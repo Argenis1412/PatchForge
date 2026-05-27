@@ -1,0 +1,79 @@
+[project]
+name = "agent-lab"
+version = "0.1.0"
+description = "Multi-agent pipeline for code analysis"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Argenis", email = "argenisbackend@gmail.com"}
+]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "anthropic>=0.45.0",
+    "google-genai>=2.6.0",
+    "pydantic>=2.10.0",
+    "python-dotenv>=1.0.0",
+    "httpx>=0.28.0",
+    "typer>=0.12.0",
+    "rich>=13.0.0",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+
+[project.urls]
+Homepage = "https://github.com/Argenis1412/agents"
+Repository = "https://github.com/Argenis1412/agents"
+Documentation = "https://github.com/Argenis1412/agents#readme"
+"Bug Tracker" = "https://github.com/Argenis1412/agents/issues"
+
+[project.scripts]
+agent-lab = "agent_lab.main:app"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "ruff>=0.9.0",
+    "pytest-cov>=4.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_lab"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"README.md" = "README.md"
+"LICENSE" = "LICENSE"
+"CHANGELOG.md" = "CHANGELOG.md"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "ruff>=0.9.0",
+    "pytest-cov>=4.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+markers = ["unit", "integration"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agent_lab"]
+

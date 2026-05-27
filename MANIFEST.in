@@ -1,0 +1,13 @@
+# Include documentation and configuration files
+include README.md
+include LICENSE
+include CHANGELOG.md
+include CONTRIBUTING.md
+include CODE_OF_CONDUCT.md
+include .env.example
+
+# Include documentation
+recursive-include docs *.md
+
+# Include tests
+recursive-include tests *.py
