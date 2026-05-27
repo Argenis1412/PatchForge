@@ -5,11 +5,11 @@ import time
 from pathlib import Path
 from typing import Optional, Union
 
-from orchestrator.schemas.architect_output import ArchitectOutput
-from orchestrator.schemas.scout_output import ScoutOutput
-from orchestrator.schemas.config import TargetConfig
-from orchestrator.observability.logger import log_call
 from orchestrator.clients.anthropic_client import get_anthropic_client
+from orchestrator.observability.logger import log_call
+from orchestrator.schemas.architect_output import ArchitectOutput
+from orchestrator.schemas.config import TargetConfig
+from orchestrator.schemas.scout_output import ScoutOutput
 
 MODEL = "claude-3-5-sonnet-20241022"
 

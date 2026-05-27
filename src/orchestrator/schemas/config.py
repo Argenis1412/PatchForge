@@ -1,7 +1,8 @@
 import json
 import os
 from pathlib import Path
-from typing import Optional, List
+from typing import List, Optional
+
 from pydantic import BaseModel, Field
 
 SCHEMA_VERSION = "1.0"

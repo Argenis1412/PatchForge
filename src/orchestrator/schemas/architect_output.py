@@ -1,5 +1,7 @@
-from pydantic import BaseModel, Field
 from typing import List
+
+from pydantic import BaseModel, Field
+
 
 class Task(BaseModel):
     task_id: str = Field(..., description="Unique identifier for the task, e.g., 'T1', 'T2'")

@@ -1,7 +1,8 @@
 import sys
-import typer
 from pathlib import Path
 from typing import Optional
+
+import typer
 from rich.console import Console
 from rich.panel import Panel
 
@@ -10,10 +11,10 @@ if sys.stdout.encoding != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8')
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from orchestrator.schemas.config import TargetConfig
+from orchestrator.agents.scout import run as run_scout
 from orchestrator.clients.bootstrap import bootstrap_environment
 from orchestrator.pipeline import Pipeline
-from orchestrator.agents.scout import run as run_scout
+from orchestrator.schemas.config import TargetConfig
 
 app = typer.Typer(help="orchestrator runtime - multi-stage software engineering workflows.")
 console = Console()

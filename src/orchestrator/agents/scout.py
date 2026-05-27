@@ -1,14 +1,15 @@
 # agents/scout.py
-import os
 import json
-import time
+import os
 import sys
+import time
 from pathlib import Path
 from typing import Union
-from orchestrator.schemas.scout_output import ScoutOutput
-from orchestrator.schemas.config import TargetConfig
-from orchestrator.observability.logger import log_call
+
 from orchestrator.clients.gemini_client import get_gemini_client
+from orchestrator.observability.logger import log_call
+from orchestrator.schemas.config import TargetConfig
+from orchestrator.schemas.scout_output import ScoutOutput
 
 MODEL = "gemini-2.5-flash"
 

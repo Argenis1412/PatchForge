@@ -1,9 +1,8 @@
 import json
-from pathlib import Path
 from datetime import datetime, timezone
-
-
+from pathlib import Path
 from typing import Optional
+
 
 def log_call(
     agent: str,

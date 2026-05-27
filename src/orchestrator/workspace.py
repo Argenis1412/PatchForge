@@ -1,5 +1,6 @@
 from pathlib import Path
 
+
 class WorkspaceManager:
     def __init__(self, workspace_path: Path):
         self.root = Path(workspace_path).resolve()
