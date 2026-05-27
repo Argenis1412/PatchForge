@@ -47,7 +47,7 @@ class TargetConfig(BaseModel):
         """
         Loads configuration by merging priority levels:
         1. Explicit parameters passed to this function (CLI overrides)
-        2. Config file 'agent-lab.json' at target_path
+        2. Config file 'orchestrator.json' at target_path
         3. Auto-detected values and defaults
         """
         target_path = Path(target_path).resolve()
@@ -63,8 +63,8 @@ class TargetConfig(BaseModel):
             "capabilities": detected_caps,
         }
 
-        # 2. Merge target's config file (agent-lab.json) if it exists
-        config_file_path = target_path / "agent-lab.json"
+        # 2. Merge target's config file (orchestrator.json) if it exists
+        config_file_path = target_path / "orchestrator.json"
         if config_file_path.exists():
             try:
                 with open(config_file_path, "r", encoding="utf-8") as f:

@@ -1,6 +1,10 @@
 # orchestrator-core
 
-A contract-driven orchestration framework for autonomous software engineering. Built for observability, reliability, and maintainable distributed workflows.
+[![CI](https://github.com/Argenis1412/orchestrator-core/actions/workflows/ci.yml/badge.svg)](https://github.com/Argenis1412/orchestrator-core/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+
+A target-agnostic orchestration runtime for multi-stage software engineering workflows powered by typed contracts, execution pipelines, and structured observability.
 
 ```mermaid
 flowchart LR
@@ -14,47 +18,83 @@ flowchart LR
 ## Quickstart
 
 ```bash
-# Clone and install
 git clone https://github.com/Argenis1412/orchestrator-core.git
 cd orchestrator-core
 pip install -e .
 
-# Run the scout pipeline
-orchestrator run scout ./your-project
+orchestrator scan ./your-project
 ```
 
-### Execution Output
-```text
-[Scout] Analyzing codebase...
-[Scout] Found 3 optimization opportunities in /your-project
-[Architect] Creating implementation plan...
-[Executor] Applying changes...
-[Validator] Code verification passed.
-Artifacts saved to: ./workspace/logs/executor_20260527T170550-57248e.json
+### Execution Artifacts
+
+Every run produces a fully traceable artifact tree:
+
+```
+workspace/
+└── run_{id}/
+    ├── scout/
+    │   └── findings.json
+    ├── architect/
+    │   └── plan.json
+    ├── executor/
+    │   ├── patch.diff
+    │   └── executor_manifest.json
+    └── validator/
+        └── report.json
 ```
 
-## What happens during execution?
-Every run generates an audit trail of the entire decision-making process:
-- **Artifacts:** Full code diffs and plan documents.
-- **Structured Logs:** JSON-formatted events for every LLM interaction.
-- **Trace IDs:** Correlation IDs tracking the pipeline state from start to finish.
+This is not simulation. These files are written to disk at every stage — debuggable, auditable, replayable.
+
+## Execution Lifecycle
+
+```
+┌────────────────────────────────────────────────────────────┐
+│  1. Scout     analyzes repository structure & hotspots     │
+│  2. Architect generates typed execution plan               │
+│  3. Executor  applies safe, isolated changes               │
+│  4. Validator checks integrity, contracts & code quality   │
+│  5. Runtime   persists artifacts, logs & traces            │
+└────────────────────────────────────────────────────────────┘
+```
+
+Every stage receives a typed contract (Pydantic schema) and produces a typed contract. The pipeline fails fast on schema mismatch, not at runtime.
 
 ## Why this architecture?
-We chose a systems-engineering approach over typical LLM wrappers to ensure production-grade reliability:
 
-- **Agents as decoupled components:** Each stage (Scout, Architect, Executor) is an independent unit, allowing for granular retries and isolated failures.
-- **Contracts over Prompts:** We enforce strict schemas using Pydantic, ensuring type-safe communication between agents.
-- **Observability First:** Built-in telemetry captures token usage, execution spans, and failure reasons automatically.
-- **Persistence:** All execution artifacts are stored on disk, making "what happened at 3am" debuggable and reproducible.
+Most "agent frameworks" are prompt wrappers with marketing. This is an orchestration engine built for production:
+
+- **Decoupled agents** — Each stage is an independent unit with isolated failure boundaries. If the Executor crashes, the re-run resumes from the last checkpoint.
+- **Contracts over prompts** — Communication between stages is enforced via Pydantic schemas. No silent JSON parsing failures, no hallucinated keys.
+- **Observability first** — Every LLM call is logged with trace ID, token usage, latency, and cost. Every stage duration is tracked.
+- **Artifact persistence** — All intermediate outputs are written to disk. Debugging "why did the Executor do that at 3am?" is a file read away.
+- **CI/CD mindset** — Pipelines are deterministic, resumable, and testable. Same inputs produce the same audit trail.
 
 ## Non-Goals
-Agent Lab is **NOT**:
-- An AGI framework.
-- A chatbot or conversational platform.
-- A collection of loose, unverified prompts.
-- A no-code automation tool.
 
-## Development Setup
+orchestrator-core is **NOT**:
+- An AGI framework
+- A chatbot or conversational platform
+- A collection of loose prompts
+- A no-code automation tool
+- A vector database or RAG system
+- Browser automation
+
+## Repository Structure
+
+```
+src/
+└── orchestrator/
+    ├── main.py          # CLI entry point
+    ├── pipeline.py      # Pipeline execution engine
+    ├── agents/          # Scout, Architect, Executor, Validator
+    ├── schemas/         # Typed contracts (Pydantic models)
+    ├── clients/         # LLM provider clients
+    └── observability/   # Structured logging & telemetry
+tests/
+docs/
+```
+
+## Development
 
 ```bash
 pip install -e ".[dev]"
@@ -62,4 +102,4 @@ pytest -v
 ruff check src/
 ```
 
-For more details, see the [full documentation](./docs/index.md).
+For more details, see the [documentation](./docs/index.md).

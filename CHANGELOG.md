@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Renamed project**: `agent-lab` → `orchestrator-core`, package import `agent_lab` → `orchestrator`
+- **Renamed CLI**: `agent-lab` → `orchestrator`
+- Full rebrand of documentation and metadata
+
 ### Added
 - Multi-agent pipeline for code analysis (Scout, Architect, Executor, Validator)
 - Support for multiple LLM providers (Google Gemini, Anthropic Claude, Groq)
@@ -17,13 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Improved error handling in executor stage
 
-### Changed
-- Refactored agent interface for better extensibility
-
 ## [0.1.0] - 2026-05-27
 
 ### Added
-- Initial release of Agent Lab
+- Initial release as Agent Lab
 - `agent-lab run` command for full pipeline execution
 - `agent-lab scan` command for reconnaissance only
 - Support for custom `.env` file configuration

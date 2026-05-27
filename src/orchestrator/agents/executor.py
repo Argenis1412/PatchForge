@@ -25,12 +25,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from typing import Optional, Union
-from agent_lab.schemas.architect_output import ArchitectOutput, Task
-from agent_lab.schemas.executor_output import ExecutorOutput, FileChange
-from agent_lab.schemas.config import TargetConfig
-from agent_lab.clients.gemini_client import get_gemini_client
-from agent_lab.clients.anthropic_client import get_anthropic_client
-from agent_lab.clients.groq_client import get_groq_client
+from orchestrator.schemas.architect_output import ArchitectOutput, Task
+from orchestrator.schemas.executor_output import ExecutorOutput, FileChange
+from orchestrator.schemas.config import TargetConfig
+from orchestrator.clients.gemini_client import get_gemini_client
+from orchestrator.clients.anthropic_client import get_anthropic_client
+from orchestrator.clients.groq_client import get_groq_client
 
 # ---------------------------------------------------------------------------
 # Configuración

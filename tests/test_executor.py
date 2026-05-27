@@ -1,6 +1,6 @@
 import pytest
-from agent_lab.agents.executor import run
-from agent_lab.schemas.architect_output import ArchitectOutput
+from orchestrator.agents.executor import run
+from orchestrator.schemas.architect_output import ArchitectOutput
 
 @pytest.mark.unit
 def test_executor_run_returns_tuple(mock_gemini):

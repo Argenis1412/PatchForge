@@ -1,13 +1,13 @@
 [project]
-name = "agent-lab"
+name = "orchestrator-core"
 version = "0.1.0"
-description = "Multi-agent pipeline for code analysis"
+description = "Target-agnostic orchestration runtime for multi-stage software engineering workflows"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
     {name = "Argenis", email = "argenisbackend@gmail.com"}
 ]
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.12"
 dependencies = [
     "anthropic>=0.45.0",
     "google-genai>=2.6.0",
@@ -21,8 +21,9 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries :: Application Frameworks",
 ]
 
@@ -33,7 +34,7 @@ Documentation = "https://github.com/Argenis1412/orchestrator-core#readme"
 "Bug Tracker" = "https://github.com/Argenis1412/orchestrator-core/issues"
 
 [project.scripts]
-agent-lab = "agent_lab.main:app"
+orchestrator = "orchestrator.main:app"
 
 [project.optional-dependencies]
 dev = [
@@ -47,7 +48,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agent_lab"]
+packages = ["src/orchestrator"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "README.md" = "README.md"
@@ -75,5 +76,5 @@ target-version = "py312"
 select = ["E", "F", "W", "I", "N"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["agent_lab"]
+known-first-party = ["orchestrator"]
 

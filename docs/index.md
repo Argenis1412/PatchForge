@@ -1,6 +1,6 @@
-# Agent Lab Documentation
+# orchestrator-core Documentation
 
-Welcome to the Agent Lab documentation. This guide helps you understand, use, and contribute to the Agent Lab framework.
+Welcome to the orchestrator-core documentation. This guide helps you understand, use, and contribute to the orchestrator-core runtime.
 
 ## Quick Links
 
@@ -10,27 +10,27 @@ Welcome to the Agent Lab documentation. This guide helps you understand, use, an
 
 ## Architecture
 
-Agent Lab is a multi-agent pipeline for code analysis and refactoring. Understanding the architecture helps you make the most of the framework.
+orchestrator-core is a target-agnostic orchestration runtime for multi-stage software engineering workflows.
 
 ### Pipeline Stages
 
-1. **Scout 🕵️** - Scans repositories to discover optimization opportunities and security issues
+1. **Scout** - Scans repositories to discover optimization opportunities and security issues
    - Analyzes repository metadata
    - Performs source code scanning
    - Generates findings report
 
-2. **Architect 🧠** - Creates detailed implementation plans
-   - Ingests Scout findings
+2. **Architect** - Creates detailed implementation plans
+   - Ingests Scout findings via typed contracts
    - Designs safe, executable plans
    - Prioritizes changes by risk and impact
 
-3. **Executor ⚙️** - Applies code modifications
+3. **Executor** - Applies code modifications
    - Routes tasks between LLM tiers based on complexity
    - Uses Gemini for simple changes
    - Uses Claude for complex/critical changes
    - Uses Groq for validation and lightweight tasks
 
-4. **Validator 🛡️** - Validates results
+4. **Validator** - Validates results
    - Checks syntax correctness
    - Performs type validation
    - Verifies code quality
@@ -41,12 +41,6 @@ Design and architecture decisions are documented in the Architecture Decision Re
 
 - [ADR-0001: Architect Comparison](./adr/0001-architect-comparison.md)
 - [ADR-0002: Runtime Boundaries](./adr/002-runtime-boundaries.md)
-
-### Project Plans
-
-- [Agent Lab Plan](./Agent_lab_plan.md) - Overall project roadmap
-- [Fix Execution Plan](./Fix_Execution_Plan.md) - Current fixes and improvements
-- [Quality Gate](./QUALITY_GATE.md) - Quality standards and checks
 
 ## Getting Started
 
@@ -70,7 +64,7 @@ cp .env.example .env
 ### First Run
 
 ```bash
-agent-lab run /path/to/project
+orchestrator run /path/to/project
 ```
 
 ## Development
@@ -103,7 +97,7 @@ pytest -v
 pytest tests/test_scout.py -v
 
 # Run with coverage
-pytest --cov=src/agent_lab tests/
+pytest --cov=src/orchestrator tests/
 ```
 
 ### Code Quality

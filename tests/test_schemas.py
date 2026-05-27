@@ -1,6 +1,6 @@
 import pytest
 from pydantic import ValidationError
-from agent_lab.schemas.scout_output import ScoutOutput, Hotspot
+from orchestrator.schemas.scout_output import ScoutOutput, Hotspot
 
 def test_scout_output_rejects_missing_fields():
     with pytest.raises(ValidationError):

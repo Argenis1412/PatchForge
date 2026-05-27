@@ -1,6 +1,6 @@
 import pytest
-from agent_lab.agents.scout import run
-from agent_lab.schemas.scout_output import ScoutOutput
+from orchestrator.agents.scout import run
+from orchestrator.schemas.scout_output import ScoutOutput
 
 @pytest.mark.unit
 def test_scout_run_returns_tuple(mock_gemini):

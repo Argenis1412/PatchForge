@@ -4,16 +4,16 @@ import json
 import time
 from datetime import datetime
 
-from agent_lab.schemas.pipeline_run import AgentMeta, PipelineRun, TaskResult
-from agent_lab.schemas.scout_output import ScoutOutput
-from agent_lab.schemas.architect_output import ArchitectOutput
+from orchestrator.schemas.pipeline_run import AgentMeta, PipelineRun, TaskResult
+from orchestrator.schemas.scout_output import ScoutOutput
+from orchestrator.schemas.architect_output import ArchitectOutput
 
-from agent_lab.agents.scout     import run as run_scout
-from agent_lab.agents.architect import run as run_architect
-from agent_lab.agents.executor  import run as run_executor
-from agent_lab.agents.validator import run as run_validator
+from orchestrator.agents.scout     import run as run_scout
+from orchestrator.agents.architect import run as run_architect
+from orchestrator.agents.executor  import run as run_executor
+from orchestrator.agents.validator import run as run_validator
 
-from agent_lab.schemas.config import TargetConfig
+from orchestrator.schemas.config import TargetConfig
 class PipelineAbort(RuntimeError):
     """Raised when a stage fails and downstream stages must not execute."""
 

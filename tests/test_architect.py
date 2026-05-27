@@ -1,7 +1,7 @@
 import pytest
-from agent_lab.agents.architect import run
-from agent_lab.schemas.scout_output import ScoutOutput
-from agent_lab.schemas.architect_output import ArchitectOutput
+from orchestrator.agents.architect import run
+from orchestrator.schemas.scout_output import ScoutOutput
+from orchestrator.schemas.architect_output import ArchitectOutput
 
 @pytest.mark.unit
 def test_architect_run_returns_tuple(mock_claude):

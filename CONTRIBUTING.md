@@ -1,6 +1,6 @@
-# Contributing to Agent Lab
+# Contributing to orchestrator-core
 
-Thank you for your interest in contributing to Agent Lab! This document outlines our contribution guidelines and workflow.
+Thank you for your interest in contributing to orchestrator-core! This document outlines our contribution guidelines and workflow.
 
 ## Getting Started
 

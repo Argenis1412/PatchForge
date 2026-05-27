@@ -10,12 +10,12 @@ if sys.stdout.encoding != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8')
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from agent_lab.schemas.config import TargetConfig
-from agent_lab.clients.bootstrap import bootstrap_environment
-from agent_lab.pipeline import Pipeline
-from agent_lab.agents.scout import run as run_scout
+from orchestrator.schemas.config import TargetConfig
+from orchestrator.clients.bootstrap import bootstrap_environment
+from orchestrator.pipeline import Pipeline
+from orchestrator.agents.scout import run as run_scout
 
-app = typer.Typer(help="Agent Lab CLI - Automated code execution and validation.")
+app = typer.Typer(help="orchestrator runtime - multi-stage software engineering workflows.")
 console = Console()
 
 @app.command()
@@ -26,8 +26,8 @@ def run(
     env_file: Optional[Path] = typer.Option(None, "--env-file", help="Path to a custom .env file"),
     workspace: Optional[Path] = typer.Option(None, "--workspace", help="Path to the workspace directory"),
 ):
-    """Run the full agent-lab pipeline on a target project."""
-    console.print(Panel(f"[bold cyan]Agent Lab Pipeline[/bold cyan]\nTarget: [yellow]{path.absolute()}[/yellow]", expand=False))
+    """Run the full orchestrator pipeline on a target project."""
+    console.print(Panel(f"[bold cyan]orchestrator Pipeline[/bold cyan]\nTarget: [yellow]{path.absolute()}[/yellow]", expand=False))
     
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
         progress.add_task("[cyan]Bootstrapping environment...", total=None)
@@ -54,7 +54,7 @@ def scan(
     workspace: Optional[Path] = typer.Option(None, "--workspace", help="Path to the workspace directory"),
 ):
     """Run only the Scout agent (reconnaissance) on a target project."""
-    console.print(Panel(f"[bold magenta]Agent Lab Scout[/bold magenta]\nTarget: [yellow]{path.absolute()}[/yellow]", expand=False))
+    console.print(Panel(f"[bold magenta]orchestrator Scout[/bold magenta]\nTarget: [yellow]{path.absolute()}[/yellow]", expand=False))
     
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
         progress.add_task("[cyan]Bootstrapping environment...", total=None)

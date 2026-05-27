@@ -5,10 +5,10 @@ import time
 import sys
 from pathlib import Path
 from typing import Union
-from agent_lab.schemas.scout_output import ScoutOutput
-from agent_lab.schemas.config import TargetConfig
-from agent_lab.observability.logger import log_call
-from agent_lab.clients.gemini_client import get_gemini_client
+from orchestrator.schemas.scout_output import ScoutOutput
+from orchestrator.schemas.config import TargetConfig
+from orchestrator.observability.logger import log_call
+from orchestrator.clients.gemini_client import get_gemini_client
 
 MODEL = "gemini-2.5-flash"
 
@@ -48,7 +48,7 @@ def read_selected_files(root: Path, selected: list[str], max_lines: int = 40) ->
     return "\n".join(snapshot)
 
 
-def call_gemini(prompt: str, agent_label: str, logs_dir: Path | None = None) -> tuple[str, dict, float]:
+def call_gemini(prompt: str, orchestratorel: str, logs_dir: Path | None = None) -> tuple[str, dict, float]:
     """Wrapper con retry y logging."""
     client = get_gemini_client()
     for attempt in range(2):
@@ -78,7 +78,7 @@ def call_gemini(prompt: str, agent_label: str, logs_dir: Path | None = None) -> 
             )
 
             log_call(
-                agent=agent_label,
+                agent=orchestratorel,
                 prompt=prompt[:500],   # no loguear prompt entero
                 response=raw[:500],
                 tokens=tokens,
@@ -91,12 +91,12 @@ def call_gemini(prompt: str, agent_label: str, logs_dir: Path | None = None) -> 
         except Exception as e:
             if "429" in str(e) or "ResourceExhausted" in str(e):
                 if attempt == 0:
-                    print(f"[{agent_label}] Rate limit. Waiting 60s...")
+                    print(f"[{orchestratorel}] Rate limit. Waiting 60s...")
                     time.sleep(60)
                     continue
             raise
 
-    raise RuntimeError(f"[{agent_label}] Failed after retry.")
+    raise RuntimeError(f"[{orchestratorel}] Failed after retry.")
 
 
 # ── prompts ────────────────────────────────────────────────────────────────
@@ -164,7 +164,7 @@ def run(config: Union[str, Path, TargetConfig]) -> tuple[ScoutOutput, dict]:
 
     raw1, tokens1, cost1 = call_gemini(
         PASS1_PROMPT.format(file_tree=tree),
-        agent_label="scout_pass1",
+        orchestratorel="scout_pass1",
         logs_dir=logs_dir,
     )
     print(f"[Scout] Pass 1 done | tokens: {tokens1} | cost: ${cost1:.5f}")
@@ -178,7 +178,7 @@ def run(config: Union[str, Path, TargetConfig]) -> tuple[ScoutOutput, dict]:
 
     raw2, tokens2, cost2 = call_gemini(
         PASS2_PROMPT.format(file_contents=contents),
-        agent_label="scout_pass2",
+        orchestratorel="scout_pass2",
         logs_dir=logs_dir,
     )
 

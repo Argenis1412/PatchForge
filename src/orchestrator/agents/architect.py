@@ -5,11 +5,11 @@ import time
 from pathlib import Path
 from typing import Optional, Union
 
-from agent_lab.schemas.architect_output import ArchitectOutput
-from agent_lab.schemas.scout_output import ScoutOutput
-from agent_lab.schemas.config import TargetConfig
-from agent_lab.observability.logger import log_call
-from agent_lab.clients.anthropic_client import get_anthropic_client
+from orchestrator.schemas.architect_output import ArchitectOutput
+from orchestrator.schemas.scout_output import ScoutOutput
+from orchestrator.schemas.config import TargetConfig
+from orchestrator.observability.logger import log_call
+from orchestrator.clients.anthropic_client import get_anthropic_client
 
 MODEL = "claude-3-5-sonnet-20241022"
 
@@ -18,7 +18,7 @@ COST_PER_1M_OUTPUT = 15.00
 
 def call_claude(
     prompt: str,
-    agent_label: str,
+    orchestratorel: str,
     logs_dir: Optional[Path] = None,
 ) -> tuple[str, dict, float]:
     """Wrapper with retry and logging for Claude."""
@@ -53,7 +53,7 @@ def call_claude(
             )
 
             log_call(
-                agent=agent_label,
+                agent=orchestratorel,
                 prompt=prompt[:500],
                 response=raw[:500],
                 tokens=tokens,
@@ -65,12 +65,12 @@ def call_claude(
 
         except Exception as e:
             if "rate" in str(e).lower() and attempt == 0:
-                print(f"[{agent_label}] Rate limit. Waiting 60s...")
+                print(f"[{orchestratorel}] Rate limit. Waiting 60s...")
                 time.sleep(60)
                 continue
-            raise RuntimeError(f"[{agent_label}] Failed: {e}")
+            raise RuntimeError(f"[{orchestratorel}] Failed: {e}")
 
-    raise RuntimeError(f"[{agent_label}] Failed after retry.")
+    raise RuntimeError(f"[{orchestratorel}] Failed after retry.")
 
 ARCHITECT_PROMPT = """
 You are the Architect Agent. Your job is to analyze the reconnaissance data provided by the Scout Agent.
@@ -122,7 +122,7 @@ def run(
 
     raw_response, tokens, cost = call_claude(
         ARCHITECT_PROMPT.format(scout_data=scout_data),
-        agent_label="architect",
+        orchestratorel="architect",
         logs_dir=logs_dir,
     )
 

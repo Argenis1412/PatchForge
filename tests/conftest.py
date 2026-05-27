@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 def mock_gemini(monkeypatch):
     mock = MagicMock()
     # Mock v2 path
-    for path in ["agent_lab.agents.scout.call_gemini"]:
+    for path in ["orchestrator.agents.scout.call_gemini"]:
         try:
             monkeypatch.setattr(path, mock)
         except (AttributeError, ModuleNotFoundError):
@@ -15,7 +15,7 @@ def mock_gemini(monkeypatch):
 @pytest.fixture
 def mock_claude(monkeypatch):
     mock = MagicMock()
-    for path in ["agent_lab.agents.architect.call_claude"]:
+    for path in ["orchestrator.agents.architect.call_claude"]:
         try:
             monkeypatch.setattr(path, mock)
         except (AttributeError, ModuleNotFoundError):
@@ -25,7 +25,7 @@ def mock_claude(monkeypatch):
 @pytest.fixture
 def mock_groq(monkeypatch):
     mock = MagicMock()
-    for path in ["agent_lab.agents.executor._call_groq"]:
+    for path in ["orchestrator.agents.executor._call_groq"]:
         try:
             monkeypatch.setattr(path, mock)
         except (AttributeError, ModuleNotFoundError):

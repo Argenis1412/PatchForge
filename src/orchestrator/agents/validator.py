@@ -27,10 +27,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Union, TYPE_CHECKING
 
-from agent_lab.schemas.validator_output import ToolResult, ValidatorOutput
+from orchestrator.schemas.validator_output import ToolResult, ValidatorOutput
 
 if TYPE_CHECKING:
-    from agent_lab.schemas.config import TargetConfig
+    from orchestrator.schemas.config import TargetConfig
 
 
 # ---------------------------------------------------------------------------
@@ -219,7 +219,7 @@ ERRORS
     t0 = time.perf_counter()
 
     try:
-        from agent_lab.clients.gemini_client import get_gemini_client
+        from orchestrator.clients.gemini_client import get_gemini_client
         client = get_gemini_client()
         response = client.models.generate_content(
             model=MODEL_GEMINI,
@@ -256,7 +256,7 @@ def run(config: Union[str, Path, "TargetConfig"] | None = None) -> tuple[Validat
     Punto de entrada del Validator.
     Corre ruff → pytest → tsc, luego Gemini resume si hay fallos.
     """
-    from agent_lab.schemas.config import TargetConfig
+    from orchestrator.schemas.config import TargetConfig
     if config is None:
         config = TargetConfig.load(target_path=Path(".").resolve())
     elif isinstance(config, (str, Path)):
