@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from datetime import datetime
 
 from orchestrator.agents.architect import run as run_architect
 from orchestrator.agents.executor import run as run_executor
 from orchestrator.agents.scout import run as run_scout
 from orchestrator.agents.validator import run as run_validator
+from orchestrator.observability.events import log_event
 from orchestrator.schemas.architect_output import ArchitectOutput
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.executor_output import ExecutorOutput
@@ -25,12 +27,34 @@ class Pipeline:
         self.target_path = config.target_path
         self.run = PipelineRun(target_path=str(self.target_path))
         self.from_stage = from_stage
-        
+        self.trace_id = str(uuid.uuid4())
         self.workspace = WorkspaceManager(self.config.workspace_path)
         self.workspace.setup()
 
+    def _log_event(
+        self,
+        event: str,
+        *,
+        level: str = "info",
+        source: str = "pipeline",
+        stage: str | None = None,
+        data: dict | None = None,
+    ) -> None:
+        log_event(
+            trace_id=self.trace_id,
+            run_id=self.run.run_id,
+            level=level,
+            source=source,
+            stage=stage,
+            event=event,
+            data=data,
+            logs_dir=self.config.workspace_path / "logs",
+        )
+        # Keep stdout for current UX
+        print(json.dumps({"event": event, "ts": datetime.utcnow().isoformat(), **({"data": data} if data else {})}))
+
     def execute(self, dry_run: bool = False) -> PipelineRun:
-        _log("pipeline.start", run_id=self.run.run_id, target=str(self.target_path))
+        self._log_event("pipeline_start", data={"target": str(self.target_path)})
 
         try:
             scout_output = None
@@ -40,7 +64,7 @@ class Pipeline:
             if self.from_stage is None:
                 scout_output = self._stage_scout()
             else:
-                _log("scout.skip", reason=f"starting from {self.from_stage}")
+                self._log_event("stage_end", stage="scout", level="warning", data={"reason": f"starting from {self.from_stage}"})
 
             # ── Stage: Architect ────────────────────────────────────────────
             if self.from_stage in [None, "scout"]:
@@ -51,9 +75,9 @@ class Pipeline:
                 architect_output = self._stage_architect(scout_output)
             elif self.from_stage == "architect":
                 architect_output = self._load_stage_output(ArchitectOutput, "architect")
-            
+
             if dry_run:
-                _log("pipeline.dry_run", reason="stopping after architect")
+                self._log_event("pipeline_end", data={"reason": "dry_run"})
                 self.run.status = "completed"
                 return self.run
 
@@ -69,10 +93,10 @@ class Pipeline:
 
         except PipelineAbort as exc:
             self.run.status = "failed"
-            _log("pipeline.abort", run_id=self.run.run_id, reason=str(exc))
+            self._log_event("failure", level="error", data={"reason": str(exc)})
         except Exception as exc:
             self.run.status = "failed"
-            _log("pipeline.error", error=str(exc))
+            self._log_event("failure", level="error", data={"error": str(exc)})
             raise
 
         else:
@@ -83,7 +107,7 @@ class Pipeline:
             self.run.total_cost_usd = _sum_costs(self.run)
             self._persist()
 
-        _log("pipeline.finish", run_id=self.run.run_id, status=self.run.status, cost_usd=self.run.total_cost_usd)
+        self._log_event("pipeline_end", data={"status": self.run.status, "cost_usd": self.run.total_cost_usd})
         return self.run
 
     def _load_stage_output(self, model_class, stage: str):
@@ -101,27 +125,29 @@ class Pipeline:
         path.write_text(output.model_dump_json(indent=2), encoding="utf-8")
 
     def _stage_scout(self) -> ScoutOutput:
-        _log("scout.start", run_id=self.run.run_id)
+        self._log_event("stage_start", stage="scout")
         t0 = time.monotonic()
         try:
-            output, meta = run_scout(self.config)
+            output, meta = run_scout(self.config, trace_id=self.trace_id, run_id=self.run.run_id)
             self.run.scout_meta = AgentMeta(status="success", latency_ms=_ms(t0), **meta)
             self._persist_stage_output("scout", output)
-            _log("scout.done", cost=meta.get("cost_usd"))
+            self._log_event("stage_end", stage="scout", data={"cost_usd": meta.get("cost_usd")})
             return output
         except Exception as exc:
             self.run.scout_meta = AgentMeta(status="failed", error=str(exc), latency_ms=_ms(t0))
             raise PipelineAbort(f"scout failed: {exc}")
 
     def _stage_architect(self, scout_output: ScoutOutput) -> ArchitectOutput:
-        _log("architect.start", run_id=self.run.run_id)
+        self._log_event("stage_start", stage="architect")
         t0 = time.monotonic()
         try:
-            output, meta = run_architect(scout_output, config=self.config)
+            output, meta = run_architect(scout_output, config=self.config, trace_id=self.trace_id, run_id=self.run.run_id)
             self.run.architect_meta = AgentMeta(status="success", latency_ms=_ms(t0), **meta)
             self._persist_stage_output("architect", output)
-            if output.blockers:
-                raise PipelineAbort(f"architect raised blockers: {output.blockers}")
+            blockers = output.blockers
+            self._log_event("stage_end", stage="architect", data={"cost_usd": meta.get("cost_usd"), "blockers": blockers})
+            if blockers:
+                raise PipelineAbort(f"architect raised blockers: {blockers}")
             return output
         except PipelineAbort:
             raise
@@ -143,7 +169,7 @@ class Pipeline:
             self.run.tasks_failed += 1
 
     def _stage_executor(self, architect_output: ArchitectOutput) -> None:
-        _log("executor.start", run_id=self.run.run_id)
+        self._log_event("stage_start", stage="executor")
         t0 = time.monotonic()
         try:
             result, meta = run_executor(architect_output, config=self.config)
@@ -156,10 +182,10 @@ class Pipeline:
 
     def _stage_validator(self) -> None:
         if self.run.tasks_applied == 0:
-            _log("validator.skip", reason="no tasks applied")
+            self._log_event("stage_end", stage="validator", level="warning", data={"reason": "no tasks applied"})
             self.run.validator_meta = AgentMeta(status="skipped", latency_ms=0)
             return
-        _log("validator.start", run_id=self.run.run_id)
+        self._log_event("stage_start", stage="validator")
         t0 = time.monotonic()
         try:
             result, meta = run_validator(config=self.config)
@@ -167,7 +193,7 @@ class Pipeline:
             self._persist_stage_output("validator", result)
         except Exception as exc:
             self.run.validator_meta = AgentMeta(status="failed", error=str(exc), latency_ms=_ms(t0))
-            _log("validator.error", error=str(exc))
+            self._log_event("failure", level="error", stage="validator", data={"error": str(exc)})
 
     def _final_status(self) -> str:
         if self.run.validator_meta and self.run.validator_meta.status == "failed":
@@ -184,7 +210,5 @@ def _ms(t0: float) -> int: return int((time.monotonic() - t0) * 1000)
 def _sum_costs(run: PipelineRun) -> float:
     metas = [run.scout_meta, run.architect_meta, run.executor_meta, run.validator_meta]
     return round(sum(m.cost_usd for m in metas if m and m.cost_usd), 6)
-def _log(event: str, **kwargs) -> None:
-    print(json.dumps({"event": event, "ts": datetime.utcnow().isoformat(), **kwargs}))
 
 

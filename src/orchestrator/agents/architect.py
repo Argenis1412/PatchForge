@@ -20,10 +20,16 @@ def call_claude(
     prompt: str,
     orchestratorel: str,
     logs_dir: Optional[Path] = None,
+    *,
+    trace_id: str | None = None,
+    run_id: str | None = None,
+    stage: str | None = None,
+    span_id: str | None = None,
 ) -> tuple[str, dict, float]:
     """Wrapper with retry and logging for Claude."""
     client = get_anthropic_client()
     for attempt in range(2):
+        call_started = time.monotonic()
         try:
             response = client.messages.create(
                 model=MODEL,
@@ -32,6 +38,7 @@ def call_claude(
                     {"role": "user", "content": prompt}
                 ]
             )
+            latency_ms = int((time.monotonic() - call_started) * 1000)
             raw = response.content[0].text.strip()
 
             # Strip markdown fences if present
@@ -59,15 +66,38 @@ def call_claude(
                 tokens=tokens,
                 cost_usd=cost,
                 logs_dir=logs_dir,
+                trace_id=trace_id,
+                run_id=run_id,
+                stage=stage,
+                span_id=span_id,
+                model=MODEL,
+                latency_ms=latency_ms,
             )
 
             return raw, tokens, cost
 
         except Exception as e:
+            latency_ms = int((time.monotonic() - call_started) * 1000)
             if "rate" in str(e).lower() and attempt == 0:
                 print(f"[{orchestratorel}] Rate limit. Waiting 60s...")
                 time.sleep(60)
                 continue
+
+            log_call(
+                agent=orchestratorel,
+                prompt=prompt[:500],
+                response="",
+                tokens={"input": 0, "output": 0},
+                cost_usd=0.0,
+                logs_dir=logs_dir,
+                trace_id=trace_id,
+                run_id=run_id,
+                stage=stage,
+                span_id=span_id,
+                model=MODEL,
+                latency_ms=latency_ms,
+                error=str(e),
+            )
             raise RuntimeError(f"[{orchestratorel}] Failed: {e}")
 
     raise RuntimeError(f"[{orchestratorel}] Failed after retry.")
@@ -109,6 +139,9 @@ Output: ONLY valid JSON matching this exact schema. No explanation. No markdown:
 def run(
     scout_output: ScoutOutput,
     config: Optional[Union[str, Path, TargetConfig]] = None,
+    *,
+    trace_id: str | None = None,
+    run_id: str | None = None,
 ) -> tuple[ArchitectOutput, dict]:
     logs_dir: Optional[Path] = None
     if config is not None:
@@ -124,6 +157,10 @@ def run(
         ARCHITECT_PROMPT.format(scout_data=scout_data),
         orchestratorel="architect",
         logs_dir=logs_dir,
+        trace_id=trace_id,
+        run_id=run_id,
+        stage="architect",
+        span_id="architect",
     )
 
     print(f"[Architect] Done | tokens: {tokens} | cost: ${cost:.5f}")

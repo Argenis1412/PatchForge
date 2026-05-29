@@ -49,15 +49,26 @@ def read_selected_files(root: Path, selected: list[str], max_lines: int = 40) ->
     return "\n".join(snapshot)
 
 
-def call_gemini(prompt: str, orchestratorel: str, logs_dir: Path | None = None) -> tuple[str, dict, float]:
+def call_gemini(
+    prompt: str,
+    orchestratorel: str,
+    logs_dir: Path | None = None,
+    *,
+    trace_id: str | None = None,
+    run_id: str | None = None,
+    stage: str | None = None,
+    span_id: str | None = None,
+) -> tuple[str, dict, float]:
     """Wrapper con retry y logging."""
     client = get_gemini_client()
     for attempt in range(2):
+        call_started = time.monotonic()
         try:
             response = client.models.generate_content(
                 model=MODEL,
                 contents=prompt,
             )
+            latency_ms = int((time.monotonic() - call_started) * 1000)
             raw = response.text.strip()
 
             # strip markdown fences
@@ -80,21 +91,44 @@ def call_gemini(prompt: str, orchestratorel: str, logs_dir: Path | None = None) 
 
             log_call(
                 agent=orchestratorel,
-                prompt=prompt[:500],   # no loguear prompt entero
+                prompt=prompt[:500],
                 response=raw[:500],
                 tokens=tokens,
                 cost_usd=cost,
                 logs_dir=logs_dir,
+                trace_id=trace_id,
+                run_id=run_id,
+                stage=stage,
+                span_id=span_id,
+                model=MODEL,
+                latency_ms=latency_ms,
             )
 
             return raw, tokens, cost
 
         except Exception as e:
+            latency_ms = int((time.monotonic() - call_started) * 1000)
             if "429" in str(e) or "ResourceExhausted" in str(e):
                 if attempt == 0:
                     print(f"[{orchestratorel}] Rate limit. Waiting 60s...")
                     time.sleep(60)
                     continue
+
+            log_call(
+                agent=orchestratorel,
+                prompt=prompt[:500],
+                response="",
+                tokens={"input": 0, "output": 0},
+                cost_usd=0.0,
+                logs_dir=logs_dir,
+                trace_id=trace_id,
+                run_id=run_id,
+                stage=stage,
+                span_id=span_id,
+                model=MODEL,
+                latency_ms=latency_ms,
+                error=str(e),
+            )
             raise
 
     raise RuntimeError(f"[{orchestratorel}] Failed after retry.")
@@ -151,7 +185,12 @@ Respond ONLY with valid JSON matching this exact schema. No explanation. No mark
 
 # ── main ───────────────────────────────────────────────────────────────────
 
-def run(config: Union[str, Path, TargetConfig]) -> tuple[ScoutOutput, dict]:
+def run(
+    config: Union[str, Path, TargetConfig],
+    *,
+    trace_id: str | None = None,
+    run_id: str | None = None,
+) -> tuple[ScoutOutput, dict]:
     if isinstance(config, (str, Path)):
         config = TargetConfig.load(target_path=Path(config))
 
@@ -167,6 +206,10 @@ def run(config: Union[str, Path, TargetConfig]) -> tuple[ScoutOutput, dict]:
         PASS1_PROMPT.format(file_tree=tree),
         orchestratorel="scout_pass1",
         logs_dir=logs_dir,
+        trace_id=trace_id,
+        run_id=run_id,
+        stage="scout",
+        span_id="scout_pass1",
     )
     print(f"[Scout] Pass 1 done | tokens: {tokens1} | cost: ${cost1:.5f}")
 
@@ -181,6 +224,10 @@ def run(config: Union[str, Path, TargetConfig]) -> tuple[ScoutOutput, dict]:
         PASS2_PROMPT.format(file_contents=contents),
         orchestratorel="scout_pass2",
         logs_dir=logs_dir,
+        trace_id=trace_id,
+        run_id=run_id,
+        stage="scout",
+        span_id="scout_pass2",
     )
 
     total_cost = cost1 + cost2
