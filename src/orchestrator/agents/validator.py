@@ -314,19 +314,11 @@ def run(config: Union[str, Path, "TargetConfig"] | None = None) -> tuple[Validat
         model_used_for_summary=model_used,
     )
 
-    # Guardar output en JSON
-    output_path = logs_dir / f"validator_{run_id}.json"
-    output_path.write_text(
-        output.model_dump_json(indent=2),
-        encoding="utf-8",
-    )
-
     _get_logger().info(
-        "[%s] Finalizado | overall=%s | failed_tools=%s | log=%s",
+        "[%s] Finalizado | overall=%s | failed_tools=%s",
         run_id,
         "PASS" if overall_passed else "FAIL",
         [r.tool for r in failed] or "none",
-        output_path.name,
     )
 
     meta = {

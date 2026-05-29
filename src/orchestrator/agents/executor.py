@@ -365,13 +365,10 @@ def run(
             else:
                 result.errors.append(change)
 
-    output_path = logs_dir / f"executor_{run_id}.json"
-    output_path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
-    
     _get_logger().info(
-        "[%s] Finalizado | applied=%d | pending_review=%d | errors=%d | cost=$%.6f | log=%s",
+        "[%s] Finalizado | applied=%d | pending_review=%d | errors=%d | cost=$%.6f",
         run_id, len(result.applied), len(result.pending_review), len(result.errors),
-        result.total_cost_usd, output_path.name
+        result.total_cost_usd
     )
 
     meta = {
