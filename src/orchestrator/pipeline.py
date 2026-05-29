@@ -176,6 +176,7 @@ class Pipeline:
             self.run.executor_meta = AgentMeta(status="success", latency_ms=_ms(t0), **meta)
             self._persist_stage_output("executor", result)
             self._apply_executor_results(result, model_used=meta.get("model_used", "unknown"))
+            self._log_event("stage_end", stage="executor", data={"cost_usd": meta.get("cost_usd"), "tasks_applied": self.run.tasks_applied})
         except Exception as exc:
             self.run.executor_meta = AgentMeta(status="failed", error=str(exc), latency_ms=_ms(t0))
             raise PipelineAbort(f"executor failed: {exc}")
