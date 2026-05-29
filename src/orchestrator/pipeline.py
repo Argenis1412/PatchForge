@@ -30,7 +30,7 @@ class Pipeline:
         (self.config.workspace_path / "runs").mkdir(exist_ok=True)
 
     def execute(self, dry_run: bool = False) -> PipelineRun:
-        _log("pipeline.start", run_id=self.run.run_id, target=self.target_path)
+        _log("pipeline.start", run_id=self.run.run_id, target=str(self.target_path))
 
         try:
             scout_output = None
@@ -77,11 +77,7 @@ class Pipeline:
             raise
 
         else:
-            self.run.status = (
-                "awaiting_review"
-                if self.run.pending_human_review
-                else "completed"
-            )
+            self.run.status = self._final_status()
 
         finally:
             self.run.finished_at = datetime.utcnow()
@@ -154,7 +150,7 @@ class Pipeline:
     def _stage_validator(self) -> None:
         if self.run.tasks_applied == 0:
             _log("validator.skip", reason="no tasks applied")
-            self.run.validator_meta = AgentMeta(status="skipped")
+            self.run.validator_meta = AgentMeta(status="skipped", latency_ms=0)
             return
         _log("validator.start", run_id=self.run.run_id)
         t0 = time.monotonic()
@@ -164,6 +160,13 @@ class Pipeline:
         except Exception as exc:
             self.run.validator_meta = AgentMeta(status="failed", error=str(exc), latency_ms=_ms(t0))
             _log("validator.error", error=str(exc))
+
+    def _final_status(self) -> str:
+        if self.run.validator_meta and self.run.validator_meta.status == "failed":
+            return "validation_failed"
+        if self.run.pending_human_review:
+            return "awaiting_review"
+        return "completed"
 
     def _persist(self) -> None:
         path = self.config.workspace_path / "runs" / f"pipeline_{self.run.run_id}.json"

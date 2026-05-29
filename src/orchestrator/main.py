@@ -41,10 +41,12 @@ def run(
     result = pipeline.execute(dry_run=dry_run)
     
     status = result.status
-    if status == "success":
+    if status == "completed":
         console.print(Panel(f"[bold green]Pipeline finished successfully![/bold green]\nRun ID: {result.run_id}", expand=False))
+    elif status == "awaiting_review":
+        console.print(Panel(f"[bold yellow]Pipeline finished with pending review items.[/bold yellow]\nRun ID: {result.run_id}", expand=False))
     else:
-        console.print(Panel(f"[bold red]Pipeline failed.[/bold red]\nRun ID: {result.run_id}", expand=False))
+        console.print(Panel(f"[bold red]Pipeline failed ({status}).[/bold red]\nRun ID: {result.run_id}", expand=False))
         raise typer.Exit(code=1)
 
 
