@@ -18,7 +18,6 @@ Reglas del lab:
 """
 from __future__ import annotations
 
-import logging
 import os
 import subprocess
 import time
@@ -27,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
+from orchestrator.observability.logging import get_file_logger
 from orchestrator.schemas.validator_output import ToolResult, ValidatorOutput
 
 if TYPE_CHECKING:
@@ -52,29 +52,8 @@ _logger = None
 
 def _get_logger(logs_dir: Path | None = None):
     global _logger
-    if logs_dir is not None:
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        lgr = logging.getLogger("validator")
-        lgr.handlers = []
-        lgr.setLevel(logging.DEBUG)
-        _handler = logging.FileHandler(logs_dir / "validator.log", encoding="utf-8")
-        _handler.setFormatter(
-            logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-        )
-        lgr.addHandler(_handler)
-        _logger = lgr
-    elif _logger is None:
-        fallback = Path("logs")
-        fallback.mkdir(parents=True, exist_ok=True)
-        lgr = logging.getLogger("validator")
-        lgr.handlers = []
-        lgr.setLevel(logging.DEBUG)
-        _handler = logging.FileHandler(fallback / "validator.log", encoding="utf-8")
-        _handler.setFormatter(
-            logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-        )
-        lgr.addHandler(_handler)
-        _logger = lgr
+    if logs_dir is not None or _logger is None:
+        _logger = get_file_logger("validator", logs_dir, "validator.log")
     return _logger
 
 # ---------------------------------------------------------------------------
@@ -271,12 +250,12 @@ def run(config: Union[str, Path, "TargetConfig"] | None = None) -> tuple[Validat
     results: list[ToolResult] = [
         run_ruff(run_id, project_root, config.lint_command),
     ]
-    
+
     if config.capabilities.effective_supports_tests:
         results.append(run_pytest(run_id, project_root, config.test_command))
     else:
         _get_logger().info("[%s] Tests skip (no framework detectado o deshabilitado)", run_id)
-        
+
     if config.capabilities.effective_supports_typecheck:
         results.append(run_tsc(run_id, project_root, config.typecheck_command))
     else:
@@ -287,7 +266,7 @@ def run(config: Union[str, Path, "TargetConfig"] | None = None) -> tuple[Validat
 
     model_used = ""
     llm_summary: str | None = None
-    
+
     tokens_input = 0
     tokens_output = 0
 
@@ -301,7 +280,7 @@ def run(config: Union[str, Path, "TargetConfig"] | None = None) -> tuple[Validat
 
         # Summary global
         llm_summary = _summarize_errors(failed, run_id)
-        
+
         # Note: Summary cost is free tier (0.0), but let's track tokens
         # The _summarize_errors doesn't return tokens explicitly but logs them.
         # This validator is lightweight.
@@ -327,7 +306,7 @@ def run(config: Union[str, Path, "TargetConfig"] | None = None) -> tuple[Validat
         "cost_usd": 0.0,
         "model_used": model_used
     }
-    
+
     return output, meta
 
 
