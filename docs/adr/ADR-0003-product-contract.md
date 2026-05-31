@@ -1,4 +1,4 @@
-# ADR-003: Product Contract — Reviewable Patch Workflow
+# ADR-0003: Product Contract — Reviewable Patch Workflow
 
 ## Status
 

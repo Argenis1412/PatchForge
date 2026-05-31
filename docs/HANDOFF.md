@@ -42,7 +42,7 @@ Only `apply` may modify the target working tree, and it must do so through Git s
 
 ## Near-term Implementation Order
 
-1. Keep docs aligned with [ADR-003](./adr/003-product-contract.md).
+1. Keep docs aligned with [ADR-0003](./adr/ADR-0003-product-contract.md).
 2. Add `doctor` for environment and repository readiness.
 3. Split `plan` from `preview`.
 4. Redesign artifacts around `workspace/runs/{run_id}/`.

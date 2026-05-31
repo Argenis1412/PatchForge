@@ -1,4 +1,4 @@
-# ADR 0003: Architect Model Comparison
+# ADR-0001: Architect Model Comparison
 
 ## Context
 During the development phase of the `Architect` agent, two models were evaluated: Gemini Flash (used by the Scout) and Claude Sonnet (`claude-sonnet-4-6`). The Architect's goal is to receive the `Scout`'s findings (in JSON format), validate them, detect false positives, prioritize them, and generate a robust implementation plan.

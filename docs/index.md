@@ -14,7 +14,7 @@ Repository → Scan → Plan → Patch → Validation → Apply
 
 - [README](../README.md) - Project overview and quickstart
 - [Product Roadmap](./ROADMAP.md) - Phased plan toward the reviewable patch workflow
-- [ADR-003: Product Contract](./adr/003-product-contract.md) - Binding product contract
+- [ADR-0003: Product Contract](./adr/ADR-0003-product-contract.md) - Binding product contract
 - [Quality Gate](./QUALITY_GATE.md) - Pre-merge checklist
 
 ## Product Workflow
@@ -61,9 +61,9 @@ Scan, Plan, Patch, Validation, Apply, and Run.
 
 Design and architecture decisions are documented in Architecture Decision Records (ADRs):
 
-- [ADR-003: Product Contract — Reviewable Patch Workflow](./adr/003-product-contract.md)
-- [ADR-004: Runtime Boundaries & Operational Hygiene](./adr/002-runtime-boundaries.md)
-- [ADR-0003: Architect Model Comparison](./adr/0001-architect-comparison.md)
+- [ADR-0003: Product Contract — Reviewable Patch Workflow](./adr/ADR-0003-product-contract.md)
+- [ADR-0002: Runtime Boundaries & Operational Hygiene](./adr/ADR-0002-runtime-boundaries.md)
+- [ADR-0001: Architect Model Comparison](./adr/ADR-0001-architect-comparison.md)
 
 ## Roadmap Summary
 
