@@ -29,9 +29,13 @@ orchestrator preview .
 orchestrator apply run_001
 ```
 
-The key safety rule is:
+The target safety rule is:
 
 > No command before `apply` may modify the target repository working tree.
+
+Current caveat: the implementation currently defaults workspace writes to `<target>/workspace`. Use
+`--workspace /tmp/orchestrator-workspace` for scans when you want to keep generated artifacts outside
+the target repository until the workspace redesign is implemented.
 
 ### Product Concepts
 
@@ -101,7 +105,7 @@ cp .env.example .env
 ### First Run
 
 ```bash
-orchestrator scan /path/to/project
+orchestrator scan /path/to/project --workspace /tmp/orchestrator-workspace
 ```
 
 ## Development

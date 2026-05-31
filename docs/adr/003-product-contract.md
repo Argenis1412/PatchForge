@@ -91,6 +91,10 @@ concepts above.
 
 Before `apply`, there must be **zero target repository modifications**.
 
+This is the target product contract. The current implementation still defaults the workspace to
+`<target>/workspace`, so current commands can write artifacts inside the target repository unless an
+external `--workspace` path is provided. Closing that gap is part of the run artifact redesign.
+
 Allowed before `apply`:
 
 - read files from the target repository

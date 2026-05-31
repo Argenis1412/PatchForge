@@ -26,7 +26,7 @@ but the user-facing workflow is organized around repository changes and patches.
 ## Product Principles
 
 1. **Patch is the unit of value** — a run succeeds when it produces a useful, safe, reviewable diff.
-2. **No magic writes** — no command before `apply` modifies the target repository working tree.
+2. **No magic writes** — no command before `apply` modifies the target repository working tree. Current default workspace behavior is a known gap until the run artifact redesign lands.
 3. **Git-native review** — users should be able to inspect results with `git diff` and commit as usual.
 4. **Small promises first** — a narrow, reliable workflow beats a broad, inconsistent platform.
 5. **Artifacts over conversation** — every important output is persisted and auditable.
@@ -74,6 +74,7 @@ Expected checks:
 Success criteria:
 
 - `doctor` never modifies the target repository.
+- `doctor` reports when the configured workspace is inside the target repository.
 - Output is understandable without knowing about internal agents.
 - Failures include concrete next steps.
 

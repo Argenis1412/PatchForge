@@ -26,6 +26,10 @@ units, but product UX and documentation should lead with Scan, Plan, Preview, Ap
 
 Before `apply`, there must be **zero target repository modifications**.
 
+Known implementation gap: the current default workspace is `<target>/workspace`, so commands can
+write artifacts inside the target repository unless users pass an external `--workspace`. This must
+be fixed by the run artifact redesign.
+
 Allowed before `apply`:
 
 - read repository files

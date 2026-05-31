@@ -23,11 +23,20 @@ organized around repositories, plans, patches, validation, and Git review.
 
 ## Product Contract
 
-The core product rule is:
+The core product rule we are building toward is:
 
 > No command before `apply` may modify the target repository working tree.
 
-That means:
+Current implementation caveat: today, the default workspace is created under the target repository
+(`./workspace`). That means `orchestrator scan ./your-project` may write orchestrator artifacts inside
+the target working tree before `apply` exists. Until the workspace redesign lands, pass an external
+workspace path when you want strict no-target-write behavior:
+
+```bash
+orchestrator scan ./your-project --workspace /tmp/orchestrator-workspace
+```
+
+The product contract means:
 
 - `doctor` checks repository and environment readiness.
 - `scan` analyzes the repository and writes findings as artifacts.
@@ -103,8 +112,9 @@ git clone https://github.com/Argenis1412/orchestrator-core.git
 cd orchestrator-core
 pip install -e .
 
-# Current available analysis command
-orchestrator scan ./your-project
+# Current available analysis command. Use an external workspace to avoid
+# writing orchestrator artifacts under ./your-project/workspace.
+orchestrator scan ./your-project --workspace /tmp/orchestrator-workspace
 ```
 
 ## Why this direction?
