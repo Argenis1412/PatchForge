@@ -28,6 +28,7 @@ from typing import Optional, Union
 from orchestrator.clients.anthropic_client import get_anthropic_client
 from orchestrator.clients.gemini_client import get_gemini_client
 from orchestrator.clients.groq_client import get_groq_client
+from orchestrator.observability.logging import get_file_logger
 from orchestrator.schemas.architect_output import ArchitectOutput, Task
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.executor_output import ExecutorOutput, FileChange
@@ -60,31 +61,9 @@ _logger = None
 
 def _get_logger(logs_dir: Optional[Path] = None):
     global _logger
-    if logs_dir is not None:
-        lgr = logging.getLogger("executor")
-        lgr.handlers = []
-        lgr.setLevel(logging.DEBUG)
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        _handler = logging.FileHandler(logs_dir / "executor.log", encoding="utf-8")
-        _handler.setFormatter(
-            logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-        )
-        lgr.addHandler(_handler)
+    if logs_dir is not None or _logger is None:
+        _logger = get_file_logger("executor", logs_dir, "executor.log")
         logging.getLogger("httpx").setLevel(logging.WARNING)
-        _logger = lgr
-    elif _logger is None:
-        fallback = Path("logs")
-        fallback.mkdir(parents=True, exist_ok=True)
-        lgr = logging.getLogger("executor")
-        lgr.handlers = []
-        lgr.setLevel(logging.DEBUG)
-        _handler = logging.FileHandler(fallback / "executor.log", encoding="utf-8")
-        _handler.setFormatter(
-            logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-        )
-        lgr.addHandler(_handler)
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        _logger = lgr
     return _logger
 
 # ---------------------------------------------------------------------------
@@ -136,9 +115,9 @@ def _call_gemini(prompt: str, run_id: str) -> tuple[str, int, int]:
         config=types.GenerateContentConfig(temperature=0.0)
     )
     elapsed = time.perf_counter() - t0
-    
+
     content = _strip_markdown(response.text)
-    
+
     usage = response.usage_metadata
     input_tokens = usage.prompt_token_count if usage else 0
     output_tokens = usage.candidates_token_count if usage else 0
@@ -177,11 +156,11 @@ def _call_groq(prompt: str, run_id: str) -> tuple[str, int, int]:
     data = response.json()
 
     content = _strip_markdown(data["choices"][0]["message"]["content"])
-    
+
     usage = data.get("usage", {})
     input_tokens = usage.get("prompt_tokens", 0)
     output_tokens = usage.get("completion_tokens", 0)
-    
+
     log.info("[%s] Groq OK | latency=%.2fs | in=%d | out=%d",
                 run_id, elapsed, input_tokens, output_tokens)
 
@@ -202,7 +181,7 @@ def _call_claude(prompt: str, run_id: str) -> tuple[str, int, int]:
         temperature=0.0
     )
     elapsed = time.perf_counter() - t0
-    
+
     content = _strip_markdown(response.content[0].text)
 
     input_tokens = response.usage.input_tokens
@@ -279,7 +258,7 @@ def _apply_task(task: Task, run_id: str, project_root: Path) -> FileChange:
     assert modified_content is not None
 
     diff = _make_diff(original_content, modified_content, relative_path)
-    
+
     if not diff:
         _get_logger().info("[%s] Task %s — sin cambios (idempotente)", run_id, task.task_id)
         return FileChange(
@@ -330,14 +309,14 @@ def run(
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:6]
     logs_dir = config.workspace_path / "logs"
     project_root = config.target_path.resolve()
-    
+
     # Initialize logger
     _get_logger(logs_dir)
     _get_logger().info("=== Executor run %s ===", run_id)
 
     model_string = f"GM:{MODEL_GEMINI}|GQ:{MODEL_GROQ}|CL:{MODEL_CLAUDE}"
     result = ExecutorOutput(model=model_string, run_id=run_id)
-    
+
     total_tokens_input = 0
     total_tokens_output = 0
 
@@ -348,10 +327,10 @@ def run(
         for file_relative in task.files_to_modify:
             single_file_task = task.model_copy(update={"files_to_modify": [file_relative]})
             change = _apply_task(single_file_task, run_id, project_root)
-            
+
             result.total_tokens += change.tokens_used
             result.total_cost_usd += change.cost_usd
-            
+
             # Simple heuristic for token tracking since _apply_task returns tokens_used
             # Note: _apply_task doesn't explicitly separate input/output tokens in its result.
             # I will estimate it for meta purposes as total_tokens.
@@ -377,7 +356,7 @@ def run(
         "cost_usd": result.total_cost_usd,
         "model_used": model_string
     }
-    
+
     return result, meta
 
 if __name__ == "__main__":

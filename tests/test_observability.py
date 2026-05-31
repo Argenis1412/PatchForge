@@ -1,11 +1,11 @@
 import json
+import logging
 import uuid
 from pathlib import Path
 
-import pytest
-
 from orchestrator.observability.events import FailureType, log_event, log_failure
 from orchestrator.observability.logger import log_call
+from orchestrator.observability.logging import get_file_logger
 
 # ---------------------------------------------------------------------------
 # log_event tests
@@ -295,3 +295,55 @@ class TestPipelineFailureIntegration:
         assert fe["data"]["error_type"] == "pipeline_abort"
         assert "blockers" in fe["data"]
         assert fe["data"]["blockers"] == ["Missing test command"]
+
+
+# ---------------------------------------------------------------------------
+# get_file_logger tests
+# ---------------------------------------------------------------------------
+
+class TestGetFileLogger:
+    def test_creates_log_file(self, tmp_path: Path) -> None:
+        logger = get_file_logger("test_agent", tmp_path, "test.log")
+        assert logger.name == "test_agent"
+        assert (tmp_path / "test.log").exists()
+
+    def test_default_filename_from_name(self, tmp_path: Path) -> None:
+        logger = get_file_logger("myagent", tmp_path)
+        assert logger.name == "myagent"
+        assert (tmp_path / "myagent.log").exists()
+
+    def test_uses_fallback_logs_dir(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        get_file_logger("fallback_test")
+        assert (tmp_path / "logs" / "fallback_test.log").exists()
+
+    def test_custom_fallback_dir(self, tmp_path: Path) -> None:
+        fb = tmp_path / "custom_fb"
+        get_file_logger("fb_test", fallback_dir=fb)
+        assert (fb / "fb_test.log").exists()
+
+    def test_closes_and_replaces_handlers(self, tmp_path: Path) -> None:
+        logger = get_file_logger("replace_test", tmp_path, "a.log")
+        assert len(logger.handlers) == 1
+        h1 = logger.handlers[0]
+
+        logger2 = get_file_logger("replace_test", tmp_path, "b.log")
+        assert len(logger2.handlers) == 1
+        assert h1 is not logger2.handlers[0]
+        assert h1.stream is None
+
+    def test_sets_propagate_false(self, tmp_path: Path) -> None:
+        logger = get_file_logger("prop_test", tmp_path, "p.log")
+        assert logger.propagate is False
+
+    def test_custom_formatter(self, tmp_path: Path) -> None:
+        fmt = logging.Formatter("%(name)s: %(message)s")
+        logger = get_file_logger("fmt_test", tmp_path, "f.log", formatter=fmt)
+        logger.info("hello")
+        content = (tmp_path / "f.log").read_text()
+        assert content.startswith("fmt_test:")
+        assert "hello" in content
+
+    def test_default_level_is_debug(self, tmp_path: Path) -> None:
+        logger = get_file_logger("lvl_test", tmp_path, "l.log")
+        assert logger.level == logging.DEBUG
