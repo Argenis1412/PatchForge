@@ -38,7 +38,7 @@ Goal: align the repository around the reviewable patch workflow before expanding
 
 Deliverables:
 
-- ADR-003 Product Contract accepted.
+- ADR-0003 Product Contract accepted.
 - README updated to describe the Git-native patch direction.
 - Roadmap documented by phase.
 - Internal agent names documented as implementation details, not product concepts.

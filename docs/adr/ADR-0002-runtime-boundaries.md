@@ -1,4 +1,4 @@
-# ADR-004: Runtime Boundaries & Operational Hygiene
+# ADR-0002: Runtime Boundaries & Operational Hygiene
 
 ## Status
 Accepted (Phase 2, May 2026)

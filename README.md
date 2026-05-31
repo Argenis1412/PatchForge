@@ -44,7 +44,7 @@ The product contract means:
 - `preview` generates a patch artifact and validation report without touching the working tree.
 - `apply` is the only command allowed to modify the repository, and it must do so through Git safety checks.
 
-See [ADR-003: Product Contract — Reviewable Patch Workflow](./docs/adr/003-product-contract.md)
+See [ADR-0003: Product Contract — Reviewable Patch Workflow](./docs/adr/ADR-0003-product-contract.md)
 for the binding product direction.
 
 ## Target Architecture
