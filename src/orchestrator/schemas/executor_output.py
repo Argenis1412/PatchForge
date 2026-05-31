@@ -14,6 +14,8 @@ class FileChange(BaseModel):
     file: str
     status: Literal["applied", "pending_human_review", "error"]
     diff: str | None = None          # unified diff antes/después
+    original_content: str | None = None
+    modified_content: str | None = None
     error: str | None = None         # mensaje si status == "error"
     tokens_used: int = 0
     cost_usd: float = 0.0

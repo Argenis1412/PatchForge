@@ -2,6 +2,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+
 from orchestrator.pipeline import Pipeline
 from orchestrator.schemas.architect_output import ArchitectOutput, Task
 from orchestrator.schemas.config import TargetConfig
@@ -117,6 +118,7 @@ def test_resume_from_scout_output(config, monkeypatch):
     path = pipeline.workspace.outputs / f"scout_{pipeline.run.run_id}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_scout_output().model_dump_json())
+    pipeline.workspace.update_manifest("scout", f"scout_{pipeline.run.run_id}.json")
 
     mock_scout = MagicMock()
     monkeypatch.setattr("orchestrator.pipeline.run_scout", mock_scout)
@@ -133,6 +135,7 @@ def test_resume_from_architect_output(config, monkeypatch):
     path = pipeline.workspace.outputs / f"architect_{pipeline.run.run_id}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_architect_output().model_dump_json())
+    pipeline.workspace.update_manifest("architect", f"architect_{pipeline.run.run_id}.json")
 
     mock_scout = MagicMock()
     mock_architect = MagicMock()
@@ -151,6 +154,7 @@ def test_resume_from_executor_reloads_task_count(config, monkeypatch):
     path = pipeline.workspace.outputs / f"executor_{pipeline.run.run_id}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_executor_output(applied=2).model_dump_json())
+    pipeline.workspace.update_manifest("executor", f"executor_{pipeline.run.run_id}.json")
 
     mock_validator = MagicMock(return_value=(_validator_output(passed=True), _meta()))
     monkeypatch.setattr("orchestrator.pipeline.run_scout", MagicMock())

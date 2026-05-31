@@ -197,7 +197,7 @@ def _call_claude(prompt: str, run_id: str) -> tuple[str, int, int]:
 # Core: aplicar task
 # ---------------------------------------------------------------------------
 
-def _apply_task(task: Task, run_id: str, project_root: Path) -> FileChange:
+def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) -> FileChange:
     if not task.files_to_modify:
         _get_logger().warning("[%s] Task %s sin files_to_modify — skip", run_id, task.task_id)
         return FileChange(
@@ -263,21 +263,26 @@ def _apply_task(task: Task, run_id: str, project_root: Path) -> FileChange:
         _get_logger().info("[%s] Task %s — sin cambios (idempotente)", run_id, task.task_id)
         return FileChange(
             task_id=task.task_id, file=relative_path, status="applied",
-            diff="(sin cambios — ya aplicado)", tokens_used=input_tokens + output_tokens, cost_usd=cost_this_call
+            diff="(sin cambios — ya aplicado)", original_content=original_content, modified_content=original_content,
+            tokens_used=input_tokens + output_tokens, cost_usd=cost_this_call
         )
 
     if task.risk_level == "high":
         _get_logger().info("[%s] Task %s — DIFF GENERADO (HIGH risk, no escrito)", run_id, task.task_id)
         return FileChange(
             task_id=task.task_id, file=relative_path, status="pending_human_review",
-            diff=diff, tokens_used=input_tokens + output_tokens, cost_usd=cost_this_call
+            diff=diff, original_content=original_content, modified_content=modified_content,
+            tokens_used=input_tokens + output_tokens, cost_usd=cost_this_call
         )
     else:
-        file_path.write_text(modified_content, encoding="utf-8")
-        _get_logger().info("[%s] Task %s — APLICADO en %s", run_id, task.task_id, relative_path)
+        staging_path = staging_dir / relative_path
+        staging_path.parent.mkdir(parents=True, exist_ok=True)
+        staging_path.write_text(modified_content, encoding="utf-8")
+        _get_logger().info("[%s] Task %s — APLICADO en staging: %s", run_id, task.task_id, staging_path)
         return FileChange(
             task_id=task.task_id, file=relative_path, status="applied",
-            diff=diff, tokens_used=input_tokens + output_tokens, cost_usd=cost_this_call
+            diff=diff, original_content=original_content, modified_content=modified_content,
+            tokens_used=input_tokens + output_tokens, cost_usd=cost_this_call
         )
 
 def _make_diff(original: str, modified: str, filename: str) -> str:
@@ -300,6 +305,7 @@ def _make_diff(original: str, modified: str, filename: str) -> str:
 def run(
     architect_output: ArchitectOutput,
     config: Optional[Union[str, Path, TargetConfig]] = None,
+    staging_dir: Optional[Path] = None,
 ) -> tuple[ExecutorOutput, dict]:
     if config is None:
         config = TargetConfig.load(target_path=PROJECT_ROOT)
@@ -309,6 +315,8 @@ def run(
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:6]
     logs_dir = config.workspace_path / "logs"
     project_root = config.target_path.resolve()
+    if staging_dir is None:
+        staging_dir = config.workspace_path / "outputs" / "staging" / run_id
 
     # Initialize logger
     _get_logger(logs_dir)
@@ -326,7 +334,7 @@ def run(
 
         for file_relative in task.files_to_modify:
             single_file_task = task.model_copy(update={"files_to_modify": [file_relative]})
-            change = _apply_task(single_file_task, run_id, project_root)
+            change = _apply_task(single_file_task, run_id, project_root, staging_dir)
 
             result.total_tokens += change.tokens_used
             result.total_cost_usd += change.cost_usd
