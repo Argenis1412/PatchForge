@@ -1,46 +1,87 @@
 # orchestrator-core Documentation
 
-Welcome to the orchestrator-core documentation. This guide helps you understand, use, and contribute to the orchestrator-core runtime.
+orchestrator-core is evolving into a Git-native refactoring engine for real repositories. Its goal
+is to generate, validate, and apply reviewable code patches safely.
+
+The internal runtime can use agents, typed contracts, provider routing, checkpoints, and structured
+observability. The public product model is simpler:
+
+```text
+Repository → Scan → Plan → Patch → Validation → Apply
+```
 
 ## Quick Links
 
-- [README](../README.md) - Installation and usage guide
-- [Contributing Guidelines](../CONTRIBUTING.md) - How to contribute
-- [Code of Conduct](../CODE_OF_CONDUCT.md) - Community standards
+- [README](../README.md) - Project overview and quickstart
+- [Product Roadmap](./ROADMAP.md) - Phased plan toward the reviewable patch workflow
+- [ADR-003: Product Contract](./adr/003-product-contract.md) - Binding product contract
+- [Quality Gate](./QUALITY_GATE.md) - Pre-merge checklist
 
-## Architecture
+## Product Workflow
 
-orchestrator-core is a target-agnostic orchestration runtime for multi-stage software engineering workflows.
+The target command flow is:
 
-### Pipeline Stages
+```bash
+orchestrator doctor .
+orchestrator scan .
+orchestrator plan .
+orchestrator preview .
+orchestrator apply run_001
+```
 
-1. **Scout** - Scans repositories to discover optimization opportunities and security issues
-   - Analyzes repository metadata
-   - Performs source code scanning
-   - Generates findings report
+The target safety rule is:
 
-2. **Architect** - Creates detailed implementation plans
-   - Ingests Scout findings via typed contracts
-   - Designs safe, executable plans
-   - Prioritizes changes by risk and impact
+> No command before `apply` may modify the target repository working tree.
 
-3. **Executor** - Applies code modifications
-   - Routes tasks between LLM tiers based on complexity
-   - Uses Gemini for simple changes
-   - Uses Claude for complex/critical changes
-   - Uses Groq for validation and lightweight tasks
+Current caveat: the implementation currently defaults workspace writes to `<target>/workspace`. Use
+`--workspace /tmp/orchestrator-workspace` for scans when you want to keep generated artifacts outside
+the target repository until the workspace redesign is implemented.
 
-4. **Validator** - Validates results
-   - Checks syntax correctness
-   - Performs type validation
-   - Verifies code quality
+### Product Concepts
 
-### Decision Records
+1. **Doctor** - Checks whether the repository and environment are ready.
+2. **Scan** - Reads the repository and produces findings.
+3. **Plan** - Converts findings into bounded, reviewable tasks.
+4. **Preview** - Generates a patch artifact and validation report without touching the working tree.
+5. **Apply** - Applies an existing patch through Git safety checks.
 
-Design and architecture decisions are documented in the Architecture Decision Records (ADRs):
+### Internal Runtime Concepts
 
-- [ADR-0001: Architect Comparison](./adr/0001-architect-comparison.md)
-- [ADR-0002: Runtime Boundaries](./adr/002-runtime-boundaries.md)
+The current implementation still contains internal stages:
+
+1. **Scout** - Repository analysis and findings generation.
+2. **Architect** - Findings validation and implementation planning.
+3. **Executor** - Current implementation stage that will evolve toward patch generation.
+4. **Validator** - Tool execution and validation summaries.
+
+These are implementation details. Public documentation and UX should prefer the product concepts:
+Scan, Plan, Patch, Validation, Apply, and Run.
+
+## Decision Records
+
+Design and architecture decisions are documented in Architecture Decision Records (ADRs):
+
+- [ADR-003: Product Contract — Reviewable Patch Workflow](./adr/003-product-contract.md)
+- [ADR-004: Runtime Boundaries & Operational Hygiene](./adr/002-runtime-boundaries.md)
+- [ADR-0003: Architect Model Comparison](./adr/0001-architect-comparison.md)
+
+## Roadmap Summary
+
+The current plan is intentionally narrow:
+
+1. Product contract and documentation alignment.
+2. `doctor` command.
+3. Separate `plan` from `preview`.
+4. Self-contained `workspace/runs/{run_id}/` artifacts.
+5. Git-safe `apply`.
+6. Risk budgets and change limits.
+7. Python framework awareness.
+8. Python monorepos.
+9. TypeScript.
+10. Migration packs.
+11. CI review.
+
+See [Product Roadmap](./ROADMAP.md) for details.
 
 ## Getting Started
 
@@ -64,7 +105,7 @@ cp .env.example .env
 ### First Run
 
 ```bash
-orchestrator run /path/to/project
+orchestrator scan /path/to/project --workspace /tmp/orchestrator-workspace
 ```
 
 ## Development
@@ -93,9 +134,6 @@ pytest -v
 # Run all tests
 pytest -v
 
-# Run specific test file
-pytest tests/test_scout.py -v
-
 # Run with coverage
 pytest --cov=src/orchestrator tests/
 ```
@@ -108,26 +146,14 @@ ruff check src/
 
 # Format code
 ruff format src/
-
-# Type checking (if configured)
-mypy src/
 ```
-
-## Contributing
-
-Please read [CONTRIBUTING.md](../CONTRIBUTING.md) for details on:
-- Development setup
-- Branch naming conventions
-- Commit message format
-- Pull request process
-- Testing requirements
 
 ## Support
 
-- Open an issue for bug reports
-- Start a discussion for feature requests
-- Check existing documentation first
+- Open an issue for bug reports.
+- Start a discussion for feature requests.
+- Check the README, roadmap, and ADRs first.
 
 ## License
 
-This project is licensed under the MIT License - see [LICENSE](../LICENSE) file for details.
+This project is licensed under the MIT License - see [LICENSE](../LICENSE) for details.
