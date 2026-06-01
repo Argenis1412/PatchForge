@@ -142,20 +142,22 @@ def _collect_staged_files(staging_dir: Path) -> list[Path]:
     return sorted(p for p in staging_dir.rglob("*") if p.is_file())
 
 
-def _create_overlay(project_root: Path, staging_dir: Path, ignore_dirs: list[str]) -> Path:
-    """Create a temp overlay with original project + staged changes applied."""
-    overlay = Path(tempfile.mkdtemp(prefix="val_overlay_"))
-    # Mirror project structure, excluding large ignored dirs
+def _create_overlay(
+    project_root: Path, staging_dir: Path, ignore_dirs: list[str],
+    tmpdir: Path | None = None,
+) -> Path:
+    """Mirror project into tmpdir + overlay staged files, return project subtree root."""
+    if tmpdir is None:
+        tmpdir = Path(tempfile.mkdtemp(prefix="val_overlay_"))
     ignore_set = set(ignore_dirs)
     shutil.copytree(
         str(project_root),
-        str(overlay / project_root.name),
+        str(tmpdir / project_root.name),
         ignore=lambda src, names: [n for n in names if n in ignore_set],
         dirs_exist_ok=True,
         symlinks=True,
     )
-    overlay_root = overlay / project_root.name
-    # Overlay staged files
+    overlay_root = tmpdir / project_root.name
     for staged_file in _collect_staged_files(staging_dir):
         rel = staged_file.relative_to(staging_dir)
         target = overlay_root / rel
@@ -180,7 +182,10 @@ def run_ruff(
     return _run(cmd, project_root, "ruff", run_id)
 
 
-IGNORE_DIRS = ["node_modules", ".venv", "__pycache__", ".git", ".ruff_cache", ".pytest_cache"]
+IGNORE_DIRS = [
+    "node_modules", ".venv", "__pycache__", ".git",
+    "workspace", ".ruff_cache", ".pytest_cache",
+]
 
 
 def run_pytest(
@@ -192,9 +197,10 @@ def run_pytest(
     if staging_dir is not None and staging_dir.is_dir() and bool(
         _collect_staged_files(staging_dir)
     ):
-        overlay_root = _create_overlay(project_root, staging_dir, IGNORE_DIRS)
-        cmd = cmd_override if cmd_override is not None else ["pytest", ".", "--tb=short", "-q"]
-        return _run(cmd, overlay_root, "pytest", run_id)
+        with tempfile.TemporaryDirectory(prefix="val_overlay_") as tmpdir:
+            overlay_root = _create_overlay(project_root, staging_dir, IGNORE_DIRS, Path(tmpdir))
+            cmd = cmd_override if cmd_override is not None else ["pytest", ".", "--tb=short", "-q"]
+            return _run(cmd, overlay_root, "pytest", run_id)
     cmd = cmd_override if cmd_override is not None else ["pytest", ".", "--tb=short", "-q"]
     return _run(
         cmd,
@@ -213,18 +219,19 @@ def run_tsc(
     if staging_dir is not None and staging_dir.is_dir() and bool(
         _collect_staged_files(staging_dir)
     ):
-        overlay_root = _create_overlay(project_root, staging_dir, IGNORE_DIRS)
-        frontend = _find_frontend_dir(overlay_root) or _find_frontend_dir(project_root)
-        if frontend is None:
-            _get_logger().warning(
-                "[%s] frontend/ no encontrado — skip tsc", run_id
-            )
-            return ToolResult(
-                tool="tsc", passed=True, return_code=0,
-                stdout="Skipped — frontend/ not found",
-            )
-        cmd = cmd_override if cmd_override is not None else ["npx", "tsc", "--noEmit"]
-        return _run(cmd, frontend, "tsc", run_id)
+        with tempfile.TemporaryDirectory(prefix="val_overlay_") as tmpdir:
+            overlay_root = _create_overlay(project_root, staging_dir, IGNORE_DIRS, Path(tmpdir))
+            frontend = _find_frontend_dir(overlay_root) or _find_frontend_dir(project_root)
+            if frontend is None:
+                _get_logger().warning(
+                    "[%s] frontend/ no encontrado — skip tsc", run_id
+                )
+                return ToolResult(
+                    tool="tsc", passed=True, return_code=0,
+                    stdout="Skipped — frontend/ not found",
+                )
+            cmd = cmd_override if cmd_override is not None else ["npx", "tsc", "--noEmit"]
+            return _run(cmd, frontend, "tsc", run_id)
     frontend = _find_frontend_dir(project_root)
     if frontend is None:
         _get_logger().warning("[%s] frontend/ no encontrado — skip tsc", run_id)
