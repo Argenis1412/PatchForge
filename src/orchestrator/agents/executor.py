@@ -214,7 +214,11 @@ def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) 
             task_id=task.task_id, file=relative_path, status="error", error=msg
         )
 
-    original_content = file_path.read_text(encoding="utf-8")
+    staged_path = staging_dir / relative_path
+    if staged_path.exists():
+        original_content = staged_path.read_text(encoding="utf-8")
+    else:
+        original_content = file_path.read_text(encoding="utf-8")
     prompt = _build_prompt(task, file_path, original_content)
 
     modified_content: str | None = None
