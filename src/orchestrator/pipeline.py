@@ -264,8 +264,10 @@ class Pipeline:
         self._log_event("stage_start", stage="validator")
         t0 = time.monotonic()
         try:
-            result, meta = run_validator(config=self.config)
-            self.run.validator_meta = AgentMeta(status="success" if result.overall_passed else "failed", latency_ms=_ms(t0), **meta)
+            staging_dir = self.workspace.staging_dir_for_run(self.run.run_id)
+            result, meta = run_validator(config=self.config, staging_dir=staging_dir)
+            status = "success" if result.overall_passed else "failed"
+            self.run.validator_meta = AgentMeta(status=status, latency_ms=_ms(t0), **meta)
             self._persist_stage_output("validator", result)
         except Exception as exc:
             self.run.validator_meta = AgentMeta(status="failed", error=str(exc), latency_ms=_ms(t0))

@@ -19,7 +19,9 @@ Reglas del lab:
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
+import tempfile
 import time
 import uuid
 from datetime import datetime, timezone
@@ -133,12 +135,66 @@ def _run(
     )
 
 
-def run_ruff(run_id: str, project_root: Path, cmd_override: list[str] | None = None) -> ToolResult:
+def _collect_staged_files(staging_dir: Path) -> list[Path]:
+    """Return all regular files under staging_dir, sorted."""
+    if not staging_dir.is_dir():
+        return []
+    return sorted(p for p in staging_dir.rglob("*") if p.is_file())
+
+
+def _create_overlay(project_root: Path, staging_dir: Path, ignore_dirs: list[str]) -> Path:
+    """Create a temp overlay with original project + staged changes applied."""
+    overlay = Path(tempfile.mkdtemp(prefix="val_overlay_"))
+    # Mirror project structure, excluding large ignored dirs
+    ignore_set = set(ignore_dirs)
+    shutil.copytree(
+        str(project_root),
+        str(overlay / project_root.name),
+        ignore=lambda src, names: [n for n in names if n in ignore_set],
+        dirs_exist_ok=True,
+        symlinks=True,
+    )
+    overlay_root = overlay / project_root.name
+    # Overlay staged files
+    for staged_file in _collect_staged_files(staging_dir):
+        rel = staged_file.relative_to(staging_dir)
+        target = overlay_root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(staged_file, target)
+    return overlay_root
+
+
+def run_ruff(
+    run_id: str,
+    project_root: Path,
+    cmd_override: list[str] | None = None,
+    staging_dir: Path | None = None,
+) -> ToolResult:
+    if staging_dir is not None and staging_dir.is_dir():
+        staged_files = _collect_staged_files(staging_dir)
+        if staged_files:
+            cmd = cmd_override if cmd_override is not None else ["ruff", "check"]
+            cmd.extend(str(sf) for sf in staged_files)
+            return _run(cmd, project_root, "ruff", run_id)
     cmd = cmd_override if cmd_override is not None else ["ruff", "check", "."]
     return _run(cmd, project_root, "ruff", run_id)
 
 
-def run_pytest(run_id: str, project_root: Path, cmd_override: list[str] | None = None) -> ToolResult:
+IGNORE_DIRS = ["node_modules", ".venv", "__pycache__", ".git", ".ruff_cache", ".pytest_cache"]
+
+
+def run_pytest(
+    run_id: str,
+    project_root: Path,
+    cmd_override: list[str] | None = None,
+    staging_dir: Path | None = None,
+) -> ToolResult:
+    if staging_dir is not None and staging_dir.is_dir() and bool(
+        _collect_staged_files(staging_dir)
+    ):
+        overlay_root = _create_overlay(project_root, staging_dir, IGNORE_DIRS)
+        cmd = cmd_override if cmd_override is not None else ["pytest", ".", "--tb=short", "-q"]
+        return _run(cmd, overlay_root, "pytest", run_id)
     cmd = cmd_override if cmd_override is not None else ["pytest", ".", "--tb=short", "-q"]
     return _run(
         cmd,
@@ -148,7 +204,27 @@ def run_pytest(run_id: str, project_root: Path, cmd_override: list[str] | None =
     )
 
 
-def run_tsc(run_id: str, project_root: Path, cmd_override: list[str] | None = None) -> ToolResult:
+def run_tsc(
+    run_id: str,
+    project_root: Path,
+    cmd_override: list[str] | None = None,
+    staging_dir: Path | None = None,
+) -> ToolResult:
+    if staging_dir is not None and staging_dir.is_dir() and bool(
+        _collect_staged_files(staging_dir)
+    ):
+        overlay_root = _create_overlay(project_root, staging_dir, IGNORE_DIRS)
+        frontend = _find_frontend_dir(overlay_root) or _find_frontend_dir(project_root)
+        if frontend is None:
+            _get_logger().warning(
+                "[%s] frontend/ no encontrado — skip tsc", run_id
+            )
+            return ToolResult(
+                tool="tsc", passed=True, return_code=0,
+                stdout="Skipped — frontend/ not found",
+            )
+        cmd = cmd_override if cmd_override is not None else ["npx", "tsc", "--noEmit"]
+        return _run(cmd, frontend, "tsc", run_id)
     frontend = _find_frontend_dir(project_root)
     if frontend is None:
         _get_logger().warning("[%s] frontend/ no encontrado — skip tsc", run_id)
@@ -230,10 +306,14 @@ ERRORS
 # Entrypoint público
 # ---------------------------------------------------------------------------
 
-def run(config: Union[str, Path, "TargetConfig"] | None = None) -> tuple[ValidatorOutput, dict]:
+def run(
+    config: Union[str, Path, "TargetConfig"] | None = None,
+    staging_dir: Path | None = None,
+) -> tuple[ValidatorOutput, dict]:
     """
     Punto de entrada del Validator.
     Corre ruff → pytest → tsc, luego Gemini resume si hay fallos.
+    Si staging_dir se provee, las tools se ejecutan contra los cambios staged.
     """
     from orchestrator.schemas.config import TargetConfig
     if config is None:
@@ -248,16 +328,16 @@ def run(config: Union[str, Path, "TargetConfig"] | None = None) -> tuple[Validat
     _get_logger(logs_dir).info("=== Validator run %s ===", run_id)
 
     results: list[ToolResult] = [
-        run_ruff(run_id, project_root, config.lint_command),
+        run_ruff(run_id, project_root, config.lint_command, staging_dir),
     ]
 
     if config.capabilities.effective_supports_tests:
-        results.append(run_pytest(run_id, project_root, config.test_command))
+        results.append(run_pytest(run_id, project_root, config.test_command, staging_dir))
     else:
         _get_logger().info("[%s] Tests skip (no framework detectado o deshabilitado)", run_id)
 
     if config.capabilities.effective_supports_typecheck:
-        results.append(run_tsc(run_id, project_root, config.typecheck_command))
+        results.append(run_tsc(run_id, project_root, config.typecheck_command, staging_dir))
     else:
          _get_logger().info("[%s] Typecheck skip (no detectado o deshabilitado)", run_id)
 
