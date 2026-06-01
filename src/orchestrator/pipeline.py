@@ -109,7 +109,7 @@ class Pipeline:
 
             # ── Stage: Architect ────────────────────────────────────────────
             if self.from_stage in [None, "scout"]:
-                # scout_output viene de stage_scout (u otro camino)
+                # scout_output comes from stage_scout (or another path)
                 # Ensure scout_output exists if not loading from stage
                 if scout_output is None:
                      scout_output = self._load_stage_output(ScoutOutput, "scout")
@@ -245,7 +245,9 @@ class Pipeline:
         t0 = time.monotonic()
         try:
             staging_dir = self.workspace.staging_dir_for_run(self.run.run_id)
-            result, meta = run_executor(architect_output, config=self.config, staging_dir=staging_dir)
+            result, meta = run_executor(
+                architect_output, config=self.config, staging_dir=staging_dir
+            )
             self.run.executor_meta = AgentMeta(status="success", latency_ms=_ms(t0), **meta)
             self._persist_stage_output("executor", result)
             self._apply_executor_results(result, model_used=meta.get("model_used", "unknown"))
