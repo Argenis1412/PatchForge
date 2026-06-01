@@ -1,7 +1,8 @@
-import sys
 import importlib
-from pathlib import Path
 import os
+import sys
+from pathlib import Path
+
 from dotenv import load_dotenv
 
 # Cargar env para validar variables
@@ -23,13 +24,13 @@ REQUIRED_ENV = [
 def check():
     print("--- Environment Health Check ---")
     print(f"Python: {sys.version}")
-    
+
     # 1. Version Check (Allowing 3.12, 3.13, 3.14 for this environment)
     if sys.version_info < (3, 12):
         print("[FAIL] Python 3.12+ required")
         sys.exit(1)
 
-        
+
     # 2. Package Check
     for pkg in REQUIRED_PKGS:
         try:
@@ -38,7 +39,7 @@ def check():
         except ImportError as e:
             print(f"[FAIL] {pkg} not installed: {e}")
             sys.exit(1)
-            
+
     # 3. Env Check
     strict_env = "--strict-env" in sys.argv
     env_path = Path(".env")

@@ -222,11 +222,11 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python agents/architect.py <path_to_scout_output.json>")
         sys.exit(1)
-        
+
     scout_path = sys.argv[1]
     with open(scout_path, "r") as f:
         scout_data = ScoutOutput.model_validate_json(f.read())
-        
+
     result, _ = run(scout_data)
     print("\n-- Architect Output --")
     print(json.dumps(result.model_dump(), indent=2))

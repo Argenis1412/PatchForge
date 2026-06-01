@@ -29,17 +29,17 @@ def run(
 ):
     """Run the full orchestrator pipeline on a target project."""
     console.print(Panel(f"[bold cyan]orchestrator Pipeline[/bold cyan]\nTarget: [yellow]{path.absolute()}[/yellow]", expand=False))
-    
+
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
         progress.add_task("[cyan]Bootstrapping environment...", total=None)
         bootstrap_environment(env_file=env_file, target_path=path)
         config = TargetConfig.load(target_path=path, workspace_path=workspace)
-        
+
     pipeline = Pipeline(config=config, from_stage=from_stage)
-    
+
     console.print("[bold blue]Starting pipeline execution...[/bold blue]")
     result = pipeline.execute(dry_run=dry_run)
-    
+
     status = result.status
     if status == "completed":
         console.print(Panel(f"[bold green]Pipeline finished successfully![/bold green]\nRun ID: {result.run_id}", expand=False))
@@ -58,17 +58,17 @@ def scan(
 ):
     """Run only the Scout agent (reconnaissance) on a target project."""
     console.print(Panel(f"[bold magenta]orchestrator Scout[/bold magenta]\nTarget: [yellow]{path.absolute()}[/yellow]", expand=False))
-    
+
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
         progress.add_task("[cyan]Bootstrapping environment...", total=None)
         bootstrap_environment(env_file=env_file, target_path=path)
         config = TargetConfig.load(target_path=path, workspace_path=workspace)
-    
+
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
         task = progress.add_task(f"[green]Scanning {config.target_path}...", total=None)
         output, meta = run_scout(config)
         progress.update(task, completed=100)
-    
+
     console.print(f"[bold green]✔ Scout completed in[/bold green] {meta.get('latency_ms', 0)}ms")
     console.print(f"Discovered [bold cyan]{len(output.hotspots)}[/bold cyan] findings.")
 

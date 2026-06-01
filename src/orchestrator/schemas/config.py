@@ -25,12 +25,12 @@ class TargetConfig(BaseModel):
     workspace_path: Path
     ignore_dirs: List[str] = ["node_modules", ".venv", "__pycache__", ".git", "workspace"]
     extensions: List[str] = [".py", ".ts", ".tsx", ".js"]
-    
+
     # Custom commands overrides
     lint_command: Optional[List[str]] = None
     test_command: Optional[List[str]] = None
     typecheck_command: Optional[List[str]] = None
-    
+
     capabilities: TargetCapabilities = Field(default_factory=TargetCapabilities)
 
     @classmethod
@@ -52,12 +52,12 @@ class TargetConfig(BaseModel):
         3. Auto-detected values and defaults
         """
         target_path = Path(target_path).resolve()
-        
+
         # 1. Start with defaults & auto-detect capabilities
         detected_caps = detect_capabilities(target_path, ignore_dirs or ["node_modules", ".venv", "__pycache__", ".git", "workspace"])
-        
+
         default_workspace = target_path / "workspace"
-        
+
         config_data = {
             "target_path": target_path,
             "workspace_path": default_workspace,
@@ -70,7 +70,7 @@ class TargetConfig(BaseModel):
             try:
                 with open(config_file_path, "r", encoding="utf-8") as f:
                     file_data = json.load(f)
-                    
+
                 # Merge top-level config keys
                 for key in ["workspace_path", "ignore_dirs", "extensions", "lint_command", "test_command", "typecheck_command"]:
                     if key in file_data and file_data[key] is not None:
@@ -78,7 +78,7 @@ class TargetConfig(BaseModel):
                             config_data[key] = Path(file_data[key]).resolve()
                         else:
                             config_data[key] = file_data[key]
-                            
+
                 # Merge capabilities overrides from file
                 if "capabilities" in file_data and isinstance(file_data["capabilities"], dict):
                     for cap_key, val in file_data["capabilities"].items():
@@ -102,7 +102,7 @@ class TargetConfig(BaseModel):
             config_data["test_command"] = test_command
         if typecheck_command is not None:
             config_data["typecheck_command"] = typecheck_command
-            
+
         # Apply CLI capabilities overrides
         if capabilities_overrides:
             for cap_key, val in capabilities_overrides.items():
@@ -116,12 +116,12 @@ class TargetConfig(BaseModel):
 
 def detect_capabilities(target_path: Path, ignore_dirs: List[str]) -> TargetCapabilities:
     target_path = Path(target_path).resolve()
-    
+
     has_python = False
     has_typescript = False
-    
+
     ignore_set = set(ignore_dirs)
-    
+
     if target_path.exists():
         for root, dirs, files in os.walk(target_path):
             # Prune ignored directories in-place
@@ -143,16 +143,16 @@ def detect_capabilities(target_path: Path, ignore_dirs: List[str]) -> TargetCapa
         package_json = target_path / "package.json"
         if package_json.exists():
             has_tests = True
-            
+
     # Typecheck detection
     has_typecheck = has_typescript and (target_path / "tsconfig.json").exists()
-    
+
     return TargetCapabilities(
         detected_supports_python=has_python,
         detected_supports_typescript=has_typescript,
         detected_supports_tests=has_tests,
         detected_supports_typecheck=has_typecheck,
-        
+
         effective_supports_python=has_python,
         effective_supports_typescript=has_typescript,
         effective_supports_tests=has_tests,
