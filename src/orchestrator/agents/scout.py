@@ -27,7 +27,7 @@ def read_file_tree(root: Path, ignore_dirs: list[str], extensions: list[str]) ->
     for dirpath, dirnames, filenames in os.walk(root):
         # Evitar entrar a carpetas ignoradas
         dirnames[:] = [d for d in dirnames if d not in ignore_set]
-        
+
         for fname in filenames:
             file = Path(dirpath) / fname
             if file.suffix in ext_set:
@@ -292,14 +292,14 @@ def run(
             logs_dir=logs_dir,
         )
         raise
-    
+
     meta = {
         "tokens_input": tokens1["input"] + tokens2["input"],
         "tokens_output": tokens1["output"] + tokens2["output"],
         "cost_usd": total_cost,
         "model_used": MODEL
     }
-    
+
     return output, meta
 
 

@@ -109,7 +109,7 @@ class Pipeline:
 
             # ── Stage: Architect ────────────────────────────────────────────
             if self.from_stage in [None, "scout"]:
-                # scout_output viene de stage_scout (u otro camino)
+                # scout_output comes from stage_scout (or another path)
                 # Ensure scout_output exists if not loading from stage
                 if scout_output is None:
                      scout_output = self._load_stage_output(ScoutOutput, "scout")
@@ -162,16 +162,23 @@ class Pipeline:
         return self.run
 
     def _load_stage_output(self, model_class, stage: str):
-        outputs_dir = self.workspace.outputs
-        files = sorted(outputs_dir.glob(f"{stage}_*.json"), key=lambda f: f.stat().st_mtime, reverse=True)
-        if not files:
+        manifest = self.workspace.read_manifest()
+        filename = manifest.get("latest", {}).get(stage)
+        if not filename:
             raise PipelineAbort(
-                f"No previous output found for stage {stage} in {outputs_dir}",
+                f"No previous output found for stage {stage} in manifest",
                 stage=stage,
                 data={"stage": stage},
             )
+        path = self.workspace.outputs / filename
+        if not path.exists():
+            raise PipelineAbort(
+                f"Manifest points to {filename} but file does not exist",
+                stage=stage,
+                data={"stage": stage, "filename": filename},
+            )
         try:
-            return model_class.model_validate_json(files[0].read_text())
+            return model_class.model_validate_json(path.read_text())
         except Exception as e:
             raise PipelineAbort(
                 f"Failed to load {stage} output: {e}. Re-run from an earlier stage.",
@@ -180,8 +187,10 @@ class Pipeline:
             )
 
     def _persist_stage_output(self, stage: str, output) -> None:
-        path = self.workspace.outputs / f"{stage}_{self.run.run_id}.json"
+        filename = f"{stage}_{self.run.run_id}.json"
+        path = self.workspace.outputs / filename
         path.write_text(output.model_dump_json(indent=2), encoding="utf-8")
+        self.workspace.update_manifest(stage, filename)
 
     def _stage_scout(self) -> ScoutOutput:
         self._log_event("stage_start", stage="scout")
@@ -235,7 +244,10 @@ class Pipeline:
         self._log_event("stage_start", stage="executor")
         t0 = time.monotonic()
         try:
-            result, meta = run_executor(architect_output, config=self.config)
+            staging_dir = self.workspace.staging_dir_for_run(self.run.run_id)
+            result, meta = run_executor(
+                architect_output, config=self.config, staging_dir=staging_dir
+            )
             self.run.executor_meta = AgentMeta(status="success", latency_ms=_ms(t0), **meta)
             self._persist_stage_output("executor", result)
             self._apply_executor_results(result, model_used=meta.get("model_used", "unknown"))

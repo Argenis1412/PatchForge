@@ -1,16 +1,16 @@
 """
 agents/executor.py
 
-Executor — tercer agente del pipeline.
+Executor — third agent in the pipeline.
 
-Routing por risk_level:
-  LOW    → Gemini Flash ejecuta el cambio
-  MEDIUM → Groq (Llama 3) ejecuta el cambio
-  HIGH   → Claude Sonnet genera el diff, pero NO escribe (pending_human_review)
+Routing by risk_level:
+  LOW    → Gemini Flash applies the change
+  MEDIUM → Groq (Llama 3) applies the change
+  HIGH   → Claude Sonnet generates the diff, but does NOT write (pending_human_review)
 
-Contrato:
-  Input  : ArchitectOutput (desde archivo JSON o directamente)
-  Output : ExecutorOutput  (cambios aplicados + diff + costo)
+Contract:
+  Input  : ArchitectOutput (from JSON file or directly)
+  Output : ExecutorOutput  (applied changes + diff + cost)
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.executor_output import ExecutorOutput, FileChange
 
 # ---------------------------------------------------------------------------
-# Configuración
+# Configuration
 # ---------------------------------------------------------------------------
 
 MODEL_GEMINI = "gemini-2.5-flash"
@@ -54,7 +54,7 @@ PROJECT_ROOT = Path(
 LOGS_DIR = Path(__file__).parent.parent / "logs"
 
 # ---------------------------------------------------------------------------
-# Logger (lazy)
+# Logger (lazy-initialized)
 # ---------------------------------------------------------------------------
 
 _logger = None
@@ -67,7 +67,7 @@ def _get_logger(logs_dir: Optional[Path] = None):
     return _logger
 
 # ---------------------------------------------------------------------------
-# Helpers Modelos
+# Model Helpers
 # ---------------------------------------------------------------------------
 
 def _build_prompt(task: Task, file_path: Path, file_content: str) -> str:
@@ -194,21 +194,21 @@ def _call_claude(prompt: str, run_id: str) -> tuple[str, int, int]:
 
 
 # ---------------------------------------------------------------------------
-# Core: aplicar task
+# Core: apply task
 # ---------------------------------------------------------------------------
 
-def _apply_task(task: Task, run_id: str, project_root: Path) -> FileChange:
+def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) -> FileChange:
     if not task.files_to_modify:
-        _get_logger().warning("[%s] Task %s sin files_to_modify — skip", run_id, task.task_id)
+        _get_logger().warning("[%s] Task %s has no files_to_modify — skip", run_id, task.task_id)
         return FileChange(
-            task_id=task.task_id, file="", status="error", error="files_to_modify vacío"
+            task_id=task.task_id, file="", status="error", error="files_to_modify is empty"
         )
 
     relative_path = task.files_to_modify[0]
     file_path = project_root / relative_path
 
     if not file_path.exists():
-        msg = f"Archivo no encontrado: {file_path}"
+        msg = f"File not found: {file_path}"
         _get_logger().error("[%s] %s", run_id, msg)
         return FileChange(
             task_id=task.task_id, file=relative_path, status="error", error=msg
@@ -236,14 +236,14 @@ def _apply_task(task: Task, run_id: str, project_root: Path) -> FileChange:
                 raise ValueError(f"Unknown risk level: {task.risk_level}")
 
             if not raw:
-                raise ValueError("Respuesta vacía del modelo")
+                raise ValueError("Empty model response")
 
             modified_content = raw
             break
 
         except (ValueError, Exception) as exc:
             log = _get_logger()
-            log.warning("[%s] Intento %d/%d fallido para task %s: %s",
+            log.warning("[%s] Attempt %d/%d failed for task %s: %s",
                            run_id, attempt + 1, MAX_RETRIES + 1, task.task_id, exc)
             if attempt == MAX_RETRIES:
                 return FileChange(
@@ -260,24 +260,29 @@ def _apply_task(task: Task, run_id: str, project_root: Path) -> FileChange:
     diff = _make_diff(original_content, modified_content, relative_path)
 
     if not diff:
-        _get_logger().info("[%s] Task %s — sin cambios (idempotente)", run_id, task.task_id)
+        _get_logger().info("[%s] Task %s — no changes (idempotent)", run_id, task.task_id)
         return FileChange(
             task_id=task.task_id, file=relative_path, status="applied",
-            diff="(sin cambios — ya aplicado)", tokens_used=input_tokens + output_tokens, cost_usd=cost_this_call
+            diff="(no changes — already applied)", original_content=original_content, modified_content=original_content,
+            tokens_used=input_tokens + output_tokens, cost_usd=cost_this_call
         )
 
     if task.risk_level == "high":
-        _get_logger().info("[%s] Task %s — DIFF GENERADO (HIGH risk, no escrito)", run_id, task.task_id)
+        _get_logger().info("[%s] Task %s — diff generated (HIGH risk, not written)", run_id, task.task_id)
         return FileChange(
             task_id=task.task_id, file=relative_path, status="pending_human_review",
-            diff=diff, tokens_used=input_tokens + output_tokens, cost_usd=cost_this_call
+            diff=diff, original_content=original_content, modified_content=modified_content,
+            tokens_used=input_tokens + output_tokens, cost_usd=cost_this_call
         )
     else:
-        file_path.write_text(modified_content, encoding="utf-8")
-        _get_logger().info("[%s] Task %s — APLICADO en %s", run_id, task.task_id, relative_path)
+        staging_path = staging_dir / relative_path
+        staging_path.parent.mkdir(parents=True, exist_ok=True)
+        staging_path.write_text(modified_content, encoding="utf-8")
+        _get_logger().info("[%s] Task %s — applied to staging: %s", run_id, task.task_id, staging_path)
         return FileChange(
             task_id=task.task_id, file=relative_path, status="applied",
-            diff=diff, tokens_used=input_tokens + output_tokens, cost_usd=cost_this_call
+            diff=diff, original_content=original_content, modified_content=modified_content,
+            tokens_used=input_tokens + output_tokens, cost_usd=cost_this_call
         )
 
 def _make_diff(original: str, modified: str, filename: str) -> str:
@@ -294,12 +299,13 @@ def _make_diff(original: str, modified: str, filename: str) -> str:
     return "".join(diff_lines)
 
 # ---------------------------------------------------------------------------
-# Entrypoint público
+# Public Entrypoint
 # ---------------------------------------------------------------------------
 
 def run(
     architect_output: ArchitectOutput,
     config: Optional[Union[str, Path, TargetConfig]] = None,
+    staging_dir: Optional[Path] = None,
 ) -> tuple[ExecutorOutput, dict]:
     if config is None:
         config = TargetConfig.load(target_path=PROJECT_ROOT)
@@ -309,6 +315,8 @@ def run(
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:6]
     logs_dir = config.workspace_path / "logs"
     project_root = config.target_path.resolve()
+    if staging_dir is None:
+        staging_dir = config.workspace_path / "outputs" / "staging" / run_id
 
     # Initialize logger
     _get_logger(logs_dir)
@@ -326,15 +334,14 @@ def run(
 
         for file_relative in task.files_to_modify:
             single_file_task = task.model_copy(update={"files_to_modify": [file_relative]})
-            change = _apply_task(single_file_task, run_id, project_root)
+            change = _apply_task(single_file_task, run_id, project_root, staging_dir)
 
             result.total_tokens += change.tokens_used
             result.total_cost_usd += change.cost_usd
 
-            # Simple heuristic for token tracking since _apply_task returns tokens_used
-            # Note: _apply_task doesn't explicitly separate input/output tokens in its result.
-            # I will estimate it for meta purposes as total_tokens.
-            total_tokens_input += change.tokens_used // 2 # Rough estimate
+            # Simple heuristic for token tracking: _apply_task returns combined tokens_used
+            # It does not separate input/output tokens, so estimate evenly for meta purposes.
+            total_tokens_input += change.tokens_used // 2
             total_tokens_output += change.tokens_used // 2
 
             if change.status == "applied":
@@ -361,12 +368,12 @@ def run(
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Uso: python agents/executor.py <architect_output.json>")
+        print("Usage: python agents/executor.py <architect_output.json>")
         sys.exit(1)
 
     architect_json_path = Path(sys.argv[1])
     if not architect_json_path.exists():
-        print(f"No existe: {architect_json_path}")
+        print(f"File not found: {architect_json_path}")
         sys.exit(1)
 
     architect_data = json.loads(architect_json_path.read_text(encoding="utf-8"))
@@ -374,19 +381,19 @@ if __name__ == "__main__":
 
     result, _ = run(architect_output)
 
-    print(f"\n[OK] Aplicados   : {len(result.applied)}")
+    print(f"\n[OK] Applied       : {len(result.applied)}")
     print(f"[~] Pending review : {len(result.pending_review)}")
-    print(f"[X] Errores     : {len(result.errors)}")
-    print(f"[$] Costo total : ${result.total_cost_usd:.6f}")
+    print(f"[X] Errors         : {len(result.errors)}")
+    print(f"[$] Total cost     : ${result.total_cost_usd:.6f}")
 
     if result.applied:
-        print("\n--- Diffs aplicados ---")
+        print("\n--- Applied diffs ---")
         for change in result.applied:
             print(f"\n[{change.task_id}] {change.file}")
             print(change.diff)
 
     if result.pending_review:
-        print("\n--- Diffs PENDIENTES (HIGH risk, no escritos) ---")
+        print("\n--- PENDING diffs (HIGH risk, not written) ---")
         for change in result.pending_review:
             print(f"\n[{change.task_id}] {change.file}")
             print(change.diff)
