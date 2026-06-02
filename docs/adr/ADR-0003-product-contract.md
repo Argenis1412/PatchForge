@@ -59,6 +59,8 @@ The system SHALL NOT modify repository contents unless:
 
 This contract is the core trust boundary of the product. No action taken by the system before an explicit `apply` command may mutate the target repository's working tree.
 
+> **⚠ Current implementation caveat**: `TargetConfig.load()` still defaults `workspace_path` to `<target>/workspace`, which means `scan` and `run` commands write logs and artifacts inside the target repository before any `apply` command. Until the workspace redesign lands, users must pass an explicit `--workspace /tmp/orchestrator-workspace` (or equivalent path outside the target tree) to satisfy this contract today.
+
 ---
 
 ## Patch Lifecycle
