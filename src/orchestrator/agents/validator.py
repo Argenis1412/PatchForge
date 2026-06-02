@@ -16,6 +16,7 @@ Reglas del lab:
   - Retry policy: si Gemini falla el summary, se loguea el error y se continúa
     (el summary es observabilidad, no bloquea el resultado)
 """
+
 from __future__ import annotations
 
 import os
@@ -44,7 +45,7 @@ MODEL_GEMINI = "gemini-2.5-flash"
 # Costo Gemini Flash en free tier
 COST_PER_SUMMARY = 0.0
 
-SUBPROCESS_TIMEOUT = 120   # segundos — pytest puede ser lento
+SUBPROCESS_TIMEOUT = 120  # segundos — pytest puede ser lento
 
 # ---------------------------------------------------------------------------
 # Logger (lazy)
@@ -52,15 +53,18 @@ SUBPROCESS_TIMEOUT = 120   # segundos — pytest puede ser lento
 
 _logger = None
 
+
 def _get_logger(logs_dir: Path | None = None):
     global _logger
     if logs_dir is not None or _logger is None:
         _logger = get_file_logger("validator", logs_dir, "validator.log")
     return _logger
 
+
 # ---------------------------------------------------------------------------
 # Helper: Frontend Detection
 # ---------------------------------------------------------------------------
+
 
 def _find_frontend_dir(root: Path) -> Path | None:
     """
@@ -72,9 +76,11 @@ def _find_frontend_dir(root: Path) -> Path | None:
             return path.parent
     return None
 
+
 # ---------------------------------------------------------------------------
 # Tool runners
 # ---------------------------------------------------------------------------
+
 
 def _run(
     cmd: list[str],
@@ -101,7 +107,7 @@ def _run(
         msg = f"Comando no encontrado: {cmd[0]} — ¿está instalado y en PATH?"
         _get_logger().error("[%s] %s", run_id, msg)
         return ToolResult(
-            tool=tool_name,          # type: ignore[arg-type]
+            tool=tool_name,  # type: ignore[arg-type]
             passed=False,
             return_code=-1,
             stderr=msg,
@@ -110,7 +116,7 @@ def _run(
         msg = f"Timeout ({SUBPROCESS_TIMEOUT}s) ejecutando {cmd[0]}"
         _get_logger().error("[%s] %s", run_id, msg)
         return ToolResult(
-            tool=tool_name,          # type: ignore[arg-type]
+            tool=tool_name,  # type: ignore[arg-type]
             passed=False,
             return_code=-2,
             stderr=msg,
@@ -121,13 +127,17 @@ def _run(
 
     _get_logger().info(
         "[%s] %s → %s | rc=%d | latency=%.2fs",
-        run_id, tool_name, "PASS" if passed else "FAIL", proc.returncode, elapsed,
+        run_id,
+        tool_name,
+        "PASS" if passed else "FAIL",
+        proc.returncode,
+        elapsed,
     )
     if not passed:
         _get_logger().debug("[%s] %s stderr:\n%s", run_id, tool_name, proc.stderr[:2000])
 
     return ToolResult(
-        tool=tool_name,              # type: ignore[arg-type]
+        tool=tool_name,  # type: ignore[arg-type]
         passed=passed,
         return_code=proc.returncode,
         stdout=proc.stdout,
@@ -143,7 +153,9 @@ def _collect_staged_files(staging_dir: Path) -> list[Path]:
 
 
 def _create_overlay(
-    project_root: Path, staging_dir: Path, ignore_dirs: list[str],
+    project_root: Path,
+    staging_dir: Path,
+    ignore_dirs: list[str],
     tmpdir: Path | None = None,
 ) -> Path:
     """Mirror project into tmpdir + overlay staged files, return project subtree root."""
@@ -183,8 +195,13 @@ def run_ruff(
 
 
 IGNORE_DIRS = [
-    "node_modules", ".venv", "__pycache__", ".git",
-    "workspace", ".ruff_cache", ".pytest_cache",
+    "node_modules",
+    ".venv",
+    "__pycache__",
+    ".git",
+    "workspace",
+    ".ruff_cache",
+    ".pytest_cache",
 ]
 
 
@@ -194,8 +211,10 @@ def run_pytest(
     cmd_override: list[str] | None = None,
     staging_dir: Path | None = None,
 ) -> ToolResult:
-    if staging_dir is not None and staging_dir.is_dir() and bool(
-        _collect_staged_files(staging_dir)
+    if (
+        staging_dir is not None
+        and staging_dir.is_dir()
+        and bool(_collect_staged_files(staging_dir))
     ):
         with tempfile.TemporaryDirectory(prefix="val_overlay_") as tmpdir:
             overlay_root = _create_overlay(project_root, staging_dir, IGNORE_DIRS, Path(tmpdir))
@@ -216,18 +235,20 @@ def run_tsc(
     cmd_override: list[str] | None = None,
     staging_dir: Path | None = None,
 ) -> ToolResult:
-    if staging_dir is not None and staging_dir.is_dir() and bool(
-        _collect_staged_files(staging_dir)
+    if (
+        staging_dir is not None
+        and staging_dir.is_dir()
+        and bool(_collect_staged_files(staging_dir))
     ):
         with tempfile.TemporaryDirectory(prefix="val_overlay_") as tmpdir:
             overlay_root = _create_overlay(project_root, staging_dir, IGNORE_DIRS, Path(tmpdir))
             frontend = _find_frontend_dir(overlay_root) or _find_frontend_dir(project_root)
             if frontend is None:
-                _get_logger().warning(
-                    "[%s] frontend/ no encontrado — skip tsc", run_id
-                )
+                _get_logger().warning("[%s] frontend/ no encontrado — skip tsc", run_id)
                 return ToolResult(
-                    tool="tsc", passed=True, return_code=0,
+                    tool="tsc",
+                    passed=True,
+                    return_code=0,
                     stdout="Skipped — frontend/ not found",
                 )
             cmd = cmd_override if cmd_override is not None else ["npx", "tsc", "--noEmit"]
@@ -249,6 +270,7 @@ def run_tsc(
 # Gemini Flash — solo para error summary
 # ---------------------------------------------------------------------------
 
+
 def _summarize_errors(failed_tools: list[ToolResult], run_id: str) -> str:
     """
     Llama a Gemini Flash para resumir los stderr de las tools que fallaron.
@@ -257,7 +279,6 @@ def _summarize_errors(failed_tools: list[ToolResult], run_id: str) -> str:
     if not os.getenv("GOOGLE_API_KEY"):
         _get_logger().warning("[%s] GOOGLE_API_KEY no configurada — skip summary", run_id)
         return "[summary no disponible — GOOGLE_API_KEY ausente]"
-
 
     stderr_sections = "\n\n".join(
         f"### {r.tool.upper()} (rc={r.return_code})\n{(r.stderr or r.stdout)[:3000]}"
@@ -277,11 +298,14 @@ ERRORS
 {stderr_sections}
 """
 
-    _get_logger().debug("[%s] Gemini summary request | tools=%s", run_id, [r.tool for r in failed_tools])
+    _get_logger().debug(
+        "[%s] Gemini summary request | tools=%s", run_id, [r.tool for r in failed_tools]
+    )
     t0 = time.perf_counter()
 
     try:
         from orchestrator.clients.gemini_client import get_gemini_client
+
         client = get_gemini_client()
         response = client.models.generate_content(
             model=MODEL_GEMINI,
@@ -297,21 +321,23 @@ ERRORS
 
         _get_logger().info(
             "[%s] Gemini summary OK | latency=%.2fs | in=%d | out=%d | cost=$0.00 (free tier)",
-            run_id, elapsed, input_tok, output_tok,
+            run_id,
+            elapsed,
+            input_tok,
+            output_tok,
         )
         return summary
 
     except Exception as exc:  # noqa: BLE001
         _get_logger().error("[%s] Gemini summary falló: %s — usando stderr crudo", run_id, exc)
         # Fallback: devolver stderr truncado, no bloquear el pipeline
-        return "\n".join(
-            f"[{r.tool}] {(r.stderr or r.stdout)[:500]}" for r in failed_tools
-        )
+        return "\n".join(f"[{r.tool}] {(r.stderr or r.stdout)[:500]}" for r in failed_tools)
 
 
 # ---------------------------------------------------------------------------
 # Entrypoint público
 # ---------------------------------------------------------------------------
+
 
 def run(
     config: Union[str, Path, "TargetConfig"] | None = None,
@@ -323,6 +349,7 @@ def run(
     Si staging_dir se provee, las tools se ejecutan contra los cambios staged.
     """
     from orchestrator.schemas.config import TargetConfig
+
     if config is None:
         config = TargetConfig.load(target_path=Path(".").resolve())
     elif isinstance(config, (str, Path)):
@@ -346,7 +373,7 @@ def run(
     if config.capabilities.effective_supports_typecheck:
         results.append(run_tsc(run_id, project_root, config.typecheck_command, staging_dir))
     else:
-         _get_logger().info("[%s] Typecheck skip (no detectado o deshabilitado)", run_id)
+        _get_logger().info("[%s] Typecheck skip (no detectado o deshabilitado)", run_id)
 
     failed = [r for r in results if not r.passed]
     overall_passed = len(failed) == 0
@@ -391,7 +418,7 @@ def run(
         "tokens_input": tokens_input,
         "tokens_output": tokens_output,
         "cost_usd": 0.0,
-        "model_used": model_used
+        "model_used": model_used,
     }
 
     return output, meta

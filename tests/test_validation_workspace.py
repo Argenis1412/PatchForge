@@ -1,13 +1,12 @@
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 import pytest
 
-from orchestrator.schemas.config import TargetConfig
 from orchestrator.validation_workspace import (
-    create_temp_copy,
     apply_patch_to_copy,
     cleanup_temp_copy,
+    create_temp_copy,
     create_validation_workspace,
 )
 
@@ -17,7 +16,9 @@ def _init_git_repo(path: Path) -> None:
     test_file = path / "main.py"
     test_file.write_text("print('Hello')\n")
     subprocess.run(["git", "add", "main.py"], cwd=path, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "initial commit"], cwd=path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "initial commit"], cwd=path, check=True, capture_output=True
+    )
 
 
 @pytest.fixture
@@ -25,7 +26,7 @@ def repo_with_dirs(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
     _init_git_repo(repo)
-    
+
     (repo / ".venv").mkdir()
     (repo / "__pycache__").mkdir()
     (repo / ".pytest_cache").mkdir()
@@ -59,7 +60,7 @@ def test_apply_patch_to_copy(repo_with_dirs: Path):
     temp_dir = create_temp_copy(repo_with_dirs)
     # Initialize git in temp copy so we can apply patch properly
     subprocess.run(["git", "init"], cwd=temp_dir, check=True, capture_output=True)
-    
+
     patch_file = temp_dir / "patch.diff"
     patch_content = """diff --git a/main.py b/main.py
 --- a/main.py
@@ -78,7 +79,7 @@ def test_apply_patch_to_copy(repo_with_dirs: Path):
 def test_apply_patch_does_not_modify_original(repo_with_dirs: Path):
     temp_dir = create_temp_copy(repo_with_dirs)
     subprocess.run(["git", "init"], cwd=temp_dir, check=True, capture_output=True)
-    
+
     patch_file = temp_dir / "patch.diff"
     patch_content = """diff --git a/main.py b/main.py
 --- a/main.py
@@ -89,7 +90,7 @@ def test_apply_patch_does_not_modify_original(repo_with_dirs: Path):
 """
     patch_file.write_text(patch_content)
     apply_patch_to_copy(temp_dir, patch_file)
-    
+
     assert (repo_with_dirs / "main.py").read_text() == "print('Hello')\n"
     cleanup_temp_copy(temp_dir)
 
@@ -108,12 +109,12 @@ def test_cleanup_ignores_missing(tmp_path: Path):
 
 def test_validation_workspace_context_manager(repo_with_dirs: Path):
     patch_path = repo_with_dirs / "patch.diff"
-    
+
     with create_validation_workspace(repo_with_dirs, patch_path) as workspace:
         temp_root = workspace.temporary_root
         assert temp_root.exists()
         assert not (temp_root / ".git").exists()
         assert workspace.original_root == repo_with_dirs
         assert workspace.patch_path == patch_path
-    
+
     assert not temp_root.exists()

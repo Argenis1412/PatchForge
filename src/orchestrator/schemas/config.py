@@ -1,7 +1,6 @@
 import hashlib
 import json
 import os
-import subprocess
 from pathlib import Path
 from typing import List, Optional
 
@@ -40,6 +39,7 @@ def validate_workspace_path(target_path: Path, workspace_path: Path) -> Path:
             f"Workspace path must be outside the target repository: {resolved_workspace}"
         )
     return resolved_workspace
+
 
 class TargetCapabilities(BaseModel):
     detected_supports_python: bool = False
@@ -82,7 +82,7 @@ class TargetConfig(BaseModel):
         lint_command: Optional[List[str]] = None,
         test_command: Optional[List[str]] = None,
         typecheck_command: Optional[List[str]] = None,
-        capabilities_overrides: Optional[dict] = None
+        capabilities_overrides: Optional[dict] = None,
     ) -> "TargetConfig":
         """
         Loads configuration by merging priority levels:
@@ -93,7 +93,10 @@ class TargetConfig(BaseModel):
         target_path = Path(target_path).resolve()
 
         # 1. Start with defaults & auto-detect capabilities
-        detected_caps = detect_capabilities(target_path, ignore_dirs or ["node_modules", ".venv", "__pycache__", ".git", "workspace"])
+        detected_caps = detect_capabilities(
+            target_path,
+            ignore_dirs or ["node_modules", ".venv", "__pycache__", ".git", "workspace"],
+        )
 
         default_workspace = default_workspace_path(target_path)
 
@@ -111,7 +114,14 @@ class TargetConfig(BaseModel):
                     file_data = json.load(f)
 
                 # Merge top-level config keys
-                for key in ["workspace_path", "ignore_dirs", "extensions", "lint_command", "test_command", "typecheck_command"]:
+                for key in [
+                    "workspace_path",
+                    "ignore_dirs",
+                    "extensions",
+                    "lint_command",
+                    "test_command",
+                    "typecheck_command",
+                ]:
                     if key in file_data and file_data[key] is not None:
                         if key == "workspace_path":
                             config_data[key] = Path(file_data[key]).expanduser().resolve()
@@ -177,7 +187,11 @@ def detect_capabilities(target_path: Path, ignore_dirs: List[str]) -> TargetCapa
     has_tests = False
     if has_python:
         # Standard pytest structures
-        has_tests = (target_path / "tests").is_dir() or (target_path / "test").is_dir() or (target_path / "pytest.ini").exists()
+        has_tests = (
+            (target_path / "tests").is_dir()
+            or (target_path / "test").is_dir()
+            or (target_path / "pytest.ini").exists()
+        )
     if has_typescript:
         package_json = target_path / "package.json"
         if package_json.exists():
@@ -191,7 +205,6 @@ def detect_capabilities(target_path: Path, ignore_dirs: List[str]) -> TargetCapa
         detected_supports_typescript=has_typescript,
         detected_supports_tests=has_tests,
         detected_supports_typecheck=has_typecheck,
-
         effective_supports_python=has_python,
         effective_supports_typescript=has_typescript,
         effective_supports_tests=has_tests,

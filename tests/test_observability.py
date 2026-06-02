@@ -11,10 +11,13 @@ from orchestrator.observability.logging import get_file_logger
 # log_event tests
 # ---------------------------------------------------------------------------
 
+
 class TestLogEvent:
     def test_creates_pipeline_jsonl(self, tmp_path: Path) -> None:
         log_event(
-            trace_id="t1", run_id="r1", event="pipeline_start",
+            trace_id="t1",
+            run_id="r1",
+            event="pipeline_start",
             logs_dir=tmp_path,
         )
         f = tmp_path / "pipeline.jsonl"
@@ -47,6 +50,7 @@ class TestLogEvent:
 # ---------------------------------------------------------------------------
 # log_call tests
 # ---------------------------------------------------------------------------
+
 
 class TestLogCall:
     def test_backward_compatible_writes_agent_log(self, tmp_path: Path) -> None:
@@ -98,8 +102,11 @@ class TestLogCall:
 
     def test_without_trace_still_writes_llm_jsonl(self, tmp_path: Path) -> None:
         log_call(
-            agent="no_trace", prompt="a", response="b",
-            tokens={"input": 0, "output": 0}, cost_usd=0.0,
+            agent="no_trace",
+            prompt="a",
+            response="b",
+            tokens={"input": 0, "output": 0},
+            cost_usd=0.0,
             logs_dir=tmp_path,
         )
         f = tmp_path / "llm_calls.jsonl"
@@ -111,8 +118,11 @@ class TestLogCall:
 
     def test_with_error_sets_level_error(self, tmp_path: Path) -> None:
         log_call(
-            agent="fail", prompt="a", response="",
-            tokens={"input": 0, "output": 0}, cost_usd=0.0,
+            agent="fail",
+            prompt="a",
+            response="",
+            tokens={"input": 0, "output": 0},
+            cost_usd=0.0,
             logs_dir=tmp_path,
             error="timeout after 60s",
         )
@@ -124,6 +134,7 @@ class TestLogCall:
 # ---------------------------------------------------------------------------
 # Pipeline integration tests
 # ---------------------------------------------------------------------------
+
 
 class TestPipelineObservability:
     def test_trace_id_is_valid_uuid(self, tmp_path: Path) -> None:
@@ -171,6 +182,7 @@ class TestPipelineObservability:
 # ---------------------------------------------------------------------------
 # log_failure tests
 # ---------------------------------------------------------------------------
+
 
 class TestLogFailure:
     def test_writes_failure_event_to_pipeline_jsonl(self, tmp_path: Path) -> None:
@@ -266,7 +278,9 @@ class TestPipelineFailureIntegration:
         from orchestrator.schemas.scout_output import ScoutOutput
 
         def mock_scout(config, **kw):
-            return ScoutOutput(hotspots=[], summary="s", risks=["r"], recommended_order=[]), {"cost_usd": 0.0}
+            return ScoutOutput(hotspots=[], summary="s", risks=["r"], recommended_order=[]), {
+                "cost_usd": 0.0
+            }
 
         def mock_architect(*a, **kw):
             output = ArchitectOutput(
@@ -301,6 +315,7 @@ class TestPipelineFailureIntegration:
 # ---------------------------------------------------------------------------
 # get_file_logger tests
 # ---------------------------------------------------------------------------
+
 
 class TestGetFileLogger:
     def test_creates_log_file(self, tmp_path: Path) -> None:

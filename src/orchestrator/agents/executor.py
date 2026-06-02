@@ -12,6 +12,7 @@ Contract:
   Input  : ArchitectOutput (from JSON file or directly)
   Output : ExecutorOutput  (applied changes + diff + cost)
 """
+
 from __future__ import annotations
 
 import difflib
@@ -47,9 +48,7 @@ COST_PER_1M_OUTPUT_CLAUDE = 15.00
 TIMEOUT_SECONDS = 60
 MAX_RETRIES = 1
 
-PROJECT_ROOT = Path(
-    os.getenv("PROJECT_ROOT", str(Path(__file__).resolve().parent.parent.parent))
-)
+PROJECT_ROOT = Path(os.getenv("PROJECT_ROOT", str(Path(__file__).resolve().parent.parent.parent)))
 
 LOGS_DIR = Path(__file__).parent.parent / "logs"
 
@@ -59,6 +58,7 @@ LOGS_DIR = Path(__file__).parent.parent / "logs"
 
 _logger = None
 
+
 def _get_logger(logs_dir: Optional[Path] = None):
     global _logger
     if logs_dir is not None or _logger is None:
@@ -66,9 +66,11 @@ def _get_logger(logs_dir: Optional[Path] = None):
         logging.getLogger("httpx").setLevel(logging.WARNING)
     return _logger
 
+
 # ---------------------------------------------------------------------------
 # Model Helpers
 # ---------------------------------------------------------------------------
+
 
 def _build_prompt(task: Task, file_path: Path, file_content: str) -> str:
     return f"""You are a precise code editor. Apply exactly one change to the file below.
@@ -92,6 +94,7 @@ FILE CONTENT
 {file_content}
 """
 
+
 def _strip_markdown(content: str) -> str:
     if content.startswith("```"):
         parts = content.split("```")
@@ -101,18 +104,17 @@ def _strip_markdown(content: str) -> str:
                 content = content.split("\n", 1)[1]
     return content.strip()
 
+
 def _call_gemini(prompt: str, run_id: str) -> tuple[str, int, int]:
     from google.genai import types
+
     client = get_gemini_client()
     log = _get_logger()
-    log.debug("[%s] Gemini request | model=%s | prompt_chars=%d",
-                 run_id, MODEL_GEMINI, len(prompt))
+    log.debug("[%s] Gemini request | model=%s | prompt_chars=%d", run_id, MODEL_GEMINI, len(prompt))
 
     t0 = time.perf_counter()
     response = client.models.generate_content(
-        model=MODEL_GEMINI,
-        contents=prompt,
-        config=types.GenerateContentConfig(temperature=0.0)
+        model=MODEL_GEMINI, contents=prompt, config=types.GenerateContentConfig(temperature=0.0)
     )
     elapsed = time.perf_counter() - t0
 
@@ -122,8 +124,13 @@ def _call_gemini(prompt: str, run_id: str) -> tuple[str, int, int]:
     input_tokens = usage.prompt_token_count if usage else 0
     output_tokens = usage.candidates_token_count if usage else 0
 
-    log.info("[%s] Gemini OK | latency=%.2fs | in=%d | out=%d",
-                run_id, elapsed, input_tokens, output_tokens)
+    log.info(
+        "[%s] Gemini OK | latency=%.2fs | in=%d | out=%d",
+        run_id,
+        elapsed,
+        input_tokens,
+        output_tokens,
+    )
 
     return content, input_tokens, output_tokens
 
@@ -141,8 +148,7 @@ def _call_groq(prompt: str, run_id: str) -> tuple[str, int, int]:
         "temperature": 0.0,
     }
 
-    log.debug("[%s] Groq request | model=%s | prompt_chars=%d",
-                 run_id, MODEL_GROQ, len(prompt))
+    log.debug("[%s] Groq request | model=%s | prompt_chars=%d", run_id, MODEL_GROQ, len(prompt))
 
     t0 = time.perf_counter()
     response = client.post(
@@ -161,8 +167,13 @@ def _call_groq(prompt: str, run_id: str) -> tuple[str, int, int]:
     input_tokens = usage.get("prompt_tokens", 0)
     output_tokens = usage.get("completion_tokens", 0)
 
-    log.info("[%s] Groq OK | latency=%.2fs | in=%d | out=%d",
-                run_id, elapsed, input_tokens, output_tokens)
+    log.info(
+        "[%s] Groq OK | latency=%.2fs | in=%d | out=%d",
+        run_id,
+        elapsed,
+        input_tokens,
+        output_tokens,
+    )
 
     return content, input_tokens, output_tokens
 
@@ -170,15 +181,14 @@ def _call_groq(prompt: str, run_id: str) -> tuple[str, int, int]:
 def _call_claude(prompt: str, run_id: str) -> tuple[str, int, int]:
     client = get_anthropic_client()
     log = _get_logger()
-    log.debug("[%s] Claude request | model=%s | prompt_chars=%d",
-                 run_id, MODEL_CLAUDE, len(prompt))
+    log.debug("[%s] Claude request | model=%s | prompt_chars=%d", run_id, MODEL_CLAUDE, len(prompt))
 
     t0 = time.perf_counter()
     response = client.messages.create(
         model=MODEL_CLAUDE,
         max_tokens=4096,
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.0
+        temperature=0.0,
     )
     elapsed = time.perf_counter() - t0
 
@@ -187,8 +197,13 @@ def _call_claude(prompt: str, run_id: str) -> tuple[str, int, int]:
     input_tokens = response.usage.input_tokens
     output_tokens = response.usage.output_tokens
 
-    log.info("[%s] Claude OK | latency=%.2fs | in=%d | out=%d",
-                run_id, elapsed, input_tokens, output_tokens)
+    log.info(
+        "[%s] Claude OK | latency=%.2fs | in=%d | out=%d",
+        run_id,
+        elapsed,
+        input_tokens,
+        output_tokens,
+    )
 
     return content, input_tokens, output_tokens
 
@@ -196,6 +211,7 @@ def _call_claude(prompt: str, run_id: str) -> tuple[str, int, int]:
 # ---------------------------------------------------------------------------
 # Core: apply task
 # ---------------------------------------------------------------------------
+
 
 def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) -> FileChange:
     if not task.files_to_modify:
@@ -210,9 +226,7 @@ def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) 
     if not file_path.exists():
         msg = f"File not found: {file_path}"
         _get_logger().error("[%s] %s", run_id, msg)
-        return FileChange(
-            task_id=task.task_id, file=relative_path, status="error", error=msg
-        )
+        return FileChange(task_id=task.task_id, file=relative_path, status="error", error=msg)
 
     staged_path = staging_dir / relative_path
     if staged_path.exists():
@@ -235,7 +249,9 @@ def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) 
                 cost_this_call = 0.0
             elif task.risk_level == "high":
                 raw, input_tokens, output_tokens = _call_claude(prompt, run_id)
-                cost_this_call = (input_tokens / 1_000_000) * COST_PER_1M_INPUT_CLAUDE + (output_tokens / 1_000_000) * COST_PER_1M_OUTPUT_CLAUDE
+                cost_this_call = (input_tokens / 1_000_000) * COST_PER_1M_INPUT_CLAUDE + (
+                    output_tokens / 1_000_000
+                ) * COST_PER_1M_OUTPUT_CLAUDE
             else:
                 raise ValueError(f"Unknown risk level: {task.risk_level}")
 
@@ -247,8 +263,14 @@ def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) 
 
         except (ValueError, Exception) as exc:
             log = _get_logger()
-            log.warning("[%s] Attempt %d/%d failed for task %s: %s",
-                           run_id, attempt + 1, MAX_RETRIES + 1, task.task_id, exc)
+            log.warning(
+                "[%s] Attempt %d/%d failed for task %s: %s",
+                run_id,
+                attempt + 1,
+                MAX_RETRIES + 1,
+                task.task_id,
+                exc,
+            )
             if attempt == MAX_RETRIES:
                 return FileChange(
                     task_id=task.task_id,
@@ -266,28 +288,48 @@ def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) 
     if not diff:
         _get_logger().info("[%s] Task %s — no changes (idempotent)", run_id, task.task_id)
         return FileChange(
-            task_id=task.task_id, file=relative_path, status="applied",
-            diff="(no changes — already applied)", original_content=original_content, modified_content=original_content,
-            tokens_used=input_tokens + output_tokens, cost_usd=cost_this_call
+            task_id=task.task_id,
+            file=relative_path,
+            status="applied",
+            diff="(no changes — already applied)",
+            original_content=original_content,
+            modified_content=original_content,
+            tokens_used=input_tokens + output_tokens,
+            cost_usd=cost_this_call,
         )
 
     if task.risk_level == "high":
-        _get_logger().info("[%s] Task %s — diff generated (HIGH risk, not written)", run_id, task.task_id)
+        _get_logger().info(
+            "[%s] Task %s — diff generated (HIGH risk, not written)", run_id, task.task_id
+        )
         return FileChange(
-            task_id=task.task_id, file=relative_path, status="pending_human_review",
-            diff=diff, original_content=original_content, modified_content=modified_content,
-            tokens_used=input_tokens + output_tokens, cost_usd=cost_this_call
+            task_id=task.task_id,
+            file=relative_path,
+            status="pending_human_review",
+            diff=diff,
+            original_content=original_content,
+            modified_content=modified_content,
+            tokens_used=input_tokens + output_tokens,
+            cost_usd=cost_this_call,
         )
     else:
         staging_path = staging_dir / relative_path
         staging_path.parent.mkdir(parents=True, exist_ok=True)
         staging_path.write_text(modified_content, encoding="utf-8")
-        _get_logger().info("[%s] Task %s — applied to staging: %s", run_id, task.task_id, staging_path)
-        return FileChange(
-            task_id=task.task_id, file=relative_path, status="applied",
-            diff=diff, original_content=original_content, modified_content=modified_content,
-            tokens_used=input_tokens + output_tokens, cost_usd=cost_this_call
+        _get_logger().info(
+            "[%s] Task %s — applied to staging: %s", run_id, task.task_id, staging_path
         )
+        return FileChange(
+            task_id=task.task_id,
+            file=relative_path,
+            status="applied",
+            diff=diff,
+            original_content=original_content,
+            modified_content=modified_content,
+            tokens_used=input_tokens + output_tokens,
+            cost_usd=cost_this_call,
+        )
+
 
 def _make_diff(original: str, modified: str, filename: str) -> str:
     original_lines = original.splitlines(keepends=True)
@@ -295,16 +337,20 @@ def _make_diff(original: str, modified: str, filename: str) -> str:
 
     diff_lines = list(
         difflib.unified_diff(
-            original_lines, modified_lines,
-            fromfile=f"a/{filename}", tofile=f"b/{filename}",
+            original_lines,
+            modified_lines,
+            fromfile=f"a/{filename}",
+            tofile=f"b/{filename}",
             lineterm="",
         )
     )
     return "".join(diff_lines)
 
+
 # ---------------------------------------------------------------------------
 # Public Entrypoint
 # ---------------------------------------------------------------------------
+
 
 def run(
     architect_output: ArchitectOutput,
@@ -333,8 +379,9 @@ def run(
     total_tokens_output = 0
 
     for task in architect_output.implementation_plan:
-        _get_logger().info("[%s] Task %s | risk=%s | title=%s",
-                    run_id, task.task_id, task.risk_level, task.title)
+        _get_logger().info(
+            "[%s] Task %s | risk=%s | title=%s", run_id, task.task_id, task.risk_level, task.title
+        )
 
         for file_relative in task.files_to_modify:
             single_file_task = task.model_copy(update={"files_to_modify": [file_relative]})
@@ -357,18 +404,22 @@ def run(
 
     _get_logger().info(
         "[%s] Finalizado | applied=%d | pending_review=%d | errors=%d | cost=$%.6f",
-        run_id, len(result.applied), len(result.pending_review), len(result.errors),
-        result.total_cost_usd
+        run_id,
+        len(result.applied),
+        len(result.pending_review),
+        len(result.errors),
+        result.total_cost_usd,
     )
 
     meta = {
         "tokens_input": total_tokens_input,
         "tokens_output": total_tokens_output,
         "cost_usd": result.total_cost_usd,
-        "model_used": model_string
+        "model_used": model_string,
     }
 
     return result, meta
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

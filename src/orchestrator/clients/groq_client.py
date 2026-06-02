@@ -6,6 +6,7 @@ _client = None
 
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
+
 def get_groq_client():
     global _client
     if _client is None:

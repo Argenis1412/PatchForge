@@ -16,7 +16,7 @@ def test_executor_run_returns_tuple(mock_gemini, tmp_path):
         false_positives=[],
         systemic_risks=[],
         implementation_plan=[],
-        blockers=[]
+        blockers=[],
     )
     workspace = tmp_path.parent / f"{tmp_path.name}-workspace"
     config = TargetConfig(target_path=tmp_path, workspace_path=workspace)
@@ -50,19 +50,32 @@ def test_accumulated_changes_same_file(tmp_path, monkeypatch):
     # Two tasks modifying the same file
     tasks = [
         Task(
-            task_id="t1", title="change 1 to 2", description="bump x",
-            files_to_modify=["test.py"], priority="high", effort="low",
-            risk_level="low", dependencies=[],
+            task_id="t1",
+            title="change 1 to 2",
+            description="bump x",
+            files_to_modify=["test.py"],
+            priority="high",
+            effort="low",
+            risk_level="low",
+            dependencies=[],
         ),
         Task(
-            task_id="t2", title="change 2 to 3", description="bump x again",
-            files_to_modify=["test.py"], priority="high", effort="low",
-            risk_level="low", dependencies=[],
+            task_id="t2",
+            title="change 2 to 3",
+            description="bump x again",
+            files_to_modify=["test.py"],
+            priority="high",
+            effort="low",
+            risk_level="low",
+            dependencies=[],
         ),
     ]
     arch_out = ArchitectOutput(
-        validated_findings=[], false_positives=[], systemic_risks=[],
-        implementation_plan=tasks, blockers=[],
+        validated_findings=[],
+        false_positives=[],
+        systemic_risks=[],
+        implementation_plan=tasks,
+        blockers=[],
     )
     workspace = tmp_path.parent / f"{tmp_path.name}-workspace"
     config = TargetConfig(target_path=tmp_path, workspace_path=workspace)

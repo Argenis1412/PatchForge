@@ -1,5 +1,5 @@
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -24,7 +24,9 @@ def _init_git_repo(path: Path) -> None:
     test_file = path / "README.md"
     test_file.write_text("Hello\n")
     subprocess.run(["git", "add", "README.md"], cwd=path, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "initial commit"], cwd=path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "initial commit"], cwd=path, check=True, capture_output=True
+    )
 
 
 @pytest.fixture

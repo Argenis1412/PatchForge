@@ -3,6 +3,7 @@ from typing import Optional
 
 _ENV_LOADED = False
 
+
 def bootstrap_environment(env_file: Optional[Path] = None, target_path: Optional[Path] = None):
     global _ENV_LOADED
     if _ENV_LOADED and env_file is None:
@@ -39,4 +40,3 @@ def bootstrap_environment(env_file: Optional[Path] = None, target_path: Optional
         load_dotenv(resolved_path)
 
     _ENV_LOADED = True
-

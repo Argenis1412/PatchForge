@@ -14,12 +14,14 @@ class AgentMeta(BaseModel):
     model_used: Optional[str] = None
     error: Optional[str] = None
 
+
 class TaskResult(BaseModel):
     task_id: str
     status: str
     risk_level: str
     model_used: str
     error: Optional[str] = None
+
 
 class PipelineRun(BaseModel):
     run_id: str = Field(default_factory=lambda: str(uuid.uuid4()))

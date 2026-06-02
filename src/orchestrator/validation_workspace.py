@@ -12,7 +12,6 @@ from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.git import GitCommandResult, ValidationWorkspace
 from orchestrator.schemas.validator_output import ValidatorOutput
 
-
 DEFAULT_IGNORE_DIRS = {
     ".git",
     ".venv",
