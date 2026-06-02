@@ -1,11 +1,56 @@
+import hashlib
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 SCHEMA_VERSION = "1.0"
+
+
+def _resolve_git_root(target_path: Path) -> Path:
+    target_path = Path(target_path).resolve()
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(target_path), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return Path(result.stdout.strip()).resolve()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return target_path
+
+
+def _workspace_hash(root_path: Path) -> str:
+    return hashlib.sha256(str(Path(root_path).resolve()).encode("utf-8")).hexdigest()[:12]
+
+
+def default_workspace_path(target_path: Path) -> Path:
+    repo_root = _resolve_git_root(target_path)
+    return Path.home() / ".cache" / "patchforge" / "workspaces" / _workspace_hash(repo_root)
+
+
+def _is_inside(child: Path, parent: Path) -> bool:
+    child = Path(child).resolve()
+    parent = Path(parent).resolve()
+    try:
+        child.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def validate_workspace_path(target_path: Path, workspace_path: Path) -> Path:
+    target_root = _resolve_git_root(target_path)
+    resolved_workspace = Path(workspace_path).expanduser().resolve()
+    if _is_inside(resolved_workspace, target_root):
+        raise ValueError(
+            f"Workspace path must be outside the target repository: {resolved_workspace}"
+        )
+    return resolved_workspace
 
 class TargetCapabilities(BaseModel):
     detected_supports_python: bool = False
@@ -33,6 +78,11 @@ class TargetConfig(BaseModel):
 
     capabilities: TargetCapabilities = Field(default_factory=TargetCapabilities)
 
+    @model_validator(mode="after")
+    def _validate_workspace_is_external(self) -> "TargetConfig":
+        self.workspace_path = validate_workspace_path(self.target_path, self.workspace_path)
+        return self
+
     @classmethod
     def load(
         cls,
@@ -56,7 +106,7 @@ class TargetConfig(BaseModel):
         # 1. Start with defaults & auto-detect capabilities
         detected_caps = detect_capabilities(target_path, ignore_dirs or ["node_modules", ".venv", "__pycache__", ".git", "workspace"])
 
-        default_workspace = target_path / "workspace"
+        default_workspace = default_workspace_path(target_path)
 
         config_data = {
             "target_path": target_path,
@@ -75,7 +125,7 @@ class TargetConfig(BaseModel):
                 for key in ["workspace_path", "ignore_dirs", "extensions", "lint_command", "test_command", "typecheck_command"]:
                     if key in file_data and file_data[key] is not None:
                         if key == "workspace_path":
-                            config_data[key] = Path(file_data[key]).resolve()
+                            config_data[key] = Path(file_data[key]).expanduser().resolve()
                         else:
                             config_data[key] = file_data[key]
 

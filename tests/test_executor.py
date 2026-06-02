@@ -18,7 +18,8 @@ def test_executor_run_returns_tuple(mock_gemini, tmp_path):
         implementation_plan=[],
         blockers=[]
     )
-    config = TargetConfig(target_path=tmp_path, workspace_path=tmp_path)
+    workspace = tmp_path.parent / f"{tmp_path.name}-workspace"
+    config = TargetConfig(target_path=tmp_path, workspace_path=workspace)
     output, meta = run(arch_out, config=config)
     assert isinstance(meta, dict)
 
@@ -63,7 +64,8 @@ def test_accumulated_changes_same_file(tmp_path, monkeypatch):
         validated_findings=[], false_positives=[], systemic_risks=[],
         implementation_plan=tasks, blockers=[],
     )
-    config = TargetConfig(target_path=tmp_path, workspace_path=tmp_path)
+    workspace = tmp_path.parent / f"{tmp_path.name}-workspace"
+    config = TargetConfig(target_path=tmp_path, workspace_path=workspace)
     staging_dir = tmp_path / "staging"
 
     # Mock _call_gemini to return sequential content

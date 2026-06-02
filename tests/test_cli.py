@@ -1,4 +1,5 @@
 """Tests for CLI exit code mapping based on pipeline status."""
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -40,3 +41,21 @@ def test_failed_exit_one():
 
 def test_validation_failed_exit_one():
     assert _invoke("validation_failed").exit_code == 1
+
+
+def test_scan_rejects_workspace_inside_target(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True, text=True)
+
+    with (
+        patch("orchestrator.main.bootstrap_environment"),
+        patch("orchestrator.main.run_scout"),
+    ):
+        result = runner.invoke(
+            app,
+            ["scan", str(repo), "--workspace", str(repo / "workspace")],
+        )
+
+    assert result.exit_code == 1
+    assert "Workspace path must be outside the target repository" in result.stdout

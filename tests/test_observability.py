@@ -130,7 +130,8 @@ class TestPipelineObservability:
         from orchestrator.pipeline import Pipeline
         from orchestrator.schemas.config import TargetConfig
 
-        config = TargetConfig(target_path=tmp_path, workspace_path=tmp_path)
+        workspace = tmp_path.parent / f"{tmp_path.name}-workspace"
+        config = TargetConfig(target_path=tmp_path, workspace_path=workspace)
         pipeline = Pipeline(config=config)
         assert isinstance(pipeline.trace_id, str)
         uuid.UUID(pipeline.trace_id)
@@ -153,7 +154,7 @@ class TestPipelineObservability:
         monkeypatch.setattr("orchestrator.pipeline.run_scout", mock_scout)
         monkeypatch.setattr("orchestrator.pipeline.run_architect", mock_architect)
 
-        workspace = tmp_path / "workspace"
+        workspace = tmp_path.parent / f"{tmp_path.name}-workspace"
         config = TargetConfig(target_path=tmp_path, workspace_path=workspace)
         pipeline = Pipeline(config=config)
 
@@ -242,7 +243,7 @@ class TestPipelineFailureIntegration:
 
         monkeypatch.setattr("orchestrator.pipeline.run_scout", mock_scout)
 
-        workspace = tmp_path / "workspace"
+        workspace = tmp_path.parent / f"{tmp_path.name}-workspace"
         config = TargetConfig(target_path=tmp_path, workspace_path=workspace)
         pipeline = Pipeline(config=config)
         pipeline.execute()
@@ -280,7 +281,7 @@ class TestPipelineFailureIntegration:
         monkeypatch.setattr("orchestrator.pipeline.run_scout", mock_scout)
         monkeypatch.setattr("orchestrator.pipeline.run_architect", mock_architect)
 
-        workspace = tmp_path / "workspace"
+        workspace = tmp_path.parent / f"{tmp_path.name}-workspace"
         config = TargetConfig(target_path=tmp_path, workspace_path=workspace)
         pipeline = Pipeline(config=config)
         pipeline.execute()
