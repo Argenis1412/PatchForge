@@ -10,18 +10,7 @@ from pydantic import BaseModel, Field, model_validator
 SCHEMA_VERSION = "1.0"
 
 
-def _resolve_git_root(target_path: Path) -> Path:
-    target_path = Path(target_path).resolve()
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(target_path), "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return Path(result.stdout.strip()).resolve()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return target_path
+from orchestrator.git import resolve_git_root as _resolve_git_root
 
 
 def _workspace_hash(root_path: Path) -> str:
