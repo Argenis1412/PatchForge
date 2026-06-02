@@ -13,9 +13,19 @@ class Task(BaseModel):
     risk_level: str = Field(..., description="'high', 'medium', or 'low'")
     dependencies: List[str] = Field(default=[], description="List of task_ids that block this task")
 
+
 class ArchitectOutput(BaseModel):
-    validated_findings: List[str] = Field(..., description="Findings from the Scout that have been validated as true positives")
-    false_positives: List[str] = Field(..., description="Findings from the Scout that are likely false positives or not worth the effort")
+    validated_findings: List[str] = Field(
+        ..., description="Findings from the Scout that have been validated as true positives"
+    )
+    false_positives: List[str] = Field(
+        ...,
+        description="Findings from the Scout that are likely false positives or not worth the effort",
+    )
     systemic_risks: List[str] = Field(..., description="Systemic risks not caught by the Scout")
-    implementation_plan: List[Task] = Field(..., description="Ordered list of tasks for implementation")
-    blockers: List[str] = Field(..., description="Items blocking Phase 2 of the Engineering Playbook")
+    implementation_plan: List[Task] = Field(
+        ..., description="Ordered list of tasks for implementation"
+    )
+    blockers: List[str] = Field(
+        ..., description="Items blocking Phase 2 of the Engineering Playbook"
+    )

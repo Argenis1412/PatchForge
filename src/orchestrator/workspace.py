@@ -45,6 +45,4 @@ class WorkspaceManager:
         manifest = self.read_manifest()
         manifest.setdefault("latest", {})[stage] = filename
         self.outputs.mkdir(parents=True, exist_ok=True)
-        self.manifest.write_text(
-            json.dumps(manifest, indent=2), encoding="utf-8"
-        )
+        self.manifest.write_text(json.dumps(manifest, indent=2), encoding="utf-8")

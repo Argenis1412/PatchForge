@@ -66,4 +66,3 @@ def log_call(
     llm_path = logs_dir / "llm_calls.jsonl"
     with open(llm_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, default=str) + "\n")
-

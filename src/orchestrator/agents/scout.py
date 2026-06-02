@@ -14,10 +14,11 @@ from orchestrator.schemas.scout_output import ScoutOutput
 
 MODEL = "gemini-2.5-flash"
 
-COST_PER_1M_INPUT  = 0.075
+COST_PER_1M_INPUT = 0.075
 COST_PER_1M_OUTPUT = 0.30
 
 # ── helpers ────────────────────────────────────────────────────────────────
+
 
 def read_file_tree(root: Path, ignore_dirs: list[str], extensions: list[str]) -> str:
     """Pasada 1: solo lista de rutas. Costo mínimo."""
@@ -82,12 +83,12 @@ def call_gemini(
 
             usage = response.usage_metadata
             tokens = {
-                "input":  usage.prompt_token_count,
+                "input": usage.prompt_token_count,
                 "output": usage.candidates_token_count,
             }
             cost = (
-                tokens["input"]  / 1_000_000 * COST_PER_1M_INPUT +
-                tokens["output"] / 1_000_000 * COST_PER_1M_OUTPUT
+                tokens["input"] / 1_000_000 * COST_PER_1M_INPUT
+                + tokens["output"] / 1_000_000 * COST_PER_1M_OUTPUT
             )
 
             log_call(
@@ -196,6 +197,7 @@ Respond ONLY with valid JSON matching this exact schema. No explanation. No mark
 
 # ── main ───────────────────────────────────────────────────────────────────
 
+
 def run(
     config: Union[str, Path, TargetConfig],
     *,
@@ -297,7 +299,7 @@ def run(
         "tokens_input": tokens1["input"] + tokens2["input"],
         "tokens_output": tokens1["output"] + tokens2["output"],
         "cost_usd": total_cost,
-        "model_used": MODEL
+        "model_used": MODEL,
     }
 
     return output, meta

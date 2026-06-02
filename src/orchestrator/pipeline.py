@@ -20,6 +20,7 @@ from orchestrator.workspace import WorkspaceManager
 
 class PipelineAbort(RuntimeError):
     """Raised when a stage fails and downstream stages must not execute."""
+
     def __init__(
         self,
         message: str,
@@ -31,6 +32,7 @@ class PipelineAbort(RuntimeError):
         self.error_type = error_type
         self.stage = stage
         self.data = data or {}
+
 
 class Pipeline:
     def __init__(self, config: TargetConfig, from_stage: str | None = None) -> None:
@@ -62,7 +64,15 @@ class Pipeline:
             logs_dir=self.config.workspace_path / "logs",
         )
         # Keep stdout for current UX
-        print(json.dumps({"event": event, "ts": datetime.utcnow().isoformat(), **({"data": data} if data else {})}))
+        print(
+            json.dumps(
+                {
+                    "event": event,
+                    "ts": datetime.utcnow().isoformat(),
+                    **({"data": data} if data else {}),
+                }
+            )
+        )
 
     def _log_failure(
         self,
@@ -91,7 +101,9 @@ class Pipeline:
         payload = {"error_type": error_type_value, "message": message}
         if data and "blockers" in data:
             payload["blockers"] = data["blockers"]
-        print(json.dumps({"event": "failure", "ts": datetime.utcnow().isoformat(), "data": payload}))
+        print(
+            json.dumps({"event": "failure", "ts": datetime.utcnow().isoformat(), "data": payload})
+        )
 
     def execute(self, dry_run: bool = False) -> PipelineRun:
         self._log_event("pipeline_start", data={"target": str(self.target_path)})
@@ -105,14 +117,19 @@ class Pipeline:
             if self.from_stage is None:
                 scout_output = self._stage_scout()
             else:
-                self._log_event("stage_end", stage="scout", level="warning", data={"reason": f"starting from {self.from_stage}"})
+                self._log_event(
+                    "stage_end",
+                    stage="scout",
+                    level="warning",
+                    data={"reason": f"starting from {self.from_stage}"},
+                )
 
             # ── Stage: Architect ────────────────────────────────────────────
             if self.from_stage in [None, "scout"]:
                 # scout_output comes from stage_scout (or another path)
                 # Ensure scout_output exists if not loading from stage
                 if scout_output is None:
-                     scout_output = self._load_stage_output(ScoutOutput, "scout")
+                    scout_output = self._load_stage_output(ScoutOutput, "scout")
                 architect_output = self._stage_architect(scout_output)
             elif self.from_stage == "architect":
                 architect_output = self._load_stage_output(ArchitectOutput, "architect")
@@ -158,7 +175,9 @@ class Pipeline:
             self.run.total_cost_usd = _sum_costs(self.run)
             self._persist()
 
-        self._log_event("pipeline_end", data={"status": self.run.status, "cost_usd": self.run.total_cost_usd})
+        self._log_event(
+            "pipeline_end", data={"status": self.run.status, "cost_usd": self.run.total_cost_usd}
+        )
         return self.run
 
     def _load_stage_output(self, model_class, stage: str):
@@ -209,11 +228,17 @@ class Pipeline:
         self._log_event("stage_start", stage="architect")
         t0 = time.monotonic()
         try:
-            output, meta = run_architect(scout_output, config=self.config, trace_id=self.trace_id, run_id=self.run.run_id)
+            output, meta = run_architect(
+                scout_output, config=self.config, trace_id=self.trace_id, run_id=self.run.run_id
+            )
             self.run.architect_meta = AgentMeta(status="success", latency_ms=_ms(t0), **meta)
             self._persist_stage_output("architect", output)
             blockers = output.blockers
-            self._log_event("stage_end", stage="architect", data={"cost_usd": meta.get("cost_usd"), "blockers": blockers})
+            self._log_event(
+                "stage_end",
+                stage="architect",
+                data={"cost_usd": meta.get("cost_usd"), "blockers": blockers},
+            )
             if blockers:
                 raise PipelineAbort(
                     f"architect raised blockers: {blockers}",
@@ -230,14 +255,36 @@ class Pipeline:
     def _apply_executor_results(self, result: ExecutorOutput, model_used: str = "unknown") -> None:
         self.run.tasks_total = len(result.applied) + len(result.pending_review) + len(result.errors)
         for change in result.applied:
-            self.run.task_results.append(TaskResult(task_id=change.task_id, status="applied", risk_level="low", model_used=model_used))
+            self.run.task_results.append(
+                TaskResult(
+                    task_id=change.task_id,
+                    status="applied",
+                    risk_level="low",
+                    model_used=model_used,
+                )
+            )
             self.run.tasks_applied += 1
         for change in result.pending_review:
-            self.run.task_results.append(TaskResult(task_id=change.task_id, status="diff_pending_review", risk_level="high", model_used=model_used))
+            self.run.task_results.append(
+                TaskResult(
+                    task_id=change.task_id,
+                    status="diff_pending_review",
+                    risk_level="high",
+                    model_used=model_used,
+                )
+            )
             self.run.pending_human_review.append(change.diff)
             self.run.tasks_pending_review += 1
         for change in result.errors:
-            self.run.task_results.append(TaskResult(task_id=change.task_id, status="failed", risk_level="low", model_used=model_used, error=change.error))
+            self.run.task_results.append(
+                TaskResult(
+                    task_id=change.task_id,
+                    status="failed",
+                    risk_level="low",
+                    model_used=model_used,
+                    error=change.error,
+                )
+            )
             self.run.tasks_failed += 1
 
     def _stage_executor(self, architect_output: ArchitectOutput) -> None:
@@ -251,14 +298,20 @@ class Pipeline:
             self.run.executor_meta = AgentMeta(status="success", latency_ms=_ms(t0), **meta)
             self._persist_stage_output("executor", result)
             self._apply_executor_results(result, model_used=meta.get("model_used", "unknown"))
-            self._log_event("stage_end", stage="executor", data={"cost_usd": meta.get("cost_usd"), "tasks_applied": self.run.tasks_applied})
+            self._log_event(
+                "stage_end",
+                stage="executor",
+                data={"cost_usd": meta.get("cost_usd"), "tasks_applied": self.run.tasks_applied},
+            )
         except Exception as exc:
             self.run.executor_meta = AgentMeta(status="failed", error=str(exc), latency_ms=_ms(t0))
             raise PipelineAbort(f"executor failed: {exc}", stage="executor")
 
     def _stage_validator(self) -> None:
         if self.run.tasks_applied == 0:
-            self._log_event("stage_end", stage="validator", level="warning", data={"reason": "no tasks applied"})
+            self._log_event(
+                "stage_end", stage="validator", level="warning", data={"reason": "no tasks applied"}
+            )
             self.run.validator_meta = AgentMeta(status="skipped", latency_ms=0)
             return
         self._log_event("stage_start", stage="validator")
@@ -271,7 +324,12 @@ class Pipeline:
             self._persist_stage_output("validator", result)
         except Exception as exc:
             self.run.validator_meta = AgentMeta(status="failed", error=str(exc), latency_ms=_ms(t0))
-            self._log_failure(FailureType.TOOL_ERROR, f"validator failed: {exc}", stage="validator", duration_ms=_ms(t0))
+            self._log_failure(
+                FailureType.TOOL_ERROR,
+                f"validator failed: {exc}",
+                stage="validator",
+                duration_ms=_ms(t0),
+            )
 
     def _final_status(self) -> str:
         if self.run.validator_meta and self.run.validator_meta.status == "failed":
@@ -284,9 +342,11 @@ class Pipeline:
         path = self.workspace.runs / f"pipeline_{self.run.run_id}.json"
         path.write_text(self.run.model_dump_json(indent=2))
 
-def _ms(t0: float) -> int: return int((time.monotonic() - t0) * 1000)
+
+def _ms(t0: float) -> int:
+    return int((time.monotonic() - t0) * 1000)
+
+
 def _sum_costs(run: PipelineRun) -> float:
     metas = [run.scout_meta, run.architect_meta, run.executor_meta, run.validator_meta]
     return round(sum(m.cost_usd for m in metas if m and m.cost_usd), 6)
-
-

@@ -1,0 +1,161 @@
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+from orchestrator.schemas.git import GitCommandResult, RepositoryState, WorkingTreeStatus
+
+
+def is_git_repo(path: Path) -> bool:
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--git-dir"],
+            capture_output=True,
+            text=True,
+        )
+        return res.returncode == 0
+    except FileNotFoundError as e:
+        raise FileNotFoundError("Git executable not found in PATH") from e
+
+
+def resolve_git_root(path: Path) -> Path:
+    path = Path(path).resolve()
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return Path(res.stdout.strip()).resolve()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return path
+
+
+def current_branch(repo_root: Path) -> str:
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return res.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+
+
+def current_head(repo_root: Path) -> str:
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return res.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+
+
+def is_working_tree_clean(repo_root: Path) -> bool:
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return res.stdout.strip() == ""
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+
+def working_tree_status(repo_root: Path) -> WorkingTreeStatus:
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root), "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        porcelain = res.stdout
+        return WorkingTreeStatus(is_clean=porcelain.strip() == "", porcelain=porcelain)
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        porcelain = getattr(e, "stderr", None) or str(e)
+        return WorkingTreeStatus(is_clean=False, porcelain=porcelain)
+
+
+def repository_state(repo_root: Path) -> RepositoryState:
+    if not is_git_repo(repo_root):
+        raise ValueError(f"Not a Git repository: {repo_root}")
+
+    root = resolve_git_root(repo_root)
+    head = current_head(root)
+    branch = current_branch(root)
+    is_clean = is_working_tree_clean(root)
+
+    return RepositoryState(
+        root=root,
+        head=head,
+        branch=branch,
+        is_clean=is_clean,
+    )
+
+
+def check_patch(repo_root: Path, patch_path: Path) -> GitCommandResult:
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root), "apply", "--check", str(patch_path)],
+            capture_output=True,
+            text=True,
+        )
+        return GitCommandResult(return_code=res.returncode, stdout=res.stdout, stderr=res.stderr)
+    except FileNotFoundError as e:
+        return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {e}")
+
+
+def create_controlled_branch(repo_root: Path, branch_name: str) -> GitCommandResult:
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root), "checkout", "-b", branch_name],
+            capture_output=True,
+            text=True,
+        )
+        return GitCommandResult(return_code=res.returncode, stdout=res.stdout, stderr=res.stderr)
+    except FileNotFoundError as e:
+        return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {e}")
+
+
+def apply_patch(repo_root: Path, patch_path: Path) -> GitCommandResult:
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root), "apply", str(patch_path)],
+            capture_output=True,
+            text=True,
+        )
+        return GitCommandResult(return_code=res.returncode, stdout=res.stdout, stderr=res.stderr)
+    except FileNotFoundError as e:
+        return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {e}")
+
+
+def revert_apply(repo_root: Path) -> GitCommandResult:
+    try:
+        res1 = subprocess.run(
+            ["git", "-C", str(repo_root), "checkout", "."],
+            capture_output=True,
+            text=True,
+        )
+        res2 = subprocess.run(
+            ["git", "-C", str(repo_root), "clean", "-fd"],
+            capture_output=True,
+            text=True,
+        )
+        rc = res1.returncode if res1.returncode != 0 else res2.returncode
+        return GitCommandResult(
+            return_code=rc,
+            stdout=res1.stdout + res2.stdout,
+            stderr=res1.stderr + res2.stderr,
+        )
+    except FileNotFoundError as e:
+        return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {e}")

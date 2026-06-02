@@ -14,6 +14,7 @@ def mock_gemini(monkeypatch):
             pass
     return mock
 
+
 @pytest.fixture
 def mock_claude(monkeypatch):
     mock = MagicMock()
@@ -23,6 +24,7 @@ def mock_claude(monkeypatch):
         except (AttributeError, ModuleNotFoundError):
             pass
     return mock
+
 
 @pytest.fixture
 def mock_groq(monkeypatch):
@@ -34,9 +36,9 @@ def mock_groq(monkeypatch):
             pass
     return mock
 
+
 @pytest.fixture
 def mock_subprocess(monkeypatch):
     mock = MagicMock()
     monkeypatch.setattr("subprocess.run", mock)
     return mock
-

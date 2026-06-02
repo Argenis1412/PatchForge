@@ -1,4 +1,5 @@
 """Tests for pipeline correctness — status mapping, skip, failure propagation."""
+
 from unittest.mock import MagicMock
 
 import pytest
@@ -34,6 +35,7 @@ def _architect_output(tasks=None, blockers=None):
 def _executor_output(applied=0, pending=0):
     def _change(task_id, status):
         return FileChange(task_id=f"t{task_id}", file="x.py", status=status, diff="")
+
     return ExecutorOutput(
         model="test",
         run_id="test",
@@ -59,10 +61,39 @@ def _meta(**overrides):
 
 
 def test_successful_run_completed(config, monkeypatch):
-    monkeypatch.setattr("orchestrator.pipeline.run_scout", MagicMock(return_value=(_scout_output(), _meta())))
-    monkeypatch.setattr("orchestrator.pipeline.run_architect", MagicMock(return_value=(_architect_output(tasks=[Task(task_id="t1", title="x", description="x", files_to_modify=["x.py"], priority="low", effort="low", risk_level="low", dependencies=[])]), _meta())))
-    monkeypatch.setattr("orchestrator.pipeline.run_executor", MagicMock(return_value=(_executor_output(applied=1), _meta())))
-    monkeypatch.setattr("orchestrator.pipeline.run_validator", MagicMock(return_value=(_validator_output(passed=True), _meta())))
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_scout", MagicMock(return_value=(_scout_output(), _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_architect",
+        MagicMock(
+            return_value=(
+                _architect_output(
+                    tasks=[
+                        Task(
+                            task_id="t1",
+                            title="x",
+                            description="x",
+                            files_to_modify=["x.py"],
+                            priority="low",
+                            effort="low",
+                            risk_level="low",
+                            dependencies=[],
+                        )
+                    ]
+                ),
+                _meta(),
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_executor",
+        MagicMock(return_value=(_executor_output(applied=1), _meta())),
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_validator",
+        MagicMock(return_value=(_validator_output(passed=True), _meta())),
+    )
 
     result = Pipeline(config=config).execute(dry_run=False)
     assert result.status == "completed"
@@ -70,34 +101,106 @@ def test_successful_run_completed(config, monkeypatch):
 
 def test_pending_review_produces_awaiting_review(config, monkeypatch):
     exec_out = ExecutorOutput(
-        model="test", run_id="test",
+        model="test",
+        run_id="test",
         applied=[],
-        pending_review=[FileChange(task_id="t1", file="x.py", status="pending_human_review", diff="--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-old\n+new")],
+        pending_review=[
+            FileChange(
+                task_id="t1",
+                file="x.py",
+                status="pending_human_review",
+                diff="--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-old\n+new",
+            )
+        ],
         errors=[],
     )
-    monkeypatch.setattr("orchestrator.pipeline.run_scout", MagicMock(return_value=(_scout_output(), _meta())))
-    monkeypatch.setattr("orchestrator.pipeline.run_architect", MagicMock(return_value=(_architect_output(tasks=[Task(task_id="t1", title="x", description="x", files_to_modify=["x.py"], priority="high", effort="low", risk_level="high", dependencies=[])]), _meta())))
-    monkeypatch.setattr("orchestrator.pipeline.run_executor", MagicMock(return_value=(exec_out, _meta())))
-    monkeypatch.setattr("orchestrator.pipeline.run_validator", MagicMock(return_value=(_validator_output(passed=True), _meta())))
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_scout", MagicMock(return_value=(_scout_output(), _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_architect",
+        MagicMock(
+            return_value=(
+                _architect_output(
+                    tasks=[
+                        Task(
+                            task_id="t1",
+                            title="x",
+                            description="x",
+                            files_to_modify=["x.py"],
+                            priority="high",
+                            effort="low",
+                            risk_level="high",
+                            dependencies=[],
+                        )
+                    ]
+                ),
+                _meta(),
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_executor", MagicMock(return_value=(exec_out, _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_validator",
+        MagicMock(return_value=(_validator_output(passed=True), _meta())),
+    )
 
     result = Pipeline(config=config).execute(dry_run=False)
     assert result.status == "awaiting_review"
 
 
 def test_validator_failure_produces_validation_failed(config, monkeypatch):
-    monkeypatch.setattr("orchestrator.pipeline.run_scout", MagicMock(return_value=(_scout_output(), _meta())))
-    monkeypatch.setattr("orchestrator.pipeline.run_architect", MagicMock(return_value=(_architect_output(tasks=[Task(task_id="t1", title="x", description="x", files_to_modify=["x.py"], priority="low", effort="low", risk_level="low", dependencies=[])]), _meta())))
-    monkeypatch.setattr("orchestrator.pipeline.run_executor", MagicMock(return_value=(_executor_output(applied=1), _meta())))
-    monkeypatch.setattr("orchestrator.pipeline.run_validator", MagicMock(return_value=(_validator_output(passed=False), _meta(model_used="test"))))
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_scout", MagicMock(return_value=(_scout_output(), _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_architect",
+        MagicMock(
+            return_value=(
+                _architect_output(
+                    tasks=[
+                        Task(
+                            task_id="t1",
+                            title="x",
+                            description="x",
+                            files_to_modify=["x.py"],
+                            priority="low",
+                            effort="low",
+                            risk_level="low",
+                            dependencies=[],
+                        )
+                    ]
+                ),
+                _meta(),
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_executor",
+        MagicMock(return_value=(_executor_output(applied=1), _meta())),
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_validator",
+        MagicMock(return_value=(_validator_output(passed=False), _meta(model_used="test"))),
+    )
 
     result = Pipeline(config=config).execute(dry_run=False)
     assert result.status == "validation_failed"
 
 
 def test_validator_skip_does_not_crash(config, monkeypatch):
-    monkeypatch.setattr("orchestrator.pipeline.run_scout", MagicMock(return_value=(_scout_output(), _meta())))
-    monkeypatch.setattr("orchestrator.pipeline.run_architect", MagicMock(return_value=(_architect_output(), _meta())))
-    monkeypatch.setattr("orchestrator.pipeline.run_executor", MagicMock(return_value=(_executor_output(), _meta())))
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_scout", MagicMock(return_value=(_scout_output(), _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_architect",
+        MagicMock(return_value=(_architect_output(), _meta())),
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_executor", MagicMock(return_value=(_executor_output(), _meta()))
+    )
 
     result = Pipeline(config=config).execute(dry_run=False)
     assert result.status == "completed"
@@ -107,8 +210,13 @@ def test_validator_skip_does_not_crash(config, monkeypatch):
 
 
 def test_architect_blockers_produce_failed(config, monkeypatch):
-    monkeypatch.setattr("orchestrator.pipeline.run_scout", MagicMock(return_value=(_scout_output(), _meta())))
-    monkeypatch.setattr("orchestrator.pipeline.run_architect", MagicMock(return_value=(_architect_output(blockers=["something blocked"]), _meta())))
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_scout", MagicMock(return_value=(_scout_output(), _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_architect",
+        MagicMock(return_value=(_architect_output(blockers=["something blocked"]), _meta())),
+    )
 
     result = Pipeline(config=config).execute(dry_run=False)
     assert result.status == "failed"
@@ -123,8 +231,13 @@ def test_resume_from_scout_output(config, monkeypatch):
 
     mock_scout = MagicMock()
     monkeypatch.setattr("orchestrator.pipeline.run_scout", mock_scout)
-    monkeypatch.setattr("orchestrator.pipeline.run_architect", MagicMock(return_value=(_architect_output(), _meta())))
-    monkeypatch.setattr("orchestrator.pipeline.run_executor", MagicMock(return_value=(_executor_output(), _meta())))
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_architect",
+        MagicMock(return_value=(_architect_output(), _meta())),
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_executor", MagicMock(return_value=(_executor_output(), _meta()))
+    )
 
     result = Pipeline(config=config, from_stage="scout").execute(dry_run=False)
     assert result.status == "completed"
@@ -142,7 +255,9 @@ def test_resume_from_architect_output(config, monkeypatch):
     mock_architect = MagicMock()
     monkeypatch.setattr("orchestrator.pipeline.run_scout", mock_scout)
     monkeypatch.setattr("orchestrator.pipeline.run_architect", mock_architect)
-    monkeypatch.setattr("orchestrator.pipeline.run_executor", MagicMock(return_value=(_executor_output(), _meta())))
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_executor", MagicMock(return_value=(_executor_output(), _meta()))
+    )
 
     result = Pipeline(config=config, from_stage="architect").execute(dry_run=False)
     assert result.status == "completed"

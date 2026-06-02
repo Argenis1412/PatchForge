@@ -14,8 +14,9 @@ from orchestrator.schemas.scout_output import ScoutOutput
 
 MODEL = "claude-3-5-sonnet-20241022"
 
-COST_PER_1M_INPUT  = 3.00
+COST_PER_1M_INPUT = 3.00
 COST_PER_1M_OUTPUT = 15.00
+
 
 def call_claude(
     prompt: str,
@@ -33,11 +34,7 @@ def call_claude(
         call_started = time.monotonic()
         try:
             response = client.messages.create(
-                model=MODEL,
-                max_tokens=4096,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
+                model=MODEL, max_tokens=4096, messages=[{"role": "user", "content": prompt}]
             )
             latency_ms = int((time.monotonic() - call_started) * 1000)
             raw = response.content[0].text.strip()
@@ -56,8 +53,8 @@ def call_claude(
                 "output": response.usage.output_tokens,
             }
             cost = (
-                tokens["input"] / 1_000_000 * COST_PER_1M_INPUT +
-                tokens["output"] / 1_000_000 * COST_PER_1M_OUTPUT
+                tokens["input"] / 1_000_000 * COST_PER_1M_INPUT
+                + tokens["output"] / 1_000_000 * COST_PER_1M_OUTPUT
             )
 
             log_call(
@@ -113,6 +110,7 @@ def call_claude(
 
     raise RuntimeError(f"[{orchestratorel}] Failed after retry.")
 
+
 ARCHITECT_PROMPT = """
 You are the Architect Agent. Your job is to analyze the reconnaissance data provided by the Scout Agent.
 Dado este diagnóstico del Scout, tu trabajo es:
@@ -146,6 +144,7 @@ Output: ONLY valid JSON matching this exact schema. No explanation. No markdown:
 [OUTPUT DEL SCOUT]
 {scout_data}
 """
+
 
 def run(
     scout_output: ScoutOutput,
@@ -212,7 +211,7 @@ def run(
         "tokens_input": tokens["input"],
         "tokens_output": tokens["output"],
         "cost_usd": cost,
-        "model_used": MODEL
+        "model_used": MODEL,
     }
 
     return output, meta
