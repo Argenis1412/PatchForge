@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 SCHEMA_VERSION = "1.0"
 
@@ -77,6 +77,11 @@ class TargetConfig(BaseModel):
     typecheck_command: Optional[List[str]] = None
 
     capabilities: TargetCapabilities = Field(default_factory=TargetCapabilities)
+
+    @model_validator(mode="after")
+    def _validate_workspace_is_external(self) -> "TargetConfig":
+        self.workspace_path = validate_workspace_path(self.target_path, self.workspace_path)
+        return self
 
     @classmethod
     def load(
@@ -155,10 +160,6 @@ class TargetConfig(BaseModel):
                 if hasattr(detected_caps, eff_key):
                     setattr(detected_caps, eff_key, bool(val))
 
-        config_data["workspace_path"] = validate_workspace_path(
-            target_path=target_path,
-            workspace_path=config_data["workspace_path"],
-        )
         config_data["capabilities"] = detected_caps
         return cls(**config_data)
 

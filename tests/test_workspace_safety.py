@@ -57,6 +57,15 @@ def test_workspace_inside_target_is_rejected(tmp_path):
         TargetConfig.load(target_path=repo, workspace_path=repo / "workspace")
 
 
+def test_direct_targetconfig_construction_rejects_internal_workspace(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+
+    with pytest.raises(ValueError, match="outside the target repository"):
+        TargetConfig(target_path=repo, workspace_path=repo / "workspace")
+
+
 def test_symlink_workspace_resolving_inside_target_is_rejected(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
