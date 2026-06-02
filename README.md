@@ -1,11 +1,37 @@
-# orchestrator-core
+# PatchForge
 
 [![CI](https://github.com/Argenis1412/orchestrator-core/actions/workflows/ci.yml/badge.svg)](https://github.com/Argenis1412/orchestrator-core/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 
+> Working title. Repository currently named **orchestrator-core**.
+
 orchestrator-core is evolving into a Git-native refactoring engine for real repositories: generate,
 validate, and apply reviewable code patches safely.
+
+## Philosophy
+
+PatchForge is built around a simple principle:
+
+> AI proposes. PatchForge proves. Humans decide.
+
+See:
+- [Product Thesis](./docs/PRODUCT_THESIS.md) — Why PatchForge exists, its principles, and competitive moat.
+- [ADR-0003: Product Contract](./docs/adr/ADR-0003-product-contract.md) — The binding repository safety contract and patch lifecycle.
+
+## Why PatchForge Exists
+
+Most AI coding tools optimize for speed.
+
+PatchForge optimizes for trust.
+
+Instead of modifying repositories immediately, PatchForge separates:
+
+```text
+Scan → Plan → Patch → Validation → Apply
+```
+
+Every change remains reviewable before repository modification.
 
 The long-term product workflow is intentionally simple:
 
@@ -17,19 +43,32 @@ orchestrator preview .
 orchestrator apply run_001
 ```
 
+**Planned CLI** (subject to infrastructure rename):
+
+```bash
+patchforge doctor .
+patchforge scan .
+patchforge plan .
+patchforge preview .
+patchforge apply run_001
+```
+
 The internal runtime may use specialized agents, typed Pydantic contracts, checkpoints, model
 routing, and structured observability. Those are implementation details. The user-facing product is
 organized around repositories, plans, patches, validation, and Git review.
 
-## Product Contract
+## Repository Safety Contract
 
-The core product rule we are building toward is:
+PatchForge SHALL NOT modify repository contents unless:
 
-> No command before `apply` may modify the target repository working tree.
+1. A patch exists.
+2. Validation succeeded.
+3. Repository state is compatible.
+4. User explicitly executes `apply`.
 
 Current implementation caveat: today, the default workspace is created under the target repository
 (`./workspace`). That means `orchestrator scan ./your-project` may write orchestrator artifacts inside
-the target working tree before `apply` exists. Until the workspace redesign lands, pass an external
+the target working tree before `apply` is available. Until the workspace redesign lands, pass an external
 workspace path when you want strict no-target-write behavior:
 
 ```bash
@@ -45,7 +84,22 @@ The product contract means:
 - `apply` is the only command allowed to modify the repository, and it must do so through Git safety checks.
 
 See [ADR-0003: Product Contract — Reviewable Patch Workflow](./docs/adr/ADR-0003-product-contract.md)
-for the binding product direction.
+for the binding product direction and patch lifecycle.
+
+## What Makes PatchForge Different?
+
+Most tools focus on autonomous code generation.
+
+PatchForge focuses on repository safety.
+
+| Tool | Primary Goal |
+|------|-------------|
+| Aider | Fast iteration |
+| OpenHands | Autonomous execution |
+| Plandex | Large-context planning |
+| **PatchForge** | **Reviewable, auditable patches** |
+
+See the [Product Thesis](./docs/PRODUCT_THESIS.md) for a detailed competitive analysis.
 
 ## Target Architecture
 
@@ -101,6 +155,7 @@ The next phases are intentionally narrow:
 4. **Run artifact redesign** — persist `workspace/runs/{run_id}/` as the product unit.
 5. **Git-safe `apply`** — apply patches only through explicit Git checks and branch creation.
 6. **Risk budgets** — add `--risk-budget`, `--max-files`, and `--max-diff-lines`.
+7. **Patch lifecycle management** — validate patch state before apply: VALID, STALE, REBASEABLE, or CONFLICT.
 
 V1 is scoped to Python repositories using Git, Ruff, and Pytest. TypeScript, monorepos, migration
 packs, CI review, and autonomous bug investigation are deferred until the patch workflow is reliable.
