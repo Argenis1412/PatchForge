@@ -23,7 +23,8 @@ def test_validator_run_returns_tuple(monkeypatch, tmp_path):
         "orchestrator.agents.validator.run_tsc",
         lambda *a, **kw: mock_tool,
     )
-    config = TargetConfig(target_path=tmp_path, workspace_path=tmp_path)
+    workspace = tmp_path.parent / f"{tmp_path.name}-workspace"
+    config = TargetConfig(target_path=tmp_path, workspace_path=workspace)
     output, meta = run(config=config)
     assert isinstance(output, ValidatorOutput)
     assert isinstance(meta, dict)

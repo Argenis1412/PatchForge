@@ -13,7 +13,8 @@ from orchestrator.schemas.validator_output import ToolResult, ValidatorOutput
 
 @pytest.fixture
 def config(tmp_path):
-    return TargetConfig.load(target_path=tmp_path, workspace_path=tmp_path / "workspace")
+    workspace = tmp_path.parent / f"{tmp_path.name}-workspace"
+    return TargetConfig.load(target_path=tmp_path, workspace_path=workspace)
 
 
 def _scout_output():

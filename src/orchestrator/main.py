@@ -19,6 +19,19 @@ from orchestrator.schemas.config import TargetConfig
 app = typer.Typer(help="orchestrator runtime - multi-stage software engineering workflows.")
 console = Console()
 
+
+def _load_target_config(
+    path: Path,
+    workspace: Optional[Path],
+    env_file: Optional[Path],
+) -> TargetConfig:
+    bootstrap_environment(env_file=env_file, target_path=path)
+    try:
+        return TargetConfig.load(target_path=path, workspace_path=workspace)
+    except ValueError as exc:
+        console.print(f"[bold red]{exc}[/bold red]")
+        raise typer.Exit(code=1) from exc
+
 @app.command()
 def run(
     path: Path = typer.Argument(..., help="Target project path"),
@@ -32,8 +45,7 @@ def run(
 
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
         progress.add_task("[cyan]Bootstrapping environment...", total=None)
-        bootstrap_environment(env_file=env_file, target_path=path)
-        config = TargetConfig.load(target_path=path, workspace_path=workspace)
+        config = _load_target_config(path=path, workspace=workspace, env_file=env_file)
 
     pipeline = Pipeline(config=config, from_stage=from_stage)
 
@@ -61,8 +73,7 @@ def scan(
 
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
         progress.add_task("[cyan]Bootstrapping environment...", total=None)
-        bootstrap_environment(env_file=env_file, target_path=path)
-        config = TargetConfig.load(target_path=path, workspace_path=workspace)
+        config = _load_target_config(path=path, workspace=workspace, env_file=env_file)
 
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
         task = progress.add_task(f"[green]Scanning {config.target_path}...", total=None)
