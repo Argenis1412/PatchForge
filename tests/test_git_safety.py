@@ -20,6 +20,8 @@ from orchestrator.git import (
 
 def _init_git_repo(path: Path) -> None:
     subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=path, check=True, capture_output=True)
     # create initial commit
     test_file = path / "README.md"
     test_file.write_text("Hello\n")
