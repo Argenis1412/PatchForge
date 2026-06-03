@@ -11,6 +11,7 @@ from orchestrator.schemas.doctor import CheckResult, CheckStatus, DoctorResult
 
 
 def check_command_available(cmd: str) -> tuple[bool, str]:
+    """Return (available, version_str) for *cmd*."""
     try:
         res = subprocess.run(
             [cmd, "--version"],
@@ -28,6 +29,7 @@ def check_command_available(cmd: str) -> tuple[bool, str]:
 
 
 def detect_test_suite(path: Path, pyproject: Optional[dict] = None) -> bool:
+    """Return True if a test suite is detectable at *path*."""
     if (path / "tests").is_dir():
         return True
     if (path / "test").is_dir():
@@ -58,6 +60,7 @@ def _detect_typescript(path: Path) -> bool:
 
 
 def _read_orchestrator_config(path: Path) -> dict:
+    """Return orchestrator.json contents as a dict, or {} if unavailable."""
     config_file = path / "orchestrator.json"
     if not config_file.exists():
         return {}
@@ -72,6 +75,7 @@ def _read_orchestrator_config(path: Path) -> dict:
 
 
 def check_git(path: Path) -> tuple[CheckResult, Optional[str], Optional[str], Optional[bool]]:
+    """Validate Git repository state for *path*."""
     from orchestrator.git import (
         current_branch,
         current_head,
@@ -115,6 +119,7 @@ def check_git(path: Path) -> tuple[CheckResult, Optional[str], Optional[str], Op
 
 
 def check_workspace(path: Path) -> tuple[CheckResult, Optional[str]]:
+    """Validate the workspace path is outside the target repository."""
     from orchestrator.schemas.config import default_workspace_path, validate_workspace_path
 
     cfg = _read_orchestrator_config(path)
@@ -178,6 +183,7 @@ def check_workspace(path: Path) -> tuple[CheckResult, Optional[str]]:
 
 
 def check_pyproject(path: Path) -> tuple[CheckResult, Optional[dict]]:
+    """Check pyproject.toml exists, is valid TOML, and has a build system."""
     pyproject_path = path / "pyproject.toml"
 
     if not pyproject_path.exists():
@@ -236,6 +242,7 @@ def check_pyproject(path: Path) -> tuple[CheckResult, Optional[dict]]:
 
 
 def check_ruff(path: Path) -> CheckResult:
+    """Check Ruff is available or explicitly configured."""
     config = _read_orchestrator_config(path)
     lint_command = config.get("lint_command")
 
@@ -266,6 +273,7 @@ def check_ruff(path: Path) -> CheckResult:
 
 
 def check_pytest(path: Path, pyproject: Optional[dict] = None) -> CheckResult:
+    """Check Pytest is available and a test suite is detectable."""
     config = _read_orchestrator_config(path)
     test_command = config.get("test_command")
 
@@ -325,6 +333,7 @@ def check_pytest(path: Path, pyproject: Optional[dict] = None) -> CheckResult:
 
 
 def check_api_keys() -> list[CheckResult]:
+    """Check which API keys are set in the environment; return warnings."""
     keys = [
         ("anthropic_api_key", "ANTHROPIC_API_KEY", "Claude"),
         ("google_api_key", "GOOGLE_API_KEY", "Gemini"),
@@ -346,6 +355,7 @@ def check_api_keys() -> list[CheckResult]:
 
 
 def check(path: str | Path) -> DoctorResult:
+    """Run all doctor checks on *path* and return a DoctorResult."""
     target = Path(path).resolve()
     checks: list[CheckResult] = []
     workspace_path: Optional[str] = None
