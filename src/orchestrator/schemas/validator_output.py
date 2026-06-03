@@ -1,6 +1,6 @@
 """
 schemas/validator_output.py
-Contrato de salida del Validator. Define el resultado de cada tool y el summary global.
+Output contract of the Validator. Defines the result of each tool and the global summary.
 """
 
 from __future__ import annotations
@@ -16,12 +16,12 @@ class ToolResult(BaseModel):
     return_code: int
     stdout: str = ""
     stderr: str = ""
-    error_summary: str | None = None  # Gemini lo rellena solo si passed == False
+    error_summary: str | None = None  # Gemini fills this only if passed == False
 
 
 class ValidatorOutput(BaseModel):
     overall_passed: bool
     tools: list[ToolResult] = Field(default_factory=list)
-    llm_summary: str | None = None  # resumen global si hay al menos un fallo
+    llm_summary: str | None = None  # global summary if at least one tool failed
     run_id: str = ""
-    model_used_for_summary: str = ""  # vacío si todo pasó (Gemini no fue invocado)
+    model_used_for_summary: str = ""  # empty if all passed (Gemini was not invoked)

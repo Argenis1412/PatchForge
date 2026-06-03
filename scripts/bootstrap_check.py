@@ -5,7 +5,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Cargar env para validar variables
+# Load env to validate variables
 load_dotenv()
 
 REQUIRED_PKGS = [

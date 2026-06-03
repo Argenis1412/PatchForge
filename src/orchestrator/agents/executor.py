@@ -403,7 +403,7 @@ def run(
                 result.errors.append(change)
 
     _get_logger().info(
-        "[%s] Finalizado | applied=%d | pending_review=%d | errors=%d | cost=$%.6f",
+        "[%s] Finished | applied=%d | pending_review=%d | errors=%d | cost=$%.6f",
         run_id,
         len(result.applied),
         len(result.pending_review),
