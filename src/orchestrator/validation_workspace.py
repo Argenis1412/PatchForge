@@ -38,6 +38,9 @@ def create_temp_copy(source: Path, ignore_dirs: list[str] | None = None) -> Path
 
 
 def apply_patch_to_copy(temp_root: Path, patch_path: Path) -> GitCommandResult:
+    import subprocess
+    if not (temp_root / ".git").exists():
+        subprocess.run(["git", "init"], cwd=str(temp_root), capture_output=True, text=True)
     return apply_patch(temp_root, patch_path)
 
 
