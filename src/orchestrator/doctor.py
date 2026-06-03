@@ -11,7 +11,11 @@ from orchestrator.schemas.doctor import CheckResult, CheckStatus, DoctorResult
 
 
 def check_command_available(cmd: str) -> tuple[bool, str]:
-    """Return (available, version_str) for *cmd*."""
+    """Return (available, version_str) for *cmd*.
+
+    Returns (False, '') when the command is not found or cannot be executed.
+    Returns (False, 'timed out') when the command exceeds the 30-second timeout.
+    """
     try:
         res = subprocess.run(
             [cmd, "--version"],
@@ -29,7 +33,12 @@ def check_command_available(cmd: str) -> tuple[bool, str]:
 
 
 def detect_test_suite(path: Path, pyproject: Optional[dict] = None) -> bool:
-    """Return True if a test suite is detectable at *path*."""
+    """Return True if a test suite is detectable at *path*.
+
+    Detection criteria (first match wins): tests/ directory, test/ directory,
+    pytest.ini, conftest.py, [tool.pytest.ini_options] in pyproject.toml,
+    or any file matching test_*.py or *_test.py.
+    """
     if (path / "tests").is_dir():
         return True
     if (path / "test").is_dir():
@@ -60,7 +69,11 @@ def _detect_typescript(path: Path) -> bool:
 
 
 def _read_orchestrator_config(path: Path) -> dict:
-    """Return orchestrator.json contents as a dict, or {} if unavailable."""
+    """Return orchestrator.json contents as a dict, or {} if unavailable.
+
+    Returns {} when the file is missing, contains invalid JSON,
+    or the root value is not a JSON object.
+    """
     config_file = path / "orchestrator.json"
     if not config_file.exists():
         return {}
@@ -75,7 +88,14 @@ def _read_orchestrator_config(path: Path) -> dict:
 
 
 def check_git(path: Path) -> tuple[CheckResult, Optional[str], Optional[str], Optional[bool]]:
-    """Validate Git repository state for *path*."""
+    """Validate Git repository state for *path*.
+
+    Returns a 4-tuple (result, branch, head, is_dirty):
+    - result: CheckResult with PASS/FAIL for the git_repository check
+    - branch: current branch name, or None if not a Git repository
+    - head: current commit hash (40 hex characters), or None if not a repo
+    - is_dirty: True when the working tree has uncommitted changes
+    """
     from orchestrator.git import (
         current_branch,
         current_head,
@@ -119,7 +139,11 @@ def check_git(path: Path) -> tuple[CheckResult, Optional[str], Optional[str], Op
 
 
 def check_workspace(path: Path) -> tuple[CheckResult, Optional[str]]:
-    """Validate the workspace path is outside the target repository."""
+    """Validate the workspace path is outside the target repository.
+
+    Looks up workspace_path in orchestrator.json first.
+    Falls back to the default workspace path when the config key is not set.
+    """
     from orchestrator.schemas.config import default_workspace_path, validate_workspace_path
 
     cfg = _read_orchestrator_config(path)
@@ -333,7 +357,12 @@ def check_pytest(path: Path, pyproject: Optional[dict] = None) -> CheckResult:
 
 
 def check_api_keys() -> list[CheckResult]:
-    """Check which API keys are set in the environment; return warnings."""
+    """Check which API keys are set in the environment; return warnings.
+
+    Checks three environment variables: ANTHROPIC_API_KEY, GOOGLE_API_KEY,
+    and GROQ_API_KEY. Returns one WARN-level CheckResult per missing key.
+    These checks are not required for V1 support.
+    """
     keys = [
         ("anthropic_api_key", "ANTHROPIC_API_KEY", "Claude"),
         ("google_api_key", "GOOGLE_API_KEY", "Gemini"),
@@ -355,7 +384,12 @@ def check_api_keys() -> list[CheckResult]:
 
 
 def check(path: str | Path) -> DoctorResult:
-    """Run all doctor checks on *path* and return a DoctorResult."""
+    """Run all doctor checks on *path* and return a DoctorResult.
+
+    Sub-checks executed: git_repository, working_tree (dirty check),
+    workspace, pyproject_toml, ruff, pytest, api_keys, and typescript.
+    V1 support is determined by whether all required checks pass.
+    """
     target = Path(path).resolve()
     checks: list[CheckResult] = []
     workspace_path: Optional[str] = None
