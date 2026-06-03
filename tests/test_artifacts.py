@@ -1,5 +1,8 @@
 import json
+import uuid
 from datetime import datetime, timezone
+from unittest.mock import patch
+
 from orchestrator.schemas.artifacts import generate_run_id, RunMetadata
 
 
@@ -16,7 +19,12 @@ def test_generate_run_id_format():
 
 
 def test_generate_run_id_uniqueness():
-    ids = {generate_run_id() for _ in range(100)}
+    with patch("orchestrator.schemas.artifacts.uuid.uuid4") as mock_uuid:
+        mock_uuid.side_effect = [
+            uuid.UUID(hex=f"{i:06x}".ljust(32, "0"))
+            for i in range(100)
+        ]
+        ids = {generate_run_id() for _ in range(100)}
     assert len(ids) == 100  # No collisions in 100 rapid generations
 
 

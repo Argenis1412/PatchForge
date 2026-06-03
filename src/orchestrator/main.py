@@ -742,8 +742,24 @@ def apply(
             logs_dir=logs_dir,
             run_dir=run_dir,
         )
-        # Revert
-        revert_apply(target_path)
+        # Revert: attempt to clean the partial apply
+        revert_res = revert_apply(target_path)
+        if revert_res.return_code != 0:
+            console.print(
+                "[bold red]FATAL: Patch application failed AND the automatic revert also failed. "
+                f"Your repository may be in a partially applied state.\n"
+                f"Revert stderr: {revert_res.stderr}\n"
+                "Please run 'git checkout .' and 'git clean -fd' manually to restore a clean state.[/bold red]"
+            )
+            log_failure(
+                trace_id=run_id,
+                run_id=run_id,
+                stage="apply",
+                error_type="revert_failed",
+                message=revert_res.stderr,
+                logs_dir=logs_dir,
+                run_dir=run_dir,
+            )
         # Write apply.json failure
         apply_data = {
             "run_id": run_id,

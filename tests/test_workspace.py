@@ -25,7 +25,7 @@ def test_ensure_run_exists(workspace_mgr: WorkspaceManager):
     with pytest.raises(FileNotFoundError):
         workspace_mgr.ensure_run_exists(run_id)
 
-    # Now write metadata
+    workspace_mgr.create_run_directory(run_id)
     meta = RunMetadata(
         run_id=run_id,
         target_path="/dummy/target",
@@ -44,6 +44,16 @@ def test_read_write_artifact(workspace_mgr: WorkspaceManager):
     filename = "patch.diff"
     content = "diff --git a/README.md b/README.md\n..."
 
+    workspace_mgr.create_run_directory(run_id)
+    meta = RunMetadata(
+        run_id=run_id,
+        target_path="/dummy/target",
+        workspace_path=str(workspace_mgr.root),
+        base_commit="abc",
+        branch="main",
+        v1_supported=True,
+    )
+    workspace_mgr.write_run_json(run_id, meta)
     workspace_mgr.write_artifact(run_id, filename, content)
     read_content = workspace_mgr.read_artifact(run_id, filename)
     assert read_content == content
@@ -63,6 +73,7 @@ def test_read_write_run_json(workspace_mgr: WorkspaceManager):
         v1_supported=True,
     )
 
+    workspace_mgr.create_run_directory(run_id)
     workspace_mgr.write_run_json(run_id, meta)
     loaded = workspace_mgr.read_run_json(run_id)
 

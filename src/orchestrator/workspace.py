@@ -1,9 +1,22 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from orchestrator.schemas.artifacts import RunMetadata
+
+# Only allow alphanumeric characters, underscores, and hyphens in run IDs.
+_RUN_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+def _validate_run_id(run_id: str) -> None:
+    """Raise ValueError if run_id is empty or contains path-traversal characters."""
+    if not run_id or not _RUN_ID_RE.match(run_id):
+        raise ValueError(
+            f"Invalid run_id {run_id!r}. "
+            "Only alphanumeric characters, underscores, and hyphens are allowed."
+        )
 
 
 class WorkspaceManager:
@@ -52,18 +65,36 @@ class WorkspaceManager:
     # --- V1 Run-centric methods ---
 
     def run_dir(self, run_id: str) -> Path:
-        """Get the runs/{run_id} directory path."""
+        """Get the runs/{run_id} directory path (does not create it)."""
+        _validate_run_id(run_id)
         return self.runs / run_id
 
     def create_run_directory(self, run_id: str) -> Path:
-        """Create and return the runs/{run_id} directory."""
-        path = self.run_dir(run_id)
+        """Create and return the runs/{run_id} directory. Only scan should call this."""
+        _validate_run_id(run_id)
+        path = self.runs / run_id
         path.mkdir(parents=True, exist_ok=True)
         return path
 
     def write_artifact(self, run_id: str, filename: str, content: str) -> Path:
-        """Write content to an artifact file in the run directory."""
-        run_dir = self.create_run_directory(run_id)
+        """Write content to an artifact file in an *existing* run directory.
+
+        Raises FileNotFoundError if the run does not exist yet — callers must
+        call create_run_directory (i.e. scan) before writing any artifact.
+        """
+        self.ensure_run_exists(run_id)
+        run_dir = self.run_dir(run_id)
+        path = run_dir / filename
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def _write_artifact_unchecked(self, run_id: str, filename: str, content: str) -> Path:
+        """Write to an artifact path without requiring the run to pre-exist.
+
+        Used exclusively by write_run_json during the initial creation sequence
+        inside scan (after create_run_directory but before the first run.json exists).
+        """
+        run_dir = self.run_dir(run_id)
         path = run_dir / filename
         path.write_text(content, encoding="utf-8")
         return path
@@ -76,8 +107,12 @@ class WorkspaceManager:
         return path.read_text(encoding="utf-8")
 
     def write_run_json(self, run_id: str, metadata: RunMetadata) -> Path:
-        """Write the run.json metadata file."""
-        return self.write_artifact(run_id, "run.json", metadata.model_dump_json(indent=2))
+        """Write the run.json metadata file.
+
+        Uses the unchecked writer so it can be called both during initial
+        creation (scan) and during subsequent status updates.
+        """
+        return self._write_artifact_unchecked(run_id, "run.json", metadata.model_dump_json(indent=2))
 
     def read_run_json(self, run_id: str) -> RunMetadata:
         """Read and validate the run.json metadata file."""

@@ -49,10 +49,17 @@ def log_event(
 
     if run_dir is not None:
         run_dir = Path(run_dir)
-        run_dir.mkdir(parents=True, exist_ok=True)
-        run_events_path = run_dir / "events.jsonl"
-        with open(run_events_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, default=str) + "\n")
+        if run_dir.exists():
+            run_events_path = run_dir / "events.jsonl"
+            with open(run_events_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, default=str) + "\n")
+        else:
+            import sys
+            print(
+                f"[log_event] WARNING: run_dir {run_dir} does not exist. "
+                "Event will only be written to pipeline.jsonl.",
+                file=sys.stderr,
+            )
 
 
 def log_failure(
