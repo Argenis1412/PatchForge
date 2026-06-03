@@ -24,6 +24,7 @@ runner = CliRunner()
 # helpers
 # ---------------------------------------------------------------------------
 
+
 def _init_git_repo(path: Path) -> None:
     subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True)
     subprocess.run(
@@ -31,7 +32,9 @@ def _init_git_repo(path: Path) -> None:
     )
     subprocess.run(
         ["git", "config", "user.email", "test@example.com"],
-        cwd=path, check=True, capture_output=True,
+        cwd=path,
+        check=True,
+        capture_output=True,
     )
     readme = path / "README.md"
     readme.write_text("Hello\n")
@@ -54,6 +57,7 @@ def _make_orchestrator_json(path: Path, overrides: dict) -> None:
 # ---------------------------------------------------------------------------
 # detect_test_suite
 # ---------------------------------------------------------------------------
+
 
 class TestDetectTestSuite:
     def test_tests_directory(self, tmp_path: Path):
@@ -97,6 +101,7 @@ class TestDetectTestSuite:
 # check_command_available
 # ---------------------------------------------------------------------------
 
+
 class TestCheckCommandAvailable:
     def test_known_command(self):
         found, version = check_command_available("python")
@@ -112,6 +117,7 @@ class TestCheckCommandAvailable:
 # ---------------------------------------------------------------------------
 # check_git
 # ---------------------------------------------------------------------------
+
 
 class TestCheckGit:
     def test_pass(self, tmp_path: Path):
@@ -136,6 +142,7 @@ class TestCheckGit:
 # ---------------------------------------------------------------------------
 # check_workspace
 # ---------------------------------------------------------------------------
+
 
 class TestCheckWorkspace:
     def test_pass(self, tmp_path: Path):
@@ -162,6 +169,7 @@ class TestCheckWorkspace:
 # ---------------------------------------------------------------------------
 # check_pyproject
 # ---------------------------------------------------------------------------
+
 
 class TestCheckPyproject:
     def test_pass(self, tmp_path: Path):
@@ -193,6 +201,7 @@ class TestCheckPyproject:
 # check_ruff
 # ---------------------------------------------------------------------------
 
+
 class TestCheckRuff:
     def test_pass_when_ruff_available(self, monkeypatch):
         def fake_check(cmd):
@@ -217,6 +226,7 @@ class TestCheckRuff:
             return (False, "")
 
         from unittest.mock import patch
+
         with patch("orchestrator.doctor.check_command_available", fake_check):
             result = check_ruff(tmp_path)
         assert result.status == CheckStatus.PASS
@@ -226,6 +236,7 @@ class TestCheckRuff:
 # ---------------------------------------------------------------------------
 # check_pytest
 # ---------------------------------------------------------------------------
+
 
 class TestCheckPytest:
     def _mock_pytest_ok(self, monkeypatch, cmd):
@@ -272,6 +283,7 @@ class TestCheckPytest:
 # check (aggregator)
 # ---------------------------------------------------------------------------
 
+
 class TestCheck:
     def test_v1_supported_true_when_all_pass(self, tmp_path: Path):
         repo = tmp_path / "repo"
@@ -282,13 +294,16 @@ class TestCheck:
         subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
         subprocess.run(
             ["git", "commit", "-m", "add pyproject and tests"],
-            cwd=repo, check=True, capture_output=True,
+            cwd=repo,
+            check=True,
+            capture_output=True,
         )
 
         def fake_check(cmd):
             return (True, "ok")
 
         from unittest.mock import patch
+
         with patch("orchestrator.doctor.check_command_available", fake_check):
             result = check(repo)
 
@@ -307,6 +322,7 @@ class TestCheck:
             return (True, "ok")
 
         from unittest.mock import patch
+
         with patch("orchestrator.doctor.check_command_available", fake_check):
             result = check(repo)
 
@@ -327,6 +343,7 @@ class TestCheck:
             return (True, "ok")
 
         from unittest.mock import patch
+
         with patch("orchestrator.doctor.check_command_available", fake_check):
             result = check(repo)
 
@@ -349,6 +366,7 @@ class TestCheck:
             return (True, "ok")
 
         from unittest.mock import patch
+
         with patch("orchestrator.doctor.check_command_available", fake_check):
             check(repo)
 
@@ -359,6 +377,7 @@ class TestCheck:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 class TestDoctorCLI:
     def test_json_output(self, tmp_path: Path):
@@ -372,6 +391,7 @@ class TestDoctorCLI:
             return (True, "ok")
 
         from unittest.mock import patch
+
         with patch("orchestrator.doctor.check_command_available", fake_check):
             result = runner.invoke(app, ["doctor", str(repo), "--json"])
 
@@ -391,6 +411,7 @@ class TestDoctorCLI:
             return (True, "ok")
 
         from unittest.mock import patch
+
         with patch("orchestrator.doctor.check_command_available", fake_check):
             result = runner.invoke(app, ["doctor", str(repo)])
 

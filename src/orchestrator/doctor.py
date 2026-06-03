@@ -79,8 +79,7 @@ def check_git(path: Path) -> tuple[CheckResult, Optional[str], Optional[str], Op
                 message="Not a Git repository",
                 detail=f"Target path is not inside a Git repository: {path}",
                 fix_hint=(
-                    "Run 'git init' to initialize a repository, "
-                    "or point to a Git-tracked directory"
+                    "Run 'git init' to initialize a repository, or point to a Git-tracked directory"
                 ),
             ),
             None,
@@ -162,8 +161,7 @@ def check_workspace(path: Path) -> tuple[CheckResult, Optional[str]]:
                 message="Workspace path is inside the target repository",
                 detail=str(exc),
                 fix_hint=(
-                    "Set workspace_path in orchestrator.json "
-                    "to a directory outside the repository"
+                    "Set workspace_path in orchestrator.json to a directory outside the repository"
                 ),
             ),
             None,
@@ -201,7 +199,7 @@ def check_pyproject(path: Path) -> tuple[CheckResult, Optional[dict]]:
         )
 
     build_system = data.get("build-system")
-    if build_system is None:
+    if not isinstance(build_system, dict):
         return (
             CheckResult(
                 name="pyproject_toml",
@@ -254,10 +252,7 @@ def check_ruff(path: Path) -> CheckResult:
         status=CheckStatus.FAIL,
         message="Ruff is not available",
         detail="'ruff --version' did not return successfully",
-        fix_hint=(
-            "Install ruff with: pip install ruff, "
-            "or set lint_command in orchestrator.json"
-        ),
+        fix_hint=("Install ruff with: pip install ruff, or set lint_command in orchestrator.json"),
     )
 
 
@@ -296,8 +291,7 @@ def check_pytest(path: Path, pyproject: Optional[dict] = None) -> CheckResult:
             message="Pytest is not available and no test_command is configured",
             detail="'pytest --version' did not return successfully",
             fix_hint=(
-                "Install pytest with: pip install pytest, "
-                "or set test_command in orchestrator.json"
+                "Install pytest with: pip install pytest, or set test_command in orchestrator.json"
             ),
         )
 
@@ -360,11 +354,7 @@ def check(path: str | Path) -> DoctorResult:
     checks.append(check_ruff(target))
     checks.append(check_pytest(target, pyproject_data))
 
-    v1_supported = all(
-        check.status != CheckStatus.FAIL
-        for check in checks
-        if check.required
-    )
+    v1_supported = all(check.status != CheckStatus.FAIL for check in checks if check.required)
 
     return DoctorResult(
         target_path=str(target),
