@@ -49,6 +49,14 @@ def detect_test_suite(path: Path, pyproject: Optional[dict] = None) -> bool:
     return False
 
 
+def _detect_typescript(path: Path) -> bool:
+    """Return True if any .ts or .tsx files exist under *path*."""
+    for pattern in ("*.ts", "*.tsx"):
+        if any(path.rglob(pattern)):
+            return True
+    return False
+
+
 def _read_orchestrator_config(path: Path) -> dict:
     config_file = path / "orchestrator.json"
     if not config_file.exists():
@@ -325,13 +333,15 @@ def check_api_keys() -> list[CheckResult]:
     results = []
     for name, env_var, provider in keys:
         if not os.environ.get(env_var):
-            results.append(CheckResult(
-                name=name,
-                status=CheckStatus.WARN,
-                message=f"{env_var} not configured ({provider})",
-                fix_hint=f"Set {env_var} in your environment before running scan",
-                required=False,
-            ))
+            results.append(
+                CheckResult(
+                    name=name,
+                    status=CheckStatus.WARN,
+                    message=f"{env_var} not configured ({provider})",
+                    fix_hint=f"Set {env_var} in your environment before running scan",
+                    required=False,
+                )
+            )
     return results
 
 
@@ -374,6 +384,17 @@ def check(path: str | Path) -> DoctorResult:
     checks.append(check_ruff(target))
     checks.append(check_pytest(target, pyproject_data))
     checks.extend(check_api_keys())
+
+    if _detect_typescript(target):
+        checks.append(
+            CheckResult(
+                name="typescript",
+                status=CheckStatus.WARN,
+                message="TypeScript files detected — V1 only supports Python",
+                fix_hint="TypeScript support is planned for a future phase",
+                required=False,
+            )
+        )
 
     v1_supported = all(check.status != CheckStatus.FAIL for check in checks if check.required)
 
