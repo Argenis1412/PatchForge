@@ -23,6 +23,7 @@ def log_event(
     event: str = "",
     data: dict[str, Any] | None = None,
     logs_dir: Path | None = None,
+    run_dir: Path | None = None,
 ) -> None:
     if logs_dir is None:
         logs_dir = Path("logs")
@@ -46,6 +47,13 @@ def log_event(
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, default=str) + "\n")
 
+    if run_dir is not None:
+        run_dir = Path(run_dir)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        run_events_path = run_dir / "events.jsonl"
+        with open(run_events_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, default=str) + "\n")
+
 
 def log_failure(
     trace_id: str,
@@ -59,6 +67,7 @@ def log_failure(
     duration_ms: int | None = None,
     data: dict[str, Any] | None = None,
     logs_dir: Path | None = None,
+    run_dir: Path | None = None,
 ) -> None:
     """Write a normalized failure event to pipeline.jsonl."""
     if data is None:
@@ -85,4 +94,5 @@ def log_failure(
         event="failure",
         data=merged_data,
         logs_dir=logs_dir,
+        run_dir=run_dir,
     )
