@@ -6,6 +6,7 @@ from typer.testing import CliRunner
 
 from orchestrator.doctor import (
     check,
+    check_api_keys,
     check_command_available,
     check_git,
     check_pyproject,
@@ -277,6 +278,77 @@ class TestCheckPytest:
         monkeypatch.setattr("orchestrator.doctor.check_command_available", lambda cmd: (False, ""))
         result = check_pytest(tmp_path)
         assert result.status == CheckStatus.FAIL
+
+
+# ---------------------------------------------------------------------------
+# check_api_keys
+# ---------------------------------------------------------------------------
+
+
+class TestCheckApiKeys:
+    def test_all_missing(self, monkeypatch):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        monkeypatch.delenv("GROQ_API_KEY", raising=False)
+        results = check_api_keys()
+        assert len(results) == 3
+        for r in results:
+            assert r.status == CheckStatus.WARN
+            assert r.required is False
+        names = {r.name for r in results}
+        assert names == {"anthropic_api_key", "google_api_key", "groq_api_key"}
+        assert all("not configured" in r.message for r in results)
+        assert all("Set" in r.fix_hint for r in results)
+
+    def test_all_present(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-xxx")
+        monkeypatch.setenv("GOOGLE_API_KEY", "AIza-xxx")
+        monkeypatch.setenv("GROQ_API_KEY", "gsk-xxx")
+        results = check_api_keys()
+        assert len(results) == 0
+
+    def test_partial_presence(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-xxx")
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        monkeypatch.setenv("GROQ_API_KEY", "gsk-xxx")
+        results = check_api_keys()
+        assert len(results) == 1
+        assert results[0].name == "google_api_key"
+        assert results[0].status == CheckStatus.WARN
+        assert results[0].required is False
+
+    def test_v1_supported_unaffected(self, tmp_path, monkeypatch):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        _make_pyproject(repo)
+        (repo / "tests").mkdir()
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "add pyproject and tests"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+        def fake_check(cmd):
+            return (True, "ok")
+
+        from unittest.mock import patch
+        with patch("orchestrator.doctor.check_command_available", fake_check):
+            result = check(repo)
+
+        assert result.v1_supported is True
+        api_names = {"anthropic_api_key", "google_api_key", "groq_api_key"}
+        api_warns = [c for c in result.checks if c.name in api_names]
+        assert len(api_warns) == 3
+        for w in api_warns:
+            assert w.status == CheckStatus.WARN
+            assert w.required is False
 
 
 # ---------------------------------------------------------------------------
