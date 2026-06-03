@@ -1,5 +1,5 @@
-import sys
 import json
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -33,6 +33,59 @@ def _load_target_config(
     except ValueError as exc:
         console.print(f"[bold red]{exc}[/bold red]")
         raise typer.Exit(code=1) from exc
+
+
+@app.command()
+def doctor(
+    path: Path = typer.Argument(..., help="Target project path"),
+    json_output: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """Validate V1 repository readiness without modifying the target."""
+    from orchestrator.doctor import check as doctor_check
+    from orchestrator.schemas.doctor import CheckStatus
+
+    result = doctor_check(path)
+
+    if json_output:
+        print(result.model_dump_json(indent=2))
+    else:
+        for check in result.checks:
+            if check.status == CheckStatus.PASS:
+                status_str = "[green]PASS[/green]"
+            elif check.status == CheckStatus.FAIL:
+                status_str = "[red]FAIL[/red]"
+            else:
+                status_str = "[yellow]WARN[/yellow]"
+            console.print(f"  {status_str}  {check.message}")
+            if check.detail:
+                console.print(f"         {check.detail}")
+            if check.fix_hint:
+                console.print(f"         [dim]Hint: {check.fix_hint}[/dim]")
+
+        is_dirty_str = "yes" if result.is_dirty else "no"
+        console.print()
+        if result.v1_supported:
+            console.print(
+                Panel(
+                    f"[bold green]V1 supported[/bold green]\n"
+                    f"  Target: [yellow]{result.target_path}[/yellow]\n"
+                    f"  Branch: [cyan]{result.git_branch or 'N/A'}[/cyan]\n"
+                    f"  Dirty:  [cyan]{is_dirty_str}[/cyan]",
+                    expand=False,
+                )
+            )
+        else:
+            console.print(
+                Panel(
+                    f"[bold red]V1 not supported[/bold red]\n"
+                    f"  Target: [yellow]{result.target_path}[/yellow]\n"
+                    f"  Some required checks failed. See above for details.",
+                    expand=False,
+                )
+            )
+
+    if not result.v1_supported:
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -112,7 +165,7 @@ def scan(
     )
 
     # Validate Git repository first
-    from orchestrator.git import repository_state, is_git_repo
+    from orchestrator.git import is_git_repo, repository_state
     try:
         git_state = repository_state(path)
     except ValueError as exc:
@@ -129,9 +182,9 @@ def scan(
     workspace_mgr.setup()
 
     # Generate V1 Run ID and directory
-    from orchestrator.schemas.artifacts import generate_run_id, RunMetadata
     from datetime import datetime, timezone
-    import json
+
+    from orchestrator.schemas.artifacts import RunMetadata, generate_run_id
 
     run_id = generate_run_id()
     run_dir = workspace_mgr.create_run_directory(run_id)
@@ -271,11 +324,12 @@ def plan(
         )
     )
 
-    from orchestrator.schemas.config import default_workspace_path
-    from orchestrator.schemas.scout_output import ScoutOutput
+    from datetime import datetime, timezone
+
     from orchestrator.agents.architect import run as run_architect
     from orchestrator.observability.events import log_event, log_failure
-    from datetime import datetime, timezone
+    from orchestrator.schemas.config import default_workspace_path
+    from orchestrator.schemas.scout_output import ScoutOutput
 
     # 1. Resolve workspace path and ensure run exists
     if workspace is not None:
@@ -397,14 +451,19 @@ def preview(
         )
     )
 
-    from orchestrator.schemas.config import default_workspace_path
-    from orchestrator.schemas.architect_output import ArchitectOutput
-    from orchestrator.schemas.validator_output import ValidatorOutput
-    from orchestrator.agents.executor import run as run_executor
-    from orchestrator.validation_workspace import create_validation_workspace, apply_patch_to_copy, run_validation_in_copy
-    from orchestrator.observability.events import log_event, log_failure
-    from datetime import datetime, timezone
     import hashlib
+    from datetime import datetime, timezone
+
+    from orchestrator.agents.executor import run as run_executor
+    from orchestrator.observability.events import log_event, log_failure
+    from orchestrator.schemas.architect_output import ArchitectOutput
+    from orchestrator.schemas.config import default_workspace_path
+    from orchestrator.schemas.validator_output import ValidatorOutput
+    from orchestrator.validation_workspace import (
+        apply_patch_to_copy,
+        create_validation_workspace,
+        run_validation_in_copy,
+    )
 
     # 1. Resolve workspace path and ensure run exists
     if workspace is not None:
@@ -617,19 +676,19 @@ def apply(
         )
     )
 
-    from orchestrator.schemas.config import default_workspace_path
+    from datetime import datetime, timezone
+
+    from orchestrator.agents.validator import run as run_validator
     from orchestrator.git import (
-        repository_state,
-        current_head,
-        is_working_tree_clean,
+        apply_patch,
         check_patch,
         create_controlled_branch,
-        apply_patch,
+        current_head,
+        repository_state,
         revert_apply,
     )
-    from orchestrator.agents.validator import run as run_validator
     from orchestrator.observability.events import log_event, log_failure
-    from datetime import datetime, timezone
+    from orchestrator.schemas.config import default_workspace_path
 
     # 1. Resolve workspace path and ensure run exists
     if workspace is not None:
