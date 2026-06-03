@@ -340,6 +340,7 @@ class TestCheckApiKeys:
             return (True, "ok")
 
         from unittest.mock import patch
+
         with patch("orchestrator.doctor.check_command_available", fake_check):
             result = check(repo)
 
