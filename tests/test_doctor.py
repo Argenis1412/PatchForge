@@ -5,6 +5,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from orchestrator.doctor import (
+    _detect_typescript,
     check,
     check_api_keys,
     check_command_available,
@@ -349,6 +350,127 @@ class TestCheckApiKeys:
         for w in api_warns:
             assert w.status == CheckStatus.WARN
             assert w.required is False
+
+
+# ---------------------------------------------------------------------------
+# _detect_typescript
+# ---------------------------------------------------------------------------
+
+
+class TestDetectTypescriptDirect:
+    def test_detects_ts_files(self, tmp_path: Path):
+        (tmp_path / "app.ts").write_text("const x = 1")
+        assert _detect_typescript(tmp_path) is True
+
+    def test_detects_tsx_files(self, tmp_path: Path):
+        (tmp_path / "component.tsx").write_text("const x = 1")
+        assert _detect_typescript(tmp_path) is True
+
+    def test_detects_nested_ts_files(self, tmp_path: Path):
+        nested = tmp_path / "src" / "lib"
+        nested.mkdir(parents=True)
+        (nested / "util.ts").write_text("const x = 1")
+        assert _detect_typescript(tmp_path) is True
+
+    def test_no_ts_files(self, tmp_path: Path):
+        (tmp_path / "app.py").write_text("x = 1")
+        assert _detect_typescript(tmp_path) is False
+
+    def test_empty_directory(self, tmp_path: Path):
+        assert _detect_typescript(tmp_path) is False
+
+
+# ---------------------------------------------------------------------------
+# TypeScript — check() integration
+# ---------------------------------------------------------------------------
+
+
+class TestDetectTypescript:
+    def test_typescript_warn_added_when_ts_files_exist(self, tmp_path: Path, monkeypatch):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        _make_pyproject(repo)
+        (repo / "tests").mkdir()
+        (repo / "src").mkdir()
+        (repo / "src" / "app.ts").write_text("const x = 1")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "add ts files"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+
+        def fake_check(cmd):
+            return (True, "ok")
+
+        from unittest.mock import patch
+
+        with patch("orchestrator.doctor.check_command_available", fake_check):
+            result = check(repo)
+
+        ts_check = next((c for c in result.checks if c.name == "typescript"), None)
+        assert ts_check is not None
+        assert ts_check.status == CheckStatus.WARN
+        assert ts_check.required is False
+        assert ts_check.message == "TypeScript files detected — V1 only supports Python"
+        assert ts_check.fix_hint == "TypeScript support is planned for a future phase"
+
+    def test_typescript_no_warn_when_no_ts_files(self, tmp_path: Path, monkeypatch):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        _make_pyproject(repo)
+        (repo / "tests").mkdir()
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "add files"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+
+        def fake_check(cmd):
+            return (True, "ok")
+
+        from unittest.mock import patch
+
+        with patch("orchestrator.doctor.check_command_available", fake_check):
+            result = check(repo)
+
+        ts_check = next((c for c in result.checks if c.name == "typescript"), None)
+        assert ts_check is None
+
+    def test_v1_supported_unaffected_by_typescript_warn(self, tmp_path: Path, monkeypatch):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        _make_pyproject(repo)
+        (repo / "tests").mkdir()
+        (repo / "src").mkdir()
+        (repo / "src" / "app.ts").write_text("const x = 1")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "add ts files"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+
+        def fake_check(cmd):
+            return (True, "ok")
+
+        from unittest.mock import patch
+
+        with patch("orchestrator.doctor.check_command_available", fake_check):
+            result = check(repo)
+
+        assert result.v1_supported is True
+        ts_check = next((c for c in result.checks if c.name == "typescript"), None)
+        assert ts_check is not None
+        assert ts_check.status == CheckStatus.WARN
+        assert ts_check.required is False
 
 
 # ---------------------------------------------------------------------------
