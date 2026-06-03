@@ -113,14 +113,14 @@ def call_claude(
 
 ARCHITECT_PROMPT = """
 You are the Architect Agent. Your job is to analyze the reconnaissance data provided by the Scout Agent.
-Dado este diagnóstico del Scout, tu trabajo es:
-1. Validar los findings — detecta falsos positivos
-2. Priorizar por impacto real vs esfuerzo
-3. Detectar riesgos sistémicos que el Scout no vio
-4. Diseñar orden de implementación seguro
-5. Identificar qué bloquea Phase 2 del Engineering Playbook
+Given this Scout diagnosis, your job is to:
+1. Validate findings — detect false positives
+2. Prioritize by real impact vs effort
+3. Detect systemic risks the Scout missed
+4. Design a safe implementation order
+5. Identify what blocks Phase 2 of the Engineering Playbook
 
-No implementes nada.
+Do not implement anything.
 Output: ONLY valid JSON matching this exact schema. No explanation. No markdown:
 {{
   "validated_findings": ["string"],
@@ -141,7 +141,7 @@ Output: ONLY valid JSON matching this exact schema. No explanation. No markdown:
   "blockers": ["string"]
 }}
 
-[OUTPUT DEL SCOUT]
+[SCOUT OUTPUT]
 {scout_data}
 """
 

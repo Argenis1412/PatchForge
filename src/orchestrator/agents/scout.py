@@ -21,12 +21,12 @@ COST_PER_1M_OUTPUT = 0.30
 
 
 def read_file_tree(root: Path, ignore_dirs: list[str], extensions: list[str]) -> str:
-    """Pasada 1: solo lista de rutas. Costo mínimo."""
+    """Pass 1: path listing only. Minimum cost."""
     lines = []
     ignore_set = set(ignore_dirs)
     ext_set = set(extensions)
     for dirpath, dirnames, filenames in os.walk(root):
-        # Evitar entrar a carpetas ignoradas
+        # Avoid entering ignored directories
         dirnames[:] = [d for d in dirnames if d not in ignore_set]
 
         for fname in filenames:
@@ -37,7 +37,7 @@ def read_file_tree(root: Path, ignore_dirs: list[str], extensions: list[str]) ->
 
 
 def read_selected_files(root: Path, selected: list[str], max_lines: int = 40) -> str:
-    """Pasada 2: lee solo los archivos pedidos por el modelo."""
+    """Pass 2: read only the files requested by the model."""
     snapshot = []
     for rel in selected:
         file = root / rel
@@ -61,7 +61,7 @@ def call_gemini(
     stage: str | None = None,
     span_id: str | None = None,
 ) -> tuple[str, dict, float]:
-    """Wrapper con retry y logging."""
+    """Wrapper with retry and logging."""
     client = get_gemini_client()
     for attempt in range(2):
         call_started = time.monotonic()
@@ -211,7 +211,7 @@ def run(
     logs_dir = config.workspace_path / "logs"
     print(f"[Scout] scanning {root} ...")
 
-    # ── Pasada 1: árbol → selección de archivos
+    # ── Pass 1: tree → file selection
     tree = read_file_tree(root, config.ignore_dirs, config.extensions)
     print(f"[Scout] {len(tree.splitlines())} files found. Asking Gemini to select...")
 
@@ -244,7 +244,7 @@ def run(
         raise
     print(f"[Scout] Selected {len(selected)} files: {selected}")
 
-    # ── Pasada 2: contenido → diagnóstico JSON
+    # ── Pass 2: content → JSON diagnosis
     contents = read_selected_files(root, selected)
     print("[Scout] Reading selected files. Running analysis...")
 
@@ -262,7 +262,7 @@ def run(
     print(f"[Scout] Pass 2 done | tokens: {tokens2} | cost: ${cost2:.5f}")
     print(f"[Scout] Total cost: ${total_cost:.5f}")
 
-    # ── Validar schema pass 2
+    # ── Validate schema pass 2
     try:
         data = json.loads(raw2)
     except json.JSONDecodeError as e:
@@ -305,7 +305,7 @@ def run(
     return output, meta
 
 
-# ── entrypoint ─────────────────────────────────────────────────────────────
+# ── entry point ────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     target = sys.argv[1] if len(sys.argv) > 1 else "targets/loja_app"

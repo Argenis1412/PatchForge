@@ -1,20 +1,20 @@
 """
 agents/validator.py
 
-Validator — cuarto agente del pipeline.
+Validator — fourth agent in the pipeline.
 
-Responsabilidades:
-  1. Correr herramientas reales: ruff, pytest, tsc --noEmit
-  2. Capturar return_code, stdout, stderr por tool
-  3. Si hay fallos: llamar Gemini Flash para resumir stderr (NO para ejecutar nada)
-  4. Emitir ValidatorOutput con overall_passed y log completo
+Responsibilities:
+  1. Run real tools: ruff, pytest, tsc --noEmit
+  2. Capture return_code, stdout, stderr per tool
+  3. If failures: call Gemini Flash to summarize stderr (NOT to execute anything)
+  4. Emit ValidatorOutput with overall_passed and complete log
 
-Reglas del lab:
-  - LLM solo resume stderr — nunca ejecuta herramientas
-  - Gemini Flash, no Claude — resumir no requiere razonamiento profundo
-  - Logging desde el día 1: tokens, costo, latencia
-  - Retry policy: si Gemini falla el summary, se loguea el error y se continúa
-    (el summary es observabilidad, no bloquea el resultado)
+Lab rules:
+  - LLM only summarizes stderr — never runs tools
+  - Gemini Flash, not Claude — summarizing does not require deep reasoning
+  - Logging from day 1: tokens, cost, latency
+  - Retry policy: if Gemini fails the summary, the error is logged and execution continues
+    (the summary is observability, does not block the result)
 """
 
 from __future__ import annotations
@@ -37,15 +37,15 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
-# Configuración
+# Configuration
 # ---------------------------------------------------------------------------
 
 MODEL_GEMINI = "gemini-2.5-flash"
 
-# Costo Gemini Flash en free tier
+# Gemini Flash cost on free tier
 COST_PER_SUMMARY = 0.0
 
-SUBPROCESS_TIMEOUT = 120  # segundos — pytest puede ser lento
+SUBPROCESS_TIMEOUT = 120  # seconds — pytest can be slow
 
 # ---------------------------------------------------------------------------
 # Logger (lazy)
@@ -68,8 +68,8 @@ def _get_logger(logs_dir: Path | None = None):
 
 def _find_frontend_dir(root: Path) -> Path | None:
     """
-    Busca el directorio con package.json más cercano a la raíz.
-    Excluye node_modules para no fallar en proyectos con deps instaladas.
+    Find the directory with package.json closest to the root.
+    Excludes node_modules to avoid failing in projects with installed deps.
     """
     for path in root.rglob("package.json"):
         if "node_modules" not in path.parts:
@@ -89,10 +89,10 @@ def _run(
     run_id: str,
 ) -> ToolResult:
     """
-    Ejecuta un comando externo con subprocess y captura stdout/stderr.
+    Run an external command with subprocess and capture stdout/stderr.
     return_code != 0 → passed = False.
     """
-    _get_logger().info("[%s] Ejecutando %s: %s (cwd=%s)", run_id, tool_name, " ".join(cmd), cwd)
+    _get_logger().info("[%s] Running %s: %s (cwd=%s)", run_id, tool_name, " ".join(cmd), cwd)
     t0 = time.perf_counter()
 
     try:
@@ -104,7 +104,7 @@ def _run(
             timeout=SUBPROCESS_TIMEOUT,
         )
     except FileNotFoundError:
-        msg = f"Comando no encontrado: {cmd[0]} — ¿está instalado y en PATH?"
+        msg = f"Command not found: {cmd[0]} — is it installed and in PATH?"
         _get_logger().error("[%s] %s", run_id, msg)
         return ToolResult(
             tool=tool_name,  # type: ignore[arg-type]
@@ -113,7 +113,7 @@ def _run(
             stderr=msg,
         )
     except subprocess.TimeoutExpired:
-        msg = f"Timeout ({SUBPROCESS_TIMEOUT}s) ejecutando {cmd[0]}"
+        msg = f"Timeout ({SUBPROCESS_TIMEOUT}s) running {cmd[0]}"
         _get_logger().error("[%s] %s", run_id, msg)
         return ToolResult(
             tool=tool_name,  # type: ignore[arg-type]
@@ -244,7 +244,7 @@ def run_tsc(
             overlay_root = _create_overlay(project_root, staging_dir, IGNORE_DIRS, Path(tmpdir))
             frontend = _find_frontend_dir(overlay_root) or _find_frontend_dir(project_root)
             if frontend is None:
-                _get_logger().warning("[%s] frontend/ no encontrado — skip tsc", run_id)
+                _get_logger().warning("[%s] frontend/ not found — skip tsc", run_id)
                 return ToolResult(
                     tool="tsc",
                     passed=True,
@@ -255,7 +255,7 @@ def run_tsc(
             return _run(cmd, frontend, "tsc", run_id)
     frontend = _find_frontend_dir(project_root)
     if frontend is None:
-        _get_logger().warning("[%s] frontend/ no encontrado — skip tsc", run_id)
+        _get_logger().warning("[%s] frontend/ not found — skip tsc", run_id)
         return ToolResult(
             tool="tsc",
             passed=True,
@@ -267,18 +267,18 @@ def run_tsc(
 
 
 # ---------------------------------------------------------------------------
-# Gemini Flash — solo para error summary
+# Gemini Flash — only for error summary
 # ---------------------------------------------------------------------------
 
 
 def _summarize_errors(failed_tools: list[ToolResult], run_id: str) -> str:
     """
-    Llama a Gemini Flash para resumir los stderr de las tools que fallaron.
-    Si Gemini falla, devuelve un fallback con el stderr crudo — nunca bloquea.
+    Call Gemini Flash to summarize the stderr from tools that failed.
+    If Gemini fails, returns a fallback with raw stderr — never blocks.
     """
     if not os.getenv("GOOGLE_API_KEY"):
-        _get_logger().warning("[%s] GOOGLE_API_KEY no configurada — skip summary", run_id)
-        return "[summary no disponible — GOOGLE_API_KEY ausente]"
+        _get_logger().warning("[%s] GOOGLE_API_KEY not set — skip summary", run_id)
+        return "[summary not available — GOOGLE_API_KEY missing]"
 
     stderr_sections = "\n\n".join(
         f"### {r.tool.upper()} (rc={r.return_code})\n{(r.stderr or r.stdout)[:3000]}"
@@ -314,7 +314,7 @@ ERRORS
         elapsed = time.perf_counter() - t0
         summary = response.text.strip()
 
-        # Tokens (Gemini devuelve usage_metadata)
+        # Tokens (Gemini returns usage_metadata)
         usage = getattr(response, "usage_metadata", None)
         input_tok = getattr(usage, "prompt_token_count", 0) if usage else 0
         output_tok = getattr(usage, "candidates_token_count", 0) if usage else 0
@@ -329,13 +329,13 @@ ERRORS
         return summary
 
     except Exception as exc:  # noqa: BLE001
-        _get_logger().error("[%s] Gemini summary falló: %s — usando stderr crudo", run_id, exc)
-        # Fallback: devolver stderr truncado, no bloquear el pipeline
+        _get_logger().error("[%s] Gemini summary failed: %s — using raw stderr", run_id, exc)
+        # Fallback: return truncated stderr, do not block the pipeline
         return "\n".join(f"[{r.tool}] {(r.stderr or r.stdout)[:500]}" for r in failed_tools)
 
 
 # ---------------------------------------------------------------------------
-# Entrypoint público
+# Public entry point
 # ---------------------------------------------------------------------------
 
 
@@ -344,9 +344,9 @@ def run(
     staging_dir: Path | None = None,
 ) -> tuple[ValidatorOutput, dict]:
     """
-    Punto de entrada del Validator.
-    Corre ruff → pytest → tsc, luego Gemini resume si hay fallos.
-    Si staging_dir se provee, las tools se ejecutan contra los cambios staged.
+    Validator entry point.
+    Runs ruff → pytest → tsc, then Gemini summarizes if there are failures.
+    If staging_dir is provided, tools run against the staged changes.
     """
     from orchestrator.schemas.config import TargetConfig
 
@@ -368,12 +368,12 @@ def run(
     if config.capabilities.effective_supports_tests:
         results.append(run_pytest(run_id, project_root, config.test_command, staging_dir))
     else:
-        _get_logger().info("[%s] Tests skip (no framework detectado o deshabilitado)", run_id)
+        _get_logger().info("[%s] Tests skip (no framework detected or disabled)", run_id)
 
     if config.capabilities.effective_supports_typecheck:
         results.append(run_tsc(run_id, project_root, config.typecheck_command, staging_dir))
     else:
-        _get_logger().info("[%s] Typecheck skip (no detectado o deshabilitado)", run_id)
+        _get_logger().info("[%s] Typecheck skip (not detected or disabled)", run_id)
 
     failed = [r for r in results if not r.passed]
     overall_passed = len(failed) == 0
@@ -384,15 +384,15 @@ def run(
     tokens_input = 0
     tokens_output = 0
 
-    # Gemini solo si hay fallos
+    # Gemini only if there are failures
     if failed:
         model_used = MODEL_GEMINI
 
-        # Generar summary por tool individual
+        # Generate summary per individual tool
         for tool_result in failed:
             tool_result.error_summary = _summarize_errors([tool_result], run_id)
 
-        # Summary global
+        # Global summary
         llm_summary = _summarize_errors(failed, run_id)
 
         # Note: Summary cost is free tier (0.0), but let's track tokens
@@ -408,7 +408,7 @@ def run(
     )
 
     _get_logger().info(
-        "[%s] Finalizado | overall=%s | failed_tools=%s",
+        "[%s] Finished | overall=%s | failed_tools=%s",
         run_id,
         "PASS" if overall_passed else "FAIL",
         [r.tool for r in failed] or "none",
