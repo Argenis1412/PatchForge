@@ -283,3 +283,45 @@ def test_resume_from_executor_reloads_task_count(config, monkeypatch):
     assert result.tasks_applied == 2
     assert result.validator_meta is not None
     assert result.validator_meta.status == "success"
+
+
+def test_failure_artifacts_populated_on_pipeline_abort(config, monkeypatch):
+    from datetime import datetime, timezone
+
+    from orchestrator.schemas.artifacts import RunMetadata
+
+    pipeline = Pipeline(config=config)
+    # Write RunMetadata so the pipeline can populate failure_artifacts
+    run_meta = RunMetadata(
+        run_id=pipeline.run.run_id,
+        target_path=str(pipeline.target_path),
+        workspace_path=str(pipeline.workspace.root),
+        base_commit="abc123",
+        branch="main",
+        status="scanning",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        v1_supported=True,
+        support_reasons=["test"],
+    )
+    pipeline.workspace.create_run_directory(pipeline.run.run_id)
+    pipeline.workspace.write_run_json(pipeline.run.run_id, run_meta)
+
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_scout", MagicMock(return_value=(_scout_output(), _meta()))
+    )
+    # Architect raises blockers → triggers PipelineAbort
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_architect",
+        MagicMock(return_value=(_architect_output(blockers=["blocker"]), _meta())),
+    )
+
+    result = pipeline.execute(dry_run=False)
+    assert result.status == "failed"
+
+    # Verify failure_artifacts was populated on RunMetadata
+    updated_meta = pipeline.workspace.read_run_json(pipeline.run.run_id)
+    assert updated_meta.failure_artifacts is not None
+    assert len(updated_meta.failure_artifacts) > 0
+    assert "architect_failure.json" in updated_meta.failure_artifacts
+    assert updated_meta.status == "failed"

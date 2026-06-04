@@ -9,6 +9,7 @@ from orchestrator.git import (
     create_controlled_branch,
     current_branch,
     current_head,
+    force_reset_apply,
     is_git_repo,
     is_working_tree_clean,
     repository_state,
@@ -20,8 +21,15 @@ from orchestrator.git import (
 
 def _init_git_repo(path: Path) -> None:
     subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.name", "Test User"], cwd=path, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.name", "Test User"], cwd=path, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=path,
+        check=True,
+        capture_output=True,
+    )
     # create initial commit
     test_file = path / "README.md"
     test_file.write_text("Hello\n")
@@ -143,6 +151,62 @@ def test_repository_state(git_repo: Path):
     assert state.is_clean
     assert len(state.head) == 40
     assert state.branch in ("master", "main")
+
+
+def test_force_reset_apply_with_invalid_sha_does_not_clean(git_repo: Path):
+    head_before = current_head(git_repo)
+    (git_repo / "README.md").write_text("Modified\n")
+    (git_repo / "untracked.py").write_text("x = 1\n")
+    assert not is_working_tree_clean(git_repo)
+
+    result = force_reset_apply(git_repo, "deadbeef" * 5)
+
+    assert result.return_code != 0
+    assert (git_repo / "untracked.py").exists()
+    assert (git_repo / "README.md").read_text() == "Modified\n"
+    assert current_head(git_repo) == head_before
+
+
+def test_force_reset_apply_restores_exact_state(git_repo: Path):
+    head_before = current_head(git_repo)
+    # Track original file content
+    original_readme = (git_repo / "README.md").read_text()
+
+    # Modify existing file
+    (git_repo / "README.md").write_text("Modified\n")
+    # Create new file
+    (git_repo / "new_file.py").write_text("print('new')\n")
+    # Delete a file (create one first, then delete it)
+    (git_repo / "to_delete.md").write_text("delete me\n")
+    (git_repo / "to_delete.md").unlink()
+    # Create new directory with file
+    new_dir = git_repo / "new_dir"
+    new_dir.mkdir()
+    (new_dir / "inner.py").write_text("x = 1\n")
+
+    # Verify working tree is dirty
+    assert not is_working_tree_clean(git_repo)
+
+    # Execute force reset
+    result = force_reset_apply(git_repo, head_before)
+
+    # Verify reset succeeded
+    assert result.return_code == 0
+
+    # Verify SHA is unchanged
+    assert current_head(git_repo) == head_before
+
+    # Verify working tree is clean
+    assert is_working_tree_clean(git_repo)
+
+    # Verify original file content is restored
+    assert (git_repo / "README.md").read_text() == original_readme
+
+    # Verify new file was removed by clean -fd
+    assert not (git_repo / "new_file.py").exists()
+
+    # Verify new directory was removed by clean -fd
+    assert not (git_repo / "new_dir").exists()
 
 
 def test_non_git_dir_reported_clearly(tmp_path: Path):

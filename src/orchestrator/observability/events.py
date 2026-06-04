@@ -55,6 +55,7 @@ def log_event(
                 f.write(json.dumps(entry, default=str) + "\n")
         else:
             import sys
+
             print(
                 f"[log_event] WARNING: run_dir {run_dir} does not exist. "
                 "Event will only be written to pipeline.jsonl.",

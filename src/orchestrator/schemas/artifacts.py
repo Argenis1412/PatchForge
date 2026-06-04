@@ -44,3 +44,15 @@ class RunMetadata(BaseModel):
     lifecycle_state: Optional[str] = None
     apply_status: Optional[str] = None
     failure_artifacts: Optional[List[str]] = None
+
+
+class ApplyResult(BaseModel):
+    run_id: str
+    applied_at: datetime
+    branch: str
+    success: bool
+    rolled_back: bool = False
+    error: Optional[str] = None
+    pre_apply_head: Optional[str] = None
+    pre_apply_branch: Optional[str] = None
+    rollback_head: Optional[str] = None

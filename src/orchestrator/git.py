@@ -139,6 +139,33 @@ def apply_patch(repo_root: Path, patch_path: Path) -> GitCommandResult:
         return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {e}")
 
 
+def force_reset_apply(repo_root: Path, target_sha: str) -> GitCommandResult:
+    try:
+        res1 = subprocess.run(
+            ["git", "-C", str(repo_root), "reset", "--hard", target_sha],
+            capture_output=True,
+            text=True,
+        )
+        if res1.returncode != 0:
+            return GitCommandResult(
+                return_code=res1.returncode,
+                stdout=res1.stdout,
+                stderr=res1.stderr,
+            )
+        res2 = subprocess.run(
+            ["git", "-C", str(repo_root), "clean", "-fd"],
+            capture_output=True,
+            text=True,
+        )
+        return GitCommandResult(
+            return_code=res2.returncode,
+            stdout=res1.stdout + res2.stdout,
+            stderr=res1.stderr + res2.stderr,
+        )
+    except FileNotFoundError as e:
+        return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {e}")
+
+
 def revert_apply(repo_root: Path) -> GitCommandResult:
     try:
         res1 = subprocess.run(

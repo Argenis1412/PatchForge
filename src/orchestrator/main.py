@@ -166,6 +166,7 @@ def scan(
 
     # Validate Git repository first
     from orchestrator.git import is_git_repo, repository_state
+
     try:
         git_state = repository_state(path)
     except ValueError as exc:
@@ -219,6 +220,7 @@ def scan(
 
     # Log start event
     from orchestrator.observability.events import log_event
+
     log_event(
         trace_id=run_id,
         run_id=run_id,
@@ -252,6 +254,7 @@ def scan(
         except Exception as exc:
             progress.update(task, completed=100)
             from orchestrator.observability.events import log_failure
+
             log_failure(
                 trace_id=run_id,
                 run_id=run_id,
@@ -299,13 +302,15 @@ def scan(
     run_metadata.updated_at = datetime.now(timezone.utc)
     workspace_mgr.write_run_json(run_id, run_metadata)
 
-    console.print(Panel(
-        f"[bold green]✔ Scout completed successfully![/bold green]\n"
-        f"Run ID: [yellow]{run_id}[/yellow]\n"
-        f"Discovered [bold cyan]{len(output.hotspots)}[/bold cyan] findings.\n"
-        f"Artifacts stored in [cyan]{run_dir}[/cyan]",
-        expand=False,
-    ))
+    console.print(
+        Panel(
+            f"[bold green]✔ Scout completed successfully![/bold green]\n"
+            f"Run ID: [yellow]{run_id}[/yellow]\n"
+            f"Discovered [bold cyan]{len(output.hotspots)}[/bold cyan] findings.\n"
+            f"Artifacts stored in [cyan]{run_dir}[/cyan]",
+            expand=False,
+        )
+    )
 
 
 @app.command()
@@ -382,7 +387,9 @@ def plan(
     ) as progress:
         task = progress.add_task("[green]Planning implementation steps...", total=None)
         try:
-            output, meta = run_architect(scout_output, config=config, trace_id=run_id, run_id=run_id)
+            output, meta = run_architect(
+                scout_output, config=config, trace_id=run_id, run_id=run_id
+            )
             progress.update(task, completed=100)
         except Exception as exc:
             progress.update(task, completed=100)
@@ -426,13 +433,15 @@ def plan(
         run_dir=run_dir,
     )
 
-    console.print(Panel(
-        f"[bold green]✔ Plan generated successfully![/bold green]\n"
-        f"Run ID: [yellow]{run_id}[/yellow]\n"
-        f"Planned [bold cyan]{len(output.implementation_plan)}[/bold cyan] tasks modifying [bold cyan]{len(run_metadata.affected_files)}[/bold cyan] files.\n"
-        f"Plan saved to [cyan]{run_dir / 'plan.json'}[/cyan]",
-        expand=False,
-    ))
+    console.print(
+        Panel(
+            f"[bold green]✔ Plan generated successfully![/bold green]\n"
+            f"Run ID: [yellow]{run_id}[/yellow]\n"
+            f"Planned [bold cyan]{len(output.implementation_plan)}[/bold cyan] tasks modifying [bold cyan]{len(run_metadata.affected_files)}[/bold cyan] files.\n"
+            f"Plan saved to [cyan]{run_dir / 'plan.json'}[/cyan]",
+            expand=False,
+        )
+    )
 
 
 @app.command()
@@ -515,12 +524,12 @@ def preview(
     with Progress(
         SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console
     ) as progress:
-        task = progress.add_task("[green]Executing planned tasks and generating patch...", total=None)
+        task = progress.add_task(
+            "[green]Executing planned tasks and generating patch...", total=None
+        )
         try:
             executor_output, exec_meta = run_executor(
-                architect_output=architect_output,
-                config=config,
-                staging_dir=staging_dir
+                architect_output=architect_output, config=config, staging_dir=staging_dir
             )
             progress.update(task, completed=100)
         except Exception as exc:
@@ -579,7 +588,9 @@ def preview(
     ) as progress:
         task = progress.add_task("[green]Validating patch in isolated workspace...", total=None)
         try:
-            with create_validation_workspace(original_root=target_path, patch_path=patch_path) as val_ws:
+            with create_validation_workspace(
+                original_root=target_path, patch_path=patch_path
+            ) as val_ws:
                 apply_res = apply_patch_to_copy(val_ws.temporary_root, val_ws.patch_path)
                 if apply_res.return_code != 0:
                     validator_output = ValidatorOutput(
@@ -609,7 +620,9 @@ def preview(
             raise typer.Exit(code=1)
 
     # Write validation results
-    workspace_mgr.write_artifact(run_id, "validation.json", validator_output.model_dump_json(indent=2))
+    workspace_mgr.write_artifact(
+        run_id, "validation.json", validator_output.model_dump_json(indent=2)
+    )
 
     log_event(
         trace_id=run_id,
@@ -625,15 +638,17 @@ def preview(
 
     # 7. Update run metadata
     patch_checksum = hashlib.sha256(patch_diff.encode("utf-8")).hexdigest()
-    validation_summary = "All checks passed successfully" if validator_output.overall_passed else (
-        validator_output.llm_summary or "Validation failed"
+    validation_summary = (
+        "All checks passed successfully"
+        if validator_output.overall_passed
+        else (validator_output.llm_summary or "Validation failed")
     )
     model_metadata = {
         "executor": exec_meta,
         "validator": {
             "model_used": validator_output.model_used_for_summary,
             "overall_passed": validator_output.overall_passed,
-        }
+        },
     }
 
     run_metadata.patch_checksum = patch_checksum
@@ -644,15 +659,17 @@ def preview(
     workspace_mgr.write_run_json(run_id, run_metadata)
 
     status_color = "green" if validator_output.overall_passed else "red"
-    console.print(Panel(
-        f"[bold green]✔ Preview and validation completed successfully![/bold green]\n"
-        f"Run ID: [yellow]{run_id}[/yellow]\n"
-        f"Validation Status: [bold {status_color}]{'PASSED' if validator_output.overall_passed else 'FAILED'}[/bold {status_color}]\n"
-        f"Patch Checksum: [cyan]{patch_checksum[:12]}[/cyan]\n"
-        f"Consolidated Patch: [cyan]{patch_path}[/cyan]\n"
-        f"Validation Log: [cyan]{run_dir / 'validation.json'}[/cyan]",
-        expand=False,
-    ))
+    console.print(
+        Panel(
+            f"[bold green]✔ Preview and validation completed successfully![/bold green]\n"
+            f"Run ID: [yellow]{run_id}[/yellow]\n"
+            f"Validation Status: [bold {status_color}]{'PASSED' if validator_output.overall_passed else 'FAILED'}[/bold {status_color}]\n"
+            f"Patch Checksum: [cyan]{patch_checksum[:12]}[/cyan]\n"
+            f"Consolidated Patch: [cyan]{patch_path}[/cyan]\n"
+            f"Validation Log: [cyan]{run_dir / 'validation.json'}[/cyan]",
+            expand=False,
+        )
+    )
 
 
 @app.command()
@@ -676,6 +693,7 @@ def apply(
         )
     )
 
+    import hashlib
     from datetime import datetime, timezone
 
     from orchestrator.agents.validator import run as run_validator
@@ -683,11 +701,13 @@ def apply(
         apply_patch,
         check_patch,
         create_controlled_branch,
+        current_branch,
         current_head,
+        force_reset_apply,
         repository_state,
-        revert_apply,
     )
     from orchestrator.observability.events import log_event, log_failure
+    from orchestrator.schemas.artifacts import ApplyResult
     from orchestrator.schemas.config import default_workspace_path
 
     # 1. Resolve workspace path and ensure run exists
@@ -767,16 +787,55 @@ def apply(
         source="pipeline",
         stage="apply",
         event="stage_start",
-        data={"lifecycle_state": lifecycle_state, "base_commit": run_metadata.base_commit, "current_head": curr_head},
+        data={
+            "lifecycle_state": lifecycle_state,
+            "base_commit": run_metadata.base_commit,
+            "current_head": curr_head,
+        },
         logs_dir=logs_dir,
         run_dir=run_dir,
     )
 
-    # 5. Check out explicit, system-controlled Git branch
+    # 5. Verify patch checksum
+    patch_content = patch_path.read_text(encoding="utf-8")
+    actual_checksum = hashlib.sha256(patch_content.encode("utf-8")).hexdigest()
+    if not run_metadata.patch_checksum:
+        console.print("[bold red]Error: Patch checksum is missing. Run preview first.[/bold red]")
+        run_metadata.status = "failed"
+        run_metadata.apply_status = "failed"
+        run_metadata.updated_at = datetime.now(timezone.utc)
+        if run_metadata.failure_artifacts is None:
+            run_metadata.failure_artifacts = []
+        if "checksum_mismatch" not in run_metadata.failure_artifacts:
+            run_metadata.failure_artifacts.append("checksum_mismatch")
+        workspace_mgr.write_run_json(run_id, run_metadata)
+        raise typer.Exit(code=1)
+    if actual_checksum != run_metadata.patch_checksum:
+        console.print(
+            "[bold red]Error: Patch checksum mismatch. The patch.diff has been modified "
+            f"since preview.\nExpected: {run_metadata.patch_checksum}\nActual:   {actual_checksum}[/bold red]"
+        )
+        run_metadata.status = "failed"
+        run_metadata.apply_status = "failed"
+        run_metadata.updated_at = datetime.now(timezone.utc)
+        if run_metadata.failure_artifacts is None:
+            run_metadata.failure_artifacts = []
+        if "checksum_mismatch" not in run_metadata.failure_artifacts:
+            run_metadata.failure_artifacts.append("checksum_mismatch")
+        workspace_mgr.write_run_json(run_id, run_metadata)
+        raise typer.Exit(code=1)
+
+    # 6. Save pre-apply Git state
+    pre_apply_head = current_head(target_path)
+    pre_apply_branch = current_branch(target_path)
+
+    # 7. Check out explicit, system-controlled Git branch
     branch_name = f"patchforge/{run_id}"
     branch_res = create_controlled_branch(target_path, branch_name)
     if branch_res.return_code != 0:
-        console.print(f"[bold red]Error checking out branch {branch_name}: {branch_res.stderr}[/bold red]")
+        console.print(
+            f"[bold red]Error checking out branch {branch_name}: {branch_res.stderr}[/bold red]"
+        )
         log_failure(
             trace_id=run_id,
             run_id=run_id,
@@ -786,9 +845,17 @@ def apply(
             logs_dir=logs_dir,
             run_dir=run_dir,
         )
+        run_metadata.status = "failed"
+        run_metadata.apply_status = "failed"
+        run_metadata.updated_at = datetime.now(timezone.utc)
+        if run_metadata.failure_artifacts is None:
+            run_metadata.failure_artifacts = []
+        if "checkout_failure" not in run_metadata.failure_artifacts:
+            run_metadata.failure_artifacts.append("checkout_failure")
+        workspace_mgr.write_run_json(run_id, run_metadata)
         raise typer.Exit(code=1)
 
-    # 6. Apply patch
+    # 8. Apply patch
     apply_res = apply_patch(target_path, patch_path)
     if apply_res.return_code != 0:
         console.print(f"[bold red]Error applying patch: {apply_res.stderr}[/bold red]")
@@ -801,8 +868,8 @@ def apply(
             logs_dir=logs_dir,
             run_dir=run_dir,
         )
-        # Revert: attempt to clean the partial apply
-        revert_res = revert_apply(target_path)
+        # Revert: force reset to pre-apply state
+        revert_res = force_reset_apply(target_path, pre_apply_head)
         if revert_res.return_code != 0:
             console.print(
                 "[bold red]FATAL: Patch application failed AND the automatic revert also failed. "
@@ -819,22 +886,28 @@ def apply(
                 logs_dir=logs_dir,
                 run_dir=run_dir,
             )
-        # Write apply.json failure
-        apply_data = {
-            "run_id": run_id,
-            "applied_at": datetime.now(timezone.utc).isoformat(),
-            "branch": branch_name,
-            "success": False,
-            "error": apply_res.stderr,
-        }
-        workspace_mgr.write_artifact(run_id, "apply.json", json.dumps(apply_data, indent=2))
+        # Write apply.json failure using ApplyResult model
+        apply_result = ApplyResult(
+            run_id=run_id,
+            applied_at=datetime.now(timezone.utc),
+            branch=branch_name,
+            success=False,
+            error=apply_res.stderr,
+            pre_apply_head=pre_apply_head,
+            pre_apply_branch=pre_apply_branch,
+        )
+        workspace_mgr.write_artifact(run_id, "apply.json", apply_result.model_dump_json(indent=2))
         run_metadata.status = "failed"
         run_metadata.apply_status = "failed"
         run_metadata.updated_at = datetime.now(timezone.utc)
+        if run_metadata.failure_artifacts is None:
+            run_metadata.failure_artifacts = []
+        if "apply.json" not in run_metadata.failure_artifacts:
+            run_metadata.failure_artifacts.append("apply.json")
         workspace_mgr.write_run_json(run_id, run_metadata)
         raise typer.Exit(code=1)
 
-    # 7. Run post-apply validation checks
+    # 9. Run post-apply validation checks
     with Progress(
         SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console
     ) as progress:
@@ -844,7 +917,9 @@ def apply(
             progress.update(task, completed=100)
         except Exception as exc:
             progress.update(task, completed=100)
-            console.print(f"[bold yellow]Warning: post-apply validation failed to execute: {exc}[/bold yellow]")
+            console.print(
+                f"[bold yellow]Warning: post-apply validation failed to execute: {exc}[/bold yellow]"
+            )
             post_val_output = None
 
     if post_val_output is not None:
@@ -852,17 +927,80 @@ def apply(
             run_id, "post_apply_validation.json", post_val_output.model_dump_json(indent=2)
         )
 
-    # 8. Write apply.json success
-    apply_data = {
-        "run_id": run_id,
-        "applied_at": datetime.now(timezone.utc).isoformat(),
-        "branch": branch_name,
-        "success": True,
-        "error": None,
-    }
-    workspace_mgr.write_artifact(run_id, "apply.json", json.dumps(apply_data, indent=2))
+    # 10. Handle post-apply validation failure: rollback automatically
+    if post_val_output is not None and not post_val_output.overall_passed:
+        console.print("[bold yellow]Post-apply validation failed. Rolling back...[/bold yellow]")
+        revert_res = force_reset_apply(target_path, pre_apply_head)
+        rollback_succeeded = revert_res.return_code == 0
 
-    # 9. Update metadata
+        if not rollback_succeeded:
+            console.print(
+                "[bold red]FATAL: Post-apply validation failed AND automatic rollback also failed. "
+                f"Your repository may be in a partially applied state.\n"
+                f"Revert stderr: {revert_res.stderr}\n"
+                "Please run 'git checkout .' and 'git clean -fd' manually to restore a clean state.[/bold red]"
+            )
+            log_failure(
+                trace_id=run_id,
+                run_id=run_id,
+                stage="apply",
+                error_type="rollback_failed",
+                message=revert_res.stderr,
+                logs_dir=logs_dir,
+                run_dir=run_dir,
+            )
+
+        # Write post_apply_failure.json
+        failure_detail = {
+            "stage": "post_apply_validation",
+            "reason": "validation_failed",
+            "validation_output": post_val_output.model_dump(),
+            "rollback_succeeded": rollback_succeeded,
+        }
+        workspace_mgr.write_artifact(
+            run_id, "post_apply_failure.json", json.dumps(failure_detail, indent=2)
+        )
+
+        error_msg = (
+            "Post-apply validation failed; rollback also failed"
+            if not rollback_succeeded
+            else "Post-apply validation failed"
+        )
+        apply_result = ApplyResult(
+            run_id=run_id,
+            applied_at=datetime.now(timezone.utc),
+            branch=branch_name,
+            success=False,
+            rolled_back=rollback_succeeded,
+            error=error_msg,
+            pre_apply_head=pre_apply_head,
+            pre_apply_branch=pre_apply_branch,
+            rollback_head=pre_apply_head if rollback_succeeded else None,
+        )
+        workspace_mgr.write_artifact(run_id, "apply.json", apply_result.model_dump_json(indent=2))
+        run_metadata.status = "failed"
+        run_metadata.apply_status = "rolled_back" if rollback_succeeded else "rollback_failed"
+        run_metadata.updated_at = datetime.now(timezone.utc)
+        if run_metadata.failure_artifacts is None:
+            run_metadata.failure_artifacts = []
+        for artifact in ["apply.json", "post_apply_failure.json"]:
+            if artifact not in run_metadata.failure_artifacts:
+                run_metadata.failure_artifacts.append(artifact)
+        workspace_mgr.write_run_json(run_id, run_metadata)
+        raise typer.Exit(code=1)
+
+    # 11. Write apply.json success using ApplyResult model
+    apply_result = ApplyResult(
+        run_id=run_id,
+        applied_at=datetime.now(timezone.utc),
+        branch=branch_name,
+        success=True,
+        pre_apply_head=pre_apply_head,
+        pre_apply_branch=pre_apply_branch,
+    )
+    workspace_mgr.write_artifact(run_id, "apply.json", apply_result.model_dump_json(indent=2))
+
+    # 12. Update metadata
     run_metadata.status = "applied"
     run_metadata.apply_status = "success"
     run_metadata.updated_at = datetime.now(timezone.utc)
@@ -875,19 +1013,24 @@ def apply(
         source="pipeline",
         stage="apply",
         event="stage_end",
-        data={"success": True, "post_apply_passed": post_val_output.overall_passed if post_val_output else None},
+        data={
+            "success": True,
+            "post_apply_passed": post_val_output.overall_passed if post_val_output else None,
+        },
         logs_dir=logs_dir,
         run_dir=run_dir,
     )
 
-    console.print(Panel(
-        f"[bold green]✔ Patch applied successfully to branch [yellow]{branch_name}[/yellow]![/bold green]\n\n"
-        f"To review and commit the changes, run:\n"
-        f"  [cyan]git status[/cyan]\n"
-        f"  [cyan]git diff[/cyan]\n"
-        f"  [cyan]git commit -am \"Apply patch {run_id}\"[/cyan]",
-        expand=False,
-    ))
+    console.print(
+        Panel(
+            f"[bold green]Patch applied successfully to branch [yellow]{branch_name}[/yellow]![/bold green]\n\n"
+            f"To review and commit the changes, run:\n"
+            f"  [cyan]git status[/cyan]\n"
+            f"  [cyan]git diff[/cyan]\n"
+            f'  [cyan]git commit -am "Apply patch {run_id}"[/cyan]',
+            expand=False,
+        )
+    )
 
 
 if __name__ == "__main__":
