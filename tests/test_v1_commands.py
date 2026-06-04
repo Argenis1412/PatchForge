@@ -338,6 +338,17 @@ def test_apply_failure_reset_failure_fatal(target_repo: Path, workspace_dir: Pat
     assert "FATAL" in apply_res.stdout
     assert "reset failed" in apply_res.stdout
 
+    apply_json_path = workspace_dir / "runs" / run_id / "apply.json"
+    assert apply_json_path.exists()
+    apply_data = json.loads(apply_json_path.read_text())
+    assert apply_data["success"] is False
+    assert apply_data["pre_apply_head"] is not None
+
+    run_json_path = workspace_dir / "runs" / run_id / "run.json"
+    run_data = json.loads(run_json_path.read_text())
+    assert run_data["status"] == "failed"
+    assert "apply.json" in run_data.get("failure_artifacts", [])
+
 
 def test_post_apply_validation_failure_triggers_rollback(target_repo: Path, workspace_dir: Path):
     run_id = _prepare_run(target_repo, workspace_dir, runner)

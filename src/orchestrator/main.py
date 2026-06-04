@@ -799,11 +799,30 @@ def apply(
     # 5. Verify patch checksum
     patch_content = patch_path.read_text(encoding="utf-8")
     actual_checksum = hashlib.sha256(patch_content.encode("utf-8")).hexdigest()
-    if run_metadata.patch_checksum and actual_checksum != run_metadata.patch_checksum:
+    if not run_metadata.patch_checksum:
+        console.print("[bold red]Error: Patch checksum is missing. Run preview first.[/bold red]")
+        run_metadata.status = "failed"
+        run_metadata.apply_status = "failed"
+        run_metadata.updated_at = datetime.now(timezone.utc)
+        if run_metadata.failure_artifacts is None:
+            run_metadata.failure_artifacts = []
+        if "checksum_mismatch" not in run_metadata.failure_artifacts:
+            run_metadata.failure_artifacts.append("checksum_mismatch")
+        workspace_mgr.write_run_json(run_id, run_metadata)
+        raise typer.Exit(code=1)
+    if actual_checksum != run_metadata.patch_checksum:
         console.print(
             "[bold red]Error: Patch checksum mismatch. The patch.diff has been modified "
             f"since preview.\nExpected: {run_metadata.patch_checksum}\nActual:   {actual_checksum}[/bold red]"
         )
+        run_metadata.status = "failed"
+        run_metadata.apply_status = "failed"
+        run_metadata.updated_at = datetime.now(timezone.utc)
+        if run_metadata.failure_artifacts is None:
+            run_metadata.failure_artifacts = []
+        if "checksum_mismatch" not in run_metadata.failure_artifacts:
+            run_metadata.failure_artifacts.append("checksum_mismatch")
+        workspace_mgr.write_run_json(run_id, run_metadata)
         raise typer.Exit(code=1)
 
     # 6. Save pre-apply Git state
@@ -826,6 +845,14 @@ def apply(
             logs_dir=logs_dir,
             run_dir=run_dir,
         )
+        run_metadata.status = "failed"
+        run_metadata.apply_status = "failed"
+        run_metadata.updated_at = datetime.now(timezone.utc)
+        if run_metadata.failure_artifacts is None:
+            run_metadata.failure_artifacts = []
+        if "checkout_failure" not in run_metadata.failure_artifacts:
+            run_metadata.failure_artifacts.append("checkout_failure")
+        workspace_mgr.write_run_json(run_id, run_metadata)
         raise typer.Exit(code=1)
 
     # 8. Apply patch
@@ -904,7 +931,9 @@ def apply(
     if post_val_output is not None and not post_val_output.overall_passed:
         console.print("[bold yellow]Post-apply validation failed. Rolling back...[/bold yellow]")
         revert_res = force_reset_apply(target_path, pre_apply_head)
-        if revert_res.return_code != 0:
+        rollback_succeeded = revert_res.return_code == 0
+
+        if not rollback_succeeded:
             console.print(
                 "[bold red]FATAL: Post-apply validation failed AND automatic rollback also failed. "
                 f"Your repository may be in a partially applied state.\n"
@@ -926,26 +955,31 @@ def apply(
             "stage": "post_apply_validation",
             "reason": "validation_failed",
             "validation_output": post_val_output.model_dump(),
+            "rollback_succeeded": rollback_succeeded,
         }
         workspace_mgr.write_artifact(
             run_id, "post_apply_failure.json", json.dumps(failure_detail, indent=2)
         )
 
-        rollback_head = current_head(target_path)
+        error_msg = (
+            "Post-apply validation failed; rollback also failed"
+            if not rollback_succeeded
+            else "Post-apply validation failed"
+        )
         apply_result = ApplyResult(
             run_id=run_id,
             applied_at=datetime.now(timezone.utc),
             branch=branch_name,
             success=False,
-            rolled_back=True,
-            error="Post-apply validation failed",
+            rolled_back=rollback_succeeded,
+            error=error_msg,
             pre_apply_head=pre_apply_head,
             pre_apply_branch=pre_apply_branch,
-            rollback_head=rollback_head,
+            rollback_head=pre_apply_head if rollback_succeeded else None,
         )
         workspace_mgr.write_artifact(run_id, "apply.json", apply_result.model_dump_json(indent=2))
         run_metadata.status = "failed"
-        run_metadata.apply_status = "rolled_back"
+        run_metadata.apply_status = "rolled_back" if rollback_succeeded else "rollback_failed"
         run_metadata.updated_at = datetime.now(timezone.utc)
         if run_metadata.failure_artifacts is None:
             run_metadata.failure_artifacts = []

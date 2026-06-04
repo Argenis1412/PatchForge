@@ -351,8 +351,16 @@ class Pipeline:
             run_metadata.status = "failed"
             run_metadata.updated_at = datetime.now(timezone.utc)
             self.workspace.write_run_json(self.run.run_id, run_metadata)
-        except FileNotFoundError:
-            pass
+        except Exception as exc:
+            print(
+                json.dumps(
+                    {
+                        "event": "failure_artifacts_skipped",
+                        "stage": stage,
+                        "reason": str(exc),
+                    }
+                )
+            )
 
     def _persist(self) -> None:
         path = self.workspace.runs / f"pipeline_{self.run.run_id}.json"

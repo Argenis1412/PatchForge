@@ -153,6 +153,20 @@ def test_repository_state(git_repo: Path):
     assert state.branch in ("master", "main")
 
 
+def test_force_reset_apply_with_invalid_sha_does_not_clean(git_repo: Path):
+    head_before = current_head(git_repo)
+    (git_repo / "README.md").write_text("Modified\n")
+    (git_repo / "untracked.py").write_text("x = 1\n")
+    assert not is_working_tree_clean(git_repo)
+
+    result = force_reset_apply(git_repo, "deadbeef" * 5)
+
+    assert result.return_code != 0
+    assert (git_repo / "untracked.py").exists()
+    assert (git_repo / "README.md").read_text() == "Modified\n"
+    assert current_head(git_repo) == head_before
+
+
 def test_force_reset_apply_restores_exact_state(git_repo: Path):
     head_before = current_head(git_repo)
     # Track original file content

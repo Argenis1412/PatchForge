@@ -146,14 +146,19 @@ def force_reset_apply(repo_root: Path, target_sha: str) -> GitCommandResult:
             capture_output=True,
             text=True,
         )
+        if res1.returncode != 0:
+            return GitCommandResult(
+                return_code=res1.returncode,
+                stdout=res1.stdout,
+                stderr=res1.stderr,
+            )
         res2 = subprocess.run(
             ["git", "-C", str(repo_root), "clean", "-fd"],
             capture_output=True,
             text=True,
         )
-        rc = res1.returncode if res1.returncode != 0 else res2.returncode
         return GitCommandResult(
-            return_code=rc,
+            return_code=res2.returncode,
             stdout=res1.stdout + res2.stdout,
             stderr=res1.stderr + res2.stderr,
         )
