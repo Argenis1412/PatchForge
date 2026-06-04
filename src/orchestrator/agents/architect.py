@@ -12,10 +12,65 @@ from orchestrator.schemas.architect_output import ArchitectOutput
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.scout_output import ScoutOutput
 
-MODEL = "claude-3-5-sonnet-20241022"
+MODEL = "claude-sonnet-4-6"
 
 COST_PER_1M_INPUT = 3.00
 COST_PER_1M_OUTPUT = 15.00
+
+
+def _extract_json(text: str) -> str:
+    """Extract the first complete JSON object from *text*.
+
+    Handles leading/trailing prose, markdown fences anywhere in the
+    text, braces inside JSON string values, and escaped quotes.
+    """
+    raw = text.strip()
+
+    # Attempt to locate a fenced JSON block (```json ... ```)
+    fence_tag = "```json"
+    idx = raw.find(fence_tag)
+    if idx != -1:
+        rest = raw[idx + len(fence_tag) :]
+        end_fence = rest.find("```")
+        if end_fence != -1:
+            raw = rest[:end_fence].strip()
+    else:
+        # Fallback: generic fences ```...```
+        idx = raw.find("```")
+        if idx != -1:
+            rest = raw[idx + 3 :]
+            end_fence = rest.find("```")
+            if end_fence != -1:
+                raw = rest[:end_fence].strip()
+
+    # Brace-balancing scan
+    depth = 0
+    in_string = False
+    escaped = False
+    start = -1
+
+    for i, ch in enumerate(raw):
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\" and in_string:
+            escaped = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and start != -1:
+                return raw[start : i + 1]
+
+    return raw
 
 
 def call_claude(
@@ -177,7 +232,7 @@ def run(
 
     # Validate JSON
     try:
-        data = json.loads(raw_response)
+        data = json.loads(_extract_json(raw_response))
     except json.JSONDecodeError as e:
         print(f"[Architect] JSON parse error: {e}")
         print(f"[Architect] Raw output:\n{raw_response}")
