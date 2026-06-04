@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from orchestrator.agents.architect import run as run_architect
 from orchestrator.agents.executor import run as run_executor
@@ -158,6 +158,8 @@ class Pipeline:
                 duration_ms=_ms(t0_pipeline),
                 data=exc.data,
             )
+            # Populate failure_artifacts on RunMetadata if it exists
+            self._populate_failure_artifacts(exc.stage)
         except Exception as exc:
             self.run.status = "failed"
             self._log_failure(
@@ -337,6 +339,20 @@ class Pipeline:
         if self.run.pending_human_review:
             return "awaiting_review"
         return "completed"
+
+    def _populate_failure_artifacts(self, stage: str | None) -> None:
+        try:
+            run_metadata = self.workspace.read_run_json(self.run.run_id)
+            failure_artifact = f"{stage}_failure.json" if stage else "pipeline_failure.json"
+            if run_metadata.failure_artifacts is None:
+                run_metadata.failure_artifacts = []
+            if failure_artifact not in run_metadata.failure_artifacts:
+                run_metadata.failure_artifacts.append(failure_artifact)
+            run_metadata.status = "failed"
+            run_metadata.updated_at = datetime.now(timezone.utc)
+            self.workspace.write_run_json(self.run.run_id, run_metadata)
+        except FileNotFoundError:
+            pass
 
     def _persist(self) -> None:
         path = self.workspace.runs / f"pipeline_{self.run.run_id}.json"

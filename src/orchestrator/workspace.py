@@ -112,7 +112,9 @@ class WorkspaceManager:
         Uses the unchecked writer so it can be called both during initial
         creation (scan) and during subsequent status updates.
         """
-        return self._write_artifact_unchecked(run_id, "run.json", metadata.model_dump_json(indent=2))
+        return self._write_artifact_unchecked(
+            run_id, "run.json", metadata.model_dump_json(indent=2)
+        )
 
     def read_run_json(self, run_id: str) -> RunMetadata:
         """Read and validate the run.json metadata file."""
@@ -125,4 +127,3 @@ class WorkspaceManager:
         run_json = run_dir / "run.json"
         if not run_dir.exists() or not run_json.exists():
             raise FileNotFoundError(f"Run {run_id} does not exist in workspace {self.root}")
-
