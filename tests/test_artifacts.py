@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from orchestrator.schemas.artifacts import generate_run_id, RunMetadata
+from orchestrator.schemas.artifacts import RunMetadata, generate_run_id
 
 
 def test_generate_run_id_format():
@@ -37,9 +37,9 @@ def test_run_metadata_serialization():
         updated_at=datetime(2026, 6, 3, 12, 0, 0, tzinfo=timezone.utc),
         v1_supported=True,
         support_reasons=["Python support detected"],
-        risk_budget="medium",
-        max_files=5,
-        max_diff_lines=500,
+        risk_budget="low",
+        max_files=2,
+        max_diff_lines=100,
     )
     serialized = meta.model_dump_json()
     data = json.loads(serialized)
@@ -47,11 +47,31 @@ def test_run_metadata_serialization():
     assert data["run_id"] == "run_20260603_120000_abcdef"
     assert data["v1_supported"] is True
     assert data["support_reasons"] == ["Python support detected"]
-    assert data["risk_budget"] == "medium"
-    assert data["max_files"] == 5
-    assert data["max_diff_lines"] == 500
+    assert data["risk_budget"] == "low"
+    assert data["max_files"] == 2
+    assert data["max_diff_lines"] == 100
     assert "created_at" in data
 
     deserialized = RunMetadata.model_validate_json(serialized)
     assert deserialized.run_id == meta.run_id
     assert deserialized.created_at == meta.created_at
+
+
+def test_run_metadata_backward_compatibility():
+    """Values from old format must still validate after schema hardening."""
+    meta = RunMetadata(
+        run_id="run_20260101_000000_old000",
+        target_path="/legacy/target",
+        workspace_path="/legacy/workspace",
+        base_commit="a" * 40,
+        branch="main",
+        v1_supported=True,
+        risk_budget="medium",
+        max_files=5,
+        max_diff_lines=500,
+    )
+    serialized = meta.model_dump_json()
+    deserialized = RunMetadata.model_validate_json(serialized)
+    assert deserialized.risk_budget == "medium"
+    assert deserialized.max_files == 5
+    assert deserialized.max_diff_lines == 500

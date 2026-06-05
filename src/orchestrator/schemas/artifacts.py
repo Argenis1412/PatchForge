@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime, timezone
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
+
 from pydantic import BaseModel, Field
 
 RUN_JSON = "run.json"
@@ -31,9 +32,9 @@ class RunMetadata(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     v1_supported: bool
     support_reasons: List[str] = Field(default_factory=list)
-    risk_budget: str = "medium"
-    max_files: int = 5
-    max_diff_lines: int = 500
+    risk_budget: Literal["low", "medium", "high"] = "low"
+    max_files: int = Field(default=2, ge=1)
+    max_diff_lines: int = Field(default=100, ge=1)
 
     # Fields updated later by other commands
     goal: Optional[str] = None
