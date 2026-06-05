@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from orchestrator.schemas.artifacts import generate_run_id, RunMetadata
+from orchestrator.schemas.artifacts import RunMetadata, generate_run_id
 
 
 def test_generate_run_id_format():
@@ -37,9 +37,9 @@ def test_run_metadata_serialization():
         updated_at=datetime(2026, 6, 3, 12, 0, 0, tzinfo=timezone.utc),
         v1_supported=True,
         support_reasons=["Python support detected"],
-        risk_budget="medium",
-        max_files=5,
-        max_diff_lines=500,
+        risk_budget="low",
+        max_files=2,
+        max_diff_lines=100,
     )
     serialized = meta.model_dump_json()
     data = json.loads(serialized)
@@ -47,9 +47,9 @@ def test_run_metadata_serialization():
     assert data["run_id"] == "run_20260603_120000_abcdef"
     assert data["v1_supported"] is True
     assert data["support_reasons"] == ["Python support detected"]
-    assert data["risk_budget"] == "medium"
-    assert data["max_files"] == 5
-    assert data["max_diff_lines"] == 500
+    assert data["risk_budget"] == "low"
+    assert data["max_files"] == 2
+    assert data["max_diff_lines"] == 100
     assert "created_at" in data
 
     deserialized = RunMetadata.model_validate_json(serialized)
