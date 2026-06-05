@@ -1,3 +1,5 @@
+import shlex
+
 from orchestrator.schemas.architect_output import ArchitectOutput
 from orchestrator.schemas.artifacts import RunMetadata
 from orchestrator.schemas.risk import RiskGateResult
@@ -63,7 +65,7 @@ def _count_diff_files(diff_text: str) -> int:
     files = set()
     for line in diff_text.splitlines():
         if line.startswith("diff --git"):
-            parts = line.split()
+            parts = shlex.split(line)
             if len(parts) >= 4:
                 b_path = parts[3]
                 if b_path.startswith("b/"):

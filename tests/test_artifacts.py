@@ -55,3 +55,23 @@ def test_run_metadata_serialization():
     deserialized = RunMetadata.model_validate_json(serialized)
     assert deserialized.run_id == meta.run_id
     assert deserialized.created_at == meta.created_at
+
+
+def test_run_metadata_backward_compatibility():
+    """Values from old format must still validate after schema hardening."""
+    meta = RunMetadata(
+        run_id="run_20260101_000000_old000",
+        target_path="/legacy/target",
+        workspace_path="/legacy/workspace",
+        base_commit="a" * 40,
+        branch="main",
+        v1_supported=True,
+        risk_budget="medium",
+        max_files=5,
+        max_diff_lines=500,
+    )
+    serialized = meta.model_dump_json()
+    deserialized = RunMetadata.model_validate_json(serialized)
+    assert deserialized.risk_budget == "medium"
+    assert deserialized.max_files == 5
+    assert deserialized.max_diff_lines == 500
