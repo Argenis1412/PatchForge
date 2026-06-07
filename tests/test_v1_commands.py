@@ -8,10 +8,11 @@ from typer.testing import CliRunner
 
 from orchestrator.git import GitCommandResult
 from orchestrator.main import app
-from orchestrator.schemas.scout_output import ScoutOutput
 from orchestrator.schemas.architect_output import ArchitectOutput, Task
+from orchestrator.schemas.artifacts import PatchLifecycleState
 from orchestrator.schemas.executor_output import ExecutorOutput, FileChange
-from orchestrator.schemas.validator_output import ValidatorOutput, ToolResult
+from orchestrator.schemas.scout_output import ScoutOutput
+from orchestrator.schemas.validator_output import ToolResult, ValidatorOutput
 
 runner = CliRunner()
 
@@ -397,6 +398,28 @@ def test_patch_checksum_mismatch_blocks_apply(target_repo: Path, workspace_dir: 
     apply_res = runner.invoke(app, ["apply", run_id, "--workspace", str(workspace_dir)])
     assert apply_res.exit_code == 1
     assert "checksum mismatch" in apply_res.stdout.lower()
+
+    # Verify target was not modified
+    assert (target_repo / "README.md").read_text() == "Hello\n"
+
+
+def test_rebaseable_blocks_apply(target_repo: Path, workspace_dir: Path):
+    """REBASEABLE lifecycle state blocks the apply command in V1."""
+    run_id = _prepare_run(target_repo, workspace_dir, runner)
+
+    with patch(
+        "orchestrator.lifecycle.classify_lifecycle",
+        return_value=PatchLifecycleState.REBASEABLE,
+    ):
+        apply_res = runner.invoke(app, ["apply", run_id, "--workspace", str(workspace_dir)])
+
+    assert apply_res.exit_code == 1
+    assert "REBASEABLE" in apply_res.stdout
+
+    # Verify lifecycle_state is persisted in run.json before exit
+    run_json_path = workspace_dir / "runs" / run_id / "run.json"
+    run_data = json.loads(run_json_path.read_text())
+    assert run_data["lifecycle_state"] == "REBASEABLE"
 
     # Verify target was not modified
     assert (target_repo / "README.md").read_text() == "Hello\n"

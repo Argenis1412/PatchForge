@@ -452,6 +452,16 @@ def apply(
         )
         raise typer.Exit(code=1)
 
+    if lifecycle_state is PatchLifecycleState.REBASEABLE:
+        console.print(
+            "[bold red]Error: Patch lifecycle state is REBASEABLE. "
+            f"HEAD {current_head(target_path)} has diverged from base commit "
+            f"{run_metadata.base_commit}. The patch still applies cleanly, but "
+            "rebasing is blocked in V1. Please generate a new patch for the "
+            "current HEAD.[/bold red]"
+        )
+        raise typer.Exit(code=1)
+
     log_event(
         trace_id=run_id,
         run_id=run_id,
