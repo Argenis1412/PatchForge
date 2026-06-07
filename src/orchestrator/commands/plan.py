@@ -110,6 +110,11 @@ def execute(
             output, meta = architect_agent.run(
                 scout_output, config=config, trace_id=run_id, run_id=run_id
             )
+            # Post-Architect status assignment (informational, V1)
+            for plan_task in output.implementation_plan:
+                if plan_task.risk_level == "high":
+                    plan_task.status = "blocked"
+
             progress.update(task, completed=100)
         except Exception as exc:
             progress.update(task, completed=100)
