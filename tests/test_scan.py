@@ -465,7 +465,32 @@ def test_scanner_handles_syntax_error_in_file(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# 13. test_plan_errors_on_v1_findings
+# 13. test_scan_writes_run_json_on_scanner_failure
+# ---------------------------------------------------------------------------
+
+
+def test_scan_writes_run_json_on_scanner_failure(valid_repo: Path, workspace_dir: Path):
+    """When scan() raises, run.json with status=failed must still be written."""
+    with patch("orchestrator.commands.scan.scan", side_effect=RuntimeError("boom")):
+        result = runner.invoke(
+            app,
+            ["scan", str(valid_repo), "--workspace", str(workspace_dir)],
+        )
+
+    assert result.exit_code == 1
+
+    runs_dir = workspace_dir / "runs"
+    run_dirs = list(runs_dir.iterdir())
+    assert len(run_dirs) == 1
+    run_json_path = runs_dir / run_dirs[0].name / "run.json"
+    assert run_json_path.exists()
+    data = json.loads(run_json_path.read_text())
+    assert data["status"] == "failed"
+    assert data["run_id"] == run_dirs[0].name
+
+
+# ---------------------------------------------------------------------------
+# 14. test_plan_errors_on_v1_findings
 # ---------------------------------------------------------------------------
 
 

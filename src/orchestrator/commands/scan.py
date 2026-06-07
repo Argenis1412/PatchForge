@@ -103,6 +103,22 @@ def execute(config: TargetConfig) -> None:
                 logs_dir=logs_dir,
                 run_dir=run_dir,
             )
+            # Persist a minimal run.json so failed runs are discoverable
+            now = datetime.now(timezone.utc)
+            workspace_mgr.write_run_json(
+                run_id,
+                RunMetadata(
+                    run_id=run_id,
+                    target_path=str(config.target_path),
+                    workspace_path=str(config.workspace_path),
+                    base_commit="",
+                    branch="",
+                    status="failed",
+                    created_at=now,
+                    updated_at=now,
+                    v1_supported=False,
+                ),
+            )
             console.print(f"[bold red]Scanner failed: {exc}[/bold red]")
             raise typer.Exit(code=1)
 

@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+from pydantic import ValidationError
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -12,6 +13,7 @@ from orchestrator.clients.bootstrap import bootstrap_environment
 from orchestrator.observability.events import log_event, log_failure
 from orchestrator.risk import check_plan_gate
 from orchestrator.schemas.config import TargetConfig, default_workspace_path
+from orchestrator.schemas.findings import ScanFindings
 from orchestrator.schemas.scout_output import ScoutOutput
 from orchestrator.workspace import WorkspaceManager
 
@@ -58,8 +60,6 @@ def execute(
 
     # Detect V1 deterministic scan findings — plan requires AI Scout output.
     try:
-        from orchestrator.schemas.findings import ScanFindings
-
         ScanFindings.model_validate_json(findings_content)
         console.print("[bold red]Error: This run used V1 deterministic scan (no AI).[/bold red]")
         console.print("[red]`plan` requires AI-based analysis from the legacy Scout agent.[/red]")
@@ -73,7 +73,7 @@ def execute(
         raise typer.Exit(code=1)
     except typer.Exit:
         raise
-    except Exception:
+    except ValidationError:
         pass  # Not V1 findings — proceed with ScoutOutput parsing below.
 
     try:

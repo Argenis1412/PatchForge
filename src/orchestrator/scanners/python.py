@@ -67,18 +67,23 @@ def _detect_tool(cmd: str) -> ToolInfo:
         return ToolInfo(available=True, version=None)
 
 
-def _check_pyproject(target: Path) -> PyProjectInfo:
-    """Inspect pyproject.toml in *target* and return a populated :class:`PyProjectInfo`."""
+def _check_pyproject(target: Path) -> tuple[PyProjectInfo, dict | None]:
+    """Inspect pyproject.toml in *target* and return (info, parsed_dict|None).
+
+    Returns:
+        A tuple of :class:`PyProjectInfo` and the raw parsed dict (or ``None``
+        when the file is missing or invalid).
+    """
     path = target / "pyproject.toml"
     if not path.exists():
-        return PyProjectInfo(exists=False, valid=False)
+        return PyProjectInfo(exists=False, valid=False), None
     try:
         with open(path, "rb") as fh:
             data = tomllib.load(fh)
     except tomllib.TOMLDecodeError as exc:
-        return PyProjectInfo(exists=True, valid=False, error=str(exc))
+        return PyProjectInfo(exists=True, valid=False, error=str(exc)), None
     backend = data.get("build-system", {}).get("build-backend")
-    return PyProjectInfo(exists=True, valid=True, build_backend=backend)
+    return PyProjectInfo(exists=True, valid=True, build_backend=backend), data
 
 
 def _count_definitions(source: str) -> int:
@@ -98,7 +103,17 @@ def _count_definitions(source: str) -> int:
 
 
 def _detect_test_suite_info(target: Path, pyproject_data: Optional[dict]) -> TestSuiteInfo:
-    """Wrap :func:`detect_test_suite` with type information."""
+    """Detect test suite presence via filesystem conventions and pyproject.toml config.
+
+    Args:
+        target: Root path of the repository to inspect.
+        pyproject_data: Optional parsed pyproject.toml dict for detecting
+            pytest ini-options configuration.
+
+    Returns:
+        A :class:`TestSuiteInfo` with ``detected`` set to True if a test
+        directory, config file, or matching glob pattern is found.
+    """
     if (target / "tests").is_dir():
         return TestSuiteInfo(detected=True, type="tests_dir")
     if (target / "test").is_dir():
@@ -160,16 +175,7 @@ def scan(
     branch = current_branch(git_root)  # "" for empty repos
 
     # --- Static analysis of pyproject.toml ------------------------------
-    pyproject = _check_pyproject(target_path)
-
-    # Load raw dict for test-suite detection (may be None)
-    _pyproject_data: Optional[dict] = None
-    if pyproject.exists and pyproject.valid:
-        try:
-            with open(target_path / "pyproject.toml", "rb") as fh:
-                _pyproject_data = tomllib.load(fh)
-        except Exception:
-            pass
+    pyproject, _pyproject_data = _check_pyproject(target_path)
 
     # --- Tool detection -------------------------------------------------
     ruff_info = _detect_tool("ruff")
@@ -302,7 +308,7 @@ def scan(
 
     # TypeScript: WARN only, does not affect v1_supported
     if _has_typescript(target_path, _ignore):
-        support_reasons.append("TypeScript files present — V1 only supports Python (warn)")
+        support_reasons.append("TypeScript files detected (Python-only V1 will ignore them)")
 
     v1_supported = len(unsupported_reasons) == 0
 
