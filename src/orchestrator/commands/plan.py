@@ -52,6 +52,31 @@ def execute(
 
     try:
         findings_content = workspace_mgr.read_artifact(run_id, "findings.json")
+    except Exception as exc:
+        console.print(f"[bold red]Error reading findings: {exc}[/bold red]")
+        raise typer.Exit(code=1)
+
+    # Detect V1 deterministic scan findings — plan requires AI Scout output.
+    try:
+        from orchestrator.schemas.findings import ScanFindings
+
+        ScanFindings.model_validate_json(findings_content)
+        console.print("[bold red]Error: This run used V1 deterministic scan (no AI).[/bold red]")
+        console.print("[red]`plan` requires AI-based analysis from the legacy Scout agent.[/red]")
+        console.print(
+            "[red]Run `orchestrator run .` to execute the full AI pipeline, "
+            "or use `scan` for V1 deterministic results.[/red]"
+        )
+        run_metadata.status = "failed"
+        run_metadata.updated_at = datetime.now(timezone.utc)
+        workspace_mgr.write_run_json(run_id, run_metadata)
+        raise typer.Exit(code=1)
+    except typer.Exit:
+        raise
+    except Exception:
+        pass  # Not V1 findings — proceed with ScoutOutput parsing below.
+
+    try:
         scout_output = ScoutOutput.model_validate_json(findings_content)
     except Exception as exc:
         console.print(f"[bold red]Error reading findings: {exc}[/bold red]")

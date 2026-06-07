@@ -49,10 +49,7 @@ def test_scan_rejects_workspace_inside_target(tmp_path):
     repo.mkdir()
     subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True, text=True)
 
-    with (
-        patch("orchestrator.main.bootstrap_environment"),
-        patch("orchestrator.main.run_scout"),
-    ):
+    with patch("orchestrator.main.bootstrap_environment"):
         result = runner.invoke(
             app,
             ["scan", str(repo), "--workspace", str(repo / "workspace")],

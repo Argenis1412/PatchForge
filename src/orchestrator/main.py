@@ -12,7 +12,6 @@ if sys.stdout.encoding != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from orchestrator.agents.scout import run as run_scout
 from orchestrator.clients.bootstrap import bootstrap_environment
 from orchestrator.pipeline import Pipeline
 from orchestrator.schemas.config import TargetConfig
@@ -156,161 +155,11 @@ def scan(
         None, "--workspace", help="Path to the workspace directory"
     ),
 ):
-    """Run only the Scout agent (reconnaissance) on a target project."""
-    console.print(
-        Panel(
-            f"[bold magenta]orchestrator Scout (V1)[/bold magenta]\nTarget: [yellow]{path.absolute()}[/yellow]",
-            expand=False,
-        )
-    )
+    """Scan a target project using deterministic analysis (no AI)."""
+    from orchestrator.commands.scan import execute as execute_scan
 
-    # Validate Git repository first
-    from orchestrator.git import is_git_repo, repository_state
-
-    try:
-        git_state = repository_state(path)
-    except ValueError as exc:
-        console.print(f"[bold red]Error: {exc}[/bold red]")
-        raise typer.Exit(code=1)
-
-    with Progress(
-        SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console
-    ) as progress:
-        progress.add_task("[cyan]Bootstrapping environment...", total=None)
-        config = _load_target_config(path=path, workspace=workspace, env_file=env_file)
-
-    workspace_mgr = WorkspaceManager(config.workspace_path)
-    workspace_mgr.setup()
-
-    # Generate V1 Run ID and directory
-    from datetime import datetime, timezone
-
-    from orchestrator.schemas.artifacts import RunMetadata, generate_run_id
-
-    run_id = generate_run_id()
-    run_dir = workspace_mgr.create_run_directory(run_id)
-    logs_dir = config.workspace_path / "logs"
-
-    # Evaluate support
-    reasons = []
-    if config.capabilities.effective_supports_python:
-        reasons.append("Python support detected")
-    if config.capabilities.effective_supports_typescript:
-        reasons.append("TypeScript support detected")
-    if is_git_repo(path):
-        reasons.append("Git repository verified")
-    v1_supported = len(reasons) > 0
-
-    run_metadata = RunMetadata(
-        run_id=run_id,
-        target_path=str(path.resolve()),
-        workspace_path=str(config.workspace_path.resolve()),
-        base_commit=git_state.head,
-        branch=git_state.branch,
-        status="scanning",
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-        v1_supported=v1_supported,
-        support_reasons=reasons,
-        risk_budget="low",
-        max_files=2,
-        max_diff_lines=100,
-    )
-    workspace_mgr.write_run_json(run_id, run_metadata)
-
-    # Log start event
-    from orchestrator.observability.events import log_event
-
-    log_event(
-        trace_id=run_id,
-        run_id=run_id,
-        level="info",
-        source="pipeline",
-        stage="scout",
-        event="pipeline_start",
-        data={"target": str(path.resolve())},
-        logs_dir=logs_dir,
-        run_dir=run_dir,
-    )
-    log_event(
-        trace_id=run_id,
-        run_id=run_id,
-        level="info",
-        source="pipeline",
-        stage="scout",
-        event="stage_start",
-        logs_dir=logs_dir,
-        run_dir=run_dir,
-    )
-
-    # Run Scout agent
-    with Progress(
-        SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console
-    ) as progress:
-        task = progress.add_task(f"[green]Scanning {config.target_path}...", total=None)
-        try:
-            output, meta = run_scout(config, trace_id=run_id, run_id=run_id)
-            progress.update(task, completed=100)
-        except Exception as exc:
-            progress.update(task, completed=100)
-            from orchestrator.observability.events import log_failure
-
-            log_failure(
-                trace_id=run_id,
-                run_id=run_id,
-                stage="scout",
-                error_type="scout_failed",
-                message=str(exc),
-                logs_dir=logs_dir,
-                run_dir=run_dir,
-            )
-            run_metadata.status = "failed"
-            run_metadata.updated_at = datetime.now(timezone.utc)
-            workspace_mgr.write_run_json(run_id, run_metadata)
-            console.print(f"[bold red]Scout failed: {exc}[/bold red]")
-            raise typer.Exit(code=1)
-
-    # Write findings
-    workspace_mgr.write_artifact(run_id, "findings.json", output.model_dump_json(indent=2))
-
-    # Log end event
-    log_event(
-        trace_id=run_id,
-        run_id=run_id,
-        level="info",
-        source="pipeline",
-        stage="scout",
-        event="stage_end",
-        data={"cost_usd": meta.get("cost_usd"), "hotspots_count": len(output.hotspots)},
-        logs_dir=logs_dir,
-        run_dir=run_dir,
-    )
-    log_event(
-        trace_id=run_id,
-        run_id=run_id,
-        level="info",
-        source="pipeline",
-        stage="scout",
-        event="pipeline_end",
-        data={"status": "scanned", "run_id": run_id},
-        logs_dir=logs_dir,
-        run_dir=run_dir,
-    )
-
-    # Update metadata status to scanned
-    run_metadata.status = "scanned"
-    run_metadata.updated_at = datetime.now(timezone.utc)
-    workspace_mgr.write_run_json(run_id, run_metadata)
-
-    console.print(
-        Panel(
-            f"[bold green]✔ Scout completed successfully![/bold green]\n"
-            f"Run ID: [yellow]{run_id}[/yellow]\n"
-            f"Discovered [bold cyan]{len(output.hotspots)}[/bold cyan] findings.\n"
-            f"Artifacts stored in [cyan]{run_dir}[/cyan]",
-            expand=False,
-        )
-    )
+    config = _load_target_config(path=path, workspace=workspace, env_file=env_file)
+    execute_scan(config=config)
 
 
 @app.command()
