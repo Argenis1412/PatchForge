@@ -6,13 +6,20 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from orchestrator.git import GitCommandResult
+from orchestrator.git import GitCommandResult, current_head, resolve_git_root
 from orchestrator.main import app
 from orchestrator.schemas.architect_output import ArchitectOutput, Task
 from orchestrator.schemas.artifacts import PatchLifecycleState
 from orchestrator.schemas.executor_output import ExecutorOutput, FileChange
+from orchestrator.schemas.findings import (
+    PyProjectInfo,
+    ScanFindings,
+    TestSuiteInfo,
+    ToolInfo,
+)
 from orchestrator.schemas.scout_output import ScoutOutput
 from orchestrator.schemas.validator_output import ToolResult, ValidatorOutput
+from orchestrator.workspace import WorkspaceManager
 
 runner = CliRunner()
 
@@ -58,7 +65,6 @@ def test_v1_pipeline_flow(target_repo: Path, workspace_dir: Path):
         risks=[],
         summary="Test Scout Summary",
     )
-    mock_scout_meta = {"latency_ms": 100, "cost_usd": 0.01}
 
     mock_arch_out = ArchitectOutput(
         validated_findings=[],
@@ -103,8 +109,30 @@ def test_v1_pipeline_flow(target_repo: Path, workspace_dir: Path):
         llm_summary=None,
     )
 
+    # Build a ScanFindings mock that reads the real git HEAD so apply can verify it later.
+    def _mock_scan(target_path, ignore_dirs=None):
+        root = resolve_git_root(target_path)
+        head = current_head(root)
+        branch_name = "main"
+        return ScanFindings(
+            repository_root=str(root),
+            base_commit=head,
+            branch=branch_name,
+            v1_supported=True,
+            support_reasons=["mocked"],
+            unsupported_reasons=[],
+            pyproject=PyProjectInfo(exists=True, valid=True, build_backend="hatchling.build"),
+            ruff=ToolInfo(available=True, version="ruff 0.4.0"),
+            pytest=ToolInfo(available=True, version="pytest 8.0.0"),
+            test_suite=TestSuiteInfo(detected=True, type="tests_dir"),
+            total_python_files=0,
+            packages=[],
+            modules=[],
+            hotspots=[],
+        )
+
     with (
-        patch("orchestrator.main.run_scout", return_value=(mock_scout_out, mock_scout_meta)),
+        patch("orchestrator.commands.scan.scan", side_effect=_mock_scan),
         patch("orchestrator.agents.architect.run", return_value=(mock_arch_out, mock_arch_meta)),
         patch("orchestrator.agents.executor.run", return_value=(mock_exec_out, mock_exec_meta)),
         patch(
@@ -117,11 +145,10 @@ def test_v1_pipeline_flow(target_repo: Path, workspace_dir: Path):
             app,
             ["scan", str(target_repo), "--workspace", str(workspace_dir)],
         )
-        assert scan_res.exit_code == 0
-        assert "Scout completed successfully!" in scan_res.stdout
+        assert scan_res.exit_code == 0, scan_res.output
+        assert "Scanner completed successfully!" in scan_res.stdout
 
         # Extract Run ID from output
-        # Let's search runs/ directory
         runs_dir = workspace_dir / "runs"
         assert runs_dir.exists()
         run_dirs = list(runs_dir.iterdir())
@@ -138,7 +165,12 @@ def test_v1_pipeline_flow(target_repo: Path, workspace_dir: Path):
         findings_json_path = runs_dir / run_id / "findings.json"
         assert findings_json_path.exists()
         findings_data = json.loads(findings_json_path.read_text())
-        assert findings_data["summary"] == "Test Scout Summary"
+        # V1 findings: check v1_supported field (no 'summary' in ScanFindings)
+        assert findings_data["v1_supported"] is True
+
+        # Overwrite findings.json with ScoutOutput so plan/preview/apply can proceed
+        ws_mgr = WorkspaceManager(workspace_dir)
+        ws_mgr.write_artifact(run_id, "findings.json", mock_scout_out.model_dump_json(indent=2))
 
         # 2. PLAN
         plan_res = runner.invoke(
@@ -222,7 +254,6 @@ def _prepare_run(target_repo: Path, workspace_dir: Path, runner: CliRunner) -> s
         risks=[],
         summary="Test Scout Summary",
     )
-    mock_scout_meta = {"latency_ms": 100, "cost_usd": 0.01}
 
     mock_arch_out = ArchitectOutput(
         validated_findings=[],
@@ -267,8 +298,28 @@ def _prepare_run(target_repo: Path, workspace_dir: Path, runner: CliRunner) -> s
         llm_summary=None,
     )
 
+    def _mock_scan(target_path, ignore_dirs=None):
+        root = resolve_git_root(target_path)
+        head = current_head(root)
+        return ScanFindings(
+            repository_root=str(root),
+            base_commit=head,
+            branch="main",
+            v1_supported=True,
+            support_reasons=["mocked"],
+            unsupported_reasons=[],
+            pyproject=PyProjectInfo(exists=True, valid=True, build_backend="hatchling.build"),
+            ruff=ToolInfo(available=True, version="ruff 0.4.0"),
+            pytest=ToolInfo(available=True, version="pytest 8.0.0"),
+            test_suite=TestSuiteInfo(detected=True, type="tests_dir"),
+            total_python_files=0,
+            packages=[],
+            modules=[],
+            hotspots=[],
+        )
+
     with (
-        patch("orchestrator.main.run_scout", return_value=(mock_scout_out, mock_scout_meta)),
+        patch("orchestrator.commands.scan.scan", side_effect=_mock_scan),
         patch("orchestrator.agents.architect.run", return_value=(mock_arch_out, mock_arch_meta)),
         patch("orchestrator.agents.executor.run", return_value=(mock_exec_out, mock_exec_meta)),
         patch(
@@ -277,16 +328,20 @@ def _prepare_run(target_repo: Path, workspace_dir: Path, runner: CliRunner) -> s
         patch("orchestrator.agents.validator.run", return_value=(mock_val_out, {})),
     ):
         scan_res = runner.invoke(app, ["scan", str(target_repo), "--workspace", str(workspace_dir)])
-        assert scan_res.exit_code == 0
+        assert scan_res.exit_code == 0, scan_res.output
 
         runs_dir = workspace_dir / "runs"
         run_id = list(runs_dir.iterdir())[0].name
 
+        # Overwrite findings.json with ScoutOutput so plan can proceed
+        ws_mgr = WorkspaceManager(workspace_dir)
+        ws_mgr.write_artifact(run_id, "findings.json", mock_scout_out.model_dump_json(indent=2))
+
         plan_res = runner.invoke(app, ["plan", run_id, "--workspace", str(workspace_dir)])
-        assert plan_res.exit_code == 0
+        assert plan_res.exit_code == 0, plan_res.output
 
         preview_res = runner.invoke(app, ["preview", run_id, "--workspace", str(workspace_dir)])
-        assert preview_res.exit_code == 0
+        assert preview_res.exit_code == 0, preview_res.output
 
     return run_id
 

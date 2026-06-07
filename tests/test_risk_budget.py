@@ -15,7 +15,9 @@ from orchestrator.schemas.architect_output import ArchitectOutput, Task
 from orchestrator.schemas.artifacts import RunMetadata
 from orchestrator.schemas.executor_output import ExecutorOutput, FileChange
 from orchestrator.schemas.scout_output import ScoutOutput
+from orchestrator.schemas.findings import ScanFindings, PyProjectInfo, ToolInfo, TestSuiteInfo
 from orchestrator.schemas.validator_output import ToolResult, ValidatorOutput
+from orchestrator.workspace import WorkspaceManager
 
 runner = CliRunner()
 
@@ -421,9 +423,40 @@ def workspace_dir(tmp_path: Path) -> Path:
     return ws
 
 
+def _mock_scan_findings() -> ScanFindings:
+    return ScanFindings(
+        repository_root="/tmp",
+        base_commit="abc123",
+        branch="main",
+        v1_supported=True,
+        support_reasons=["pyproject", "ruff", "pytest", "tests"],
+        unsupported_reasons=[],
+        pyproject=PyProjectInfo(exists=True, valid=True, build_backend="hatchling.build"),
+        ruff=ToolInfo(available=True, version="0.9.0"),
+        pytest=ToolInfo(available=True, version="8.3.0"),
+        test_suite=TestSuiteInfo(detected=True, type="tests_dir"),
+        total_python_files=0,
+        packages=[],
+        modules=[],
+        hotspots=[],
+    )
+
+
+def _overwrite_findings_with_scout_output(
+    workspace_dir: Path, scout_out: ScoutOutput
+) -> None:
+    """Overwrite findings.json with ScoutOutput format for plan compatibility."""
+    ws = WorkspaceManager(workspace_dir)
+    runs_dir = workspace_dir / "runs"
+    run_id = list(runs_dir.iterdir())[0].name
+    ws.write_artifact(run_id, "findings.json", scout_out.model_dump_json(indent=2))
+
+
 def _run_scan(target_repo: Path, workspace_dir: Path) -> str:
     """Run scan with mock agents and return run_id."""
-    scan_res = runner.invoke(app, ["scan", str(target_repo), "--workspace", str(workspace_dir)])
+    scan_findings = _mock_scan_findings()
+    with patch("orchestrator.commands.scan.scan", return_value=scan_findings):
+        scan_res = runner.invoke(app, ["scan", str(target_repo), "--workspace", str(workspace_dir)])
     assert scan_res.exit_code == 0
     runs_dir = workspace_dir / "runs"
     return list(runs_dir.iterdir())[0].name
@@ -453,7 +486,7 @@ def _mock_scout() -> tuple[ScoutOutput, dict]:
 
 class TestPlanGateIntegration:
     def test_plan_blocked_by_high_risk_task(self, target_repo: Path, workspace_dir: Path):
-        scout_out, scout_meta = _mock_scout()
+        scout_out, _ = _mock_scout()
         arch_meta = {"latency_ms": 200, "cost_usd": 0.02}
         arch_out = _mock_arch(
             [
@@ -470,18 +503,16 @@ class TestPlanGateIntegration:
             ]
         )
 
-        with (
-            patch("orchestrator.main.run_scout", return_value=(scout_out, scout_meta)),
-            patch("orchestrator.agents.architect.run", return_value=(arch_out, arch_meta)),
-        ):
+        with patch("orchestrator.agents.architect.run", return_value=(arch_out, arch_meta)):
             run_id = _run_scan(target_repo, workspace_dir)
+            _overwrite_findings_with_scout_output(workspace_dir, scout_out)
             plan_res = _run_plan(run_id, workspace_dir)
 
         assert plan_res.exit_code == 1
         assert "high-risk" in plan_res.stdout
 
     def test_plan_blocked_by_too_many_files(self, target_repo: Path, workspace_dir: Path):
-        scout_out, scout_meta = _mock_scout()
+        scout_out, _ = _mock_scout()
         arch_meta = {"latency_ms": 200, "cost_usd": 0.02}
         arch_out = _mock_arch(
             [
@@ -498,18 +529,16 @@ class TestPlanGateIntegration:
             ]
         )
 
-        with (
-            patch("orchestrator.main.run_scout", return_value=(scout_out, scout_meta)),
-            patch("orchestrator.agents.architect.run", return_value=(arch_out, arch_meta)),
-        ):
+        with patch("orchestrator.agents.architect.run", return_value=(arch_out, arch_meta)):
             run_id = _run_scan(target_repo, workspace_dir)
+            _overwrite_findings_with_scout_output(workspace_dir, scout_out)
             plan_res = _run_plan(run_id, workspace_dir)
 
         assert plan_res.exit_code == 1
         assert "exceeding max_files" in plan_res.stdout
 
     def test_plan_passes_with_compliant_task(self, target_repo: Path, workspace_dir: Path):
-        scout_out, scout_meta = _mock_scout()
+        scout_out, _ = _mock_scout()
         arch_meta = {"latency_ms": 200, "cost_usd": 0.02}
         arch_out = _mock_arch(
             [
@@ -526,11 +555,9 @@ class TestPlanGateIntegration:
             ]
         )
 
-        with (
-            patch("orchestrator.main.run_scout", return_value=(scout_out, scout_meta)),
-            patch("orchestrator.agents.architect.run", return_value=(arch_out, arch_meta)),
-        ):
+        with patch("orchestrator.agents.architect.run", return_value=(arch_out, arch_meta)):
             run_id = _run_scan(target_repo, workspace_dir)
+            _overwrite_findings_with_scout_output(workspace_dir, scout_out)
             plan_res = _run_plan(run_id, workspace_dir)
 
         assert plan_res.exit_code == 0
@@ -553,14 +580,13 @@ class TestPatchGateIntegration:
         arch_tasks: list[Task],
         exec_out: ExecutorOutput,
     ):
-        scout_out, scout_meta = _mock_scout()
+        scout_out, _ = _mock_scout()
         arch_meta = {"latency_ms": 200, "cost_usd": 0.02}
         exec_meta = {"latency_ms": 300, "cost_usd": 0.03}
         arch_out = _mock_arch(arch_tasks)
         val_out = _mock_val()
 
         with (
-            patch("orchestrator.main.run_scout", return_value=(scout_out, scout_meta)),
             patch("orchestrator.agents.architect.run", return_value=(arch_out, arch_meta)),
             patch("orchestrator.agents.executor.run", return_value=(exec_out, exec_meta)),
             patch(
@@ -569,6 +595,7 @@ class TestPatchGateIntegration:
             ),
         ):
             run_id = _run_scan(target_repo, workspace_dir)
+            _overwrite_findings_with_scout_output(workspace_dir, scout_out)
             plan_res = _run_plan(run_id, workspace_dir)
             assert plan_res.exit_code == 0
             preview_res = runner.invoke(app, ["preview", run_id, "--workspace", str(workspace_dir)])
