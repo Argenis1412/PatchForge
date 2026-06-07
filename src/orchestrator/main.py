@@ -368,15 +368,15 @@ def apply(
     from orchestrator.agents.validator import run as run_validator
     from orchestrator.git import (
         apply_patch,
-        check_patch,
         create_controlled_branch,
         current_branch,
         current_head,
         force_reset_apply,
         repository_state,
     )
+    from orchestrator.lifecycle import classify_lifecycle
     from orchestrator.observability.events import log_event, log_failure
-    from orchestrator.schemas.artifacts import ApplyResult
+    from orchestrator.schemas.artifacts import ApplyResult, PatchLifecycleState
     from orchestrator.schemas.config import default_workspace_path
 
     # 1. Resolve workspace path and ensure run exists
@@ -427,27 +427,30 @@ def apply(
         )
         raise typer.Exit(code=1)
 
-    # Check commit compatibility
-    curr_head = current_head(target_path)
-    lifecycle_state = "VALID"
-    if curr_head != run_metadata.base_commit:
-        lifecycle_state = "REBASEABLE"
-        # Check if patch applies cleanly
-        chk_res = check_patch(target_path, patch_path)
-        if chk_res.return_code != 0:
-            lifecycle_state = "CONFLICT"
-            console.print(
-                f"[bold red]Error: Target repository is at HEAD {curr_head}, "
-                f"which diverged from base commit {run_metadata.base_commit}. "
-                f"The patch cannot be applied cleanly (Git Apply Check failed).[/bold red]"
-            )
-            run_metadata.lifecycle_state = "CONFLICT"
-            run_metadata.updated_at = datetime.now(timezone.utc)
-            workspace_mgr.write_run_json(run_id, run_metadata)
-            raise typer.Exit(code=1)
+    # Classify lifecycle state using the dedicated lifecycle module.
+    lifecycle_state = classify_lifecycle(run_id, workspace_mgr)
 
     run_metadata.lifecycle_state = lifecycle_state
+    run_metadata.updated_at = datetime.now(timezone.utc)
     workspace_mgr.write_run_json(run_id, run_metadata)
+
+    if lifecycle_state is PatchLifecycleState.CONFLICT:
+        console.print(
+            f"[bold red]Error: Patch lifecycle state is CONFLICT. "
+            f"HEAD {current_head(target_path)} has diverged from base commit "
+            f"{run_metadata.base_commit} and the patch cannot be applied cleanly. "
+            "Please rebase the patch or generate a new one.[/bold red]"
+        )
+        raise typer.Exit(code=1)
+
+    if lifecycle_state is PatchLifecycleState.STALE:
+        console.print(
+            "[bold red]Error: Patch lifecycle state is STALE. "
+            "The patch.diff is missing, empty, or git could not process it "
+            "(git executable not found or invalid patch format). "
+            "Please run the preview command again.[/bold red]"
+        )
+        raise typer.Exit(code=1)
 
     log_event(
         trace_id=run_id,
@@ -459,7 +462,7 @@ def apply(
         data={
             "lifecycle_state": lifecycle_state,
             "base_commit": run_metadata.base_commit,
-            "current_head": curr_head,
+            "current_head": current_head(target_path),
         },
         logs_dir=logs_dir,
         run_dir=run_dir,
