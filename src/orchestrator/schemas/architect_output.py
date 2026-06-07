@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -12,6 +12,24 @@ class Task(BaseModel):
     effort: str = Field(..., description="'high', 'medium', or 'low'")
     risk_level: str = Field(..., description="'high', 'medium', or 'low'")
     dependencies: List[str] = Field(default=[], description="List of task_ids that block this task")
+    reason: Optional[str] = Field(
+        default=None, description="Why this task is necessary given the findings."
+    )
+    risk_reasons: Optional[List[str]] = Field(
+        default=None, description="Specific reasons this task carries its stated risk level."
+    )
+    validation_expectations: Optional[List[str]] = Field(
+        default=None,
+        description="Observable outcomes that confirm the task was applied correctly.",
+    )
+    status: Literal["blocked"] | None = Field(
+        default=None,
+        description=(
+            "Set to 'blocked' by plan.py when risk_level is 'high'. "
+            "None means the task was not individually evaluated. "
+            "Plan-level approval is determined by the plan gate, not this field."
+        ),
+    )
 
 
 class ArchitectOutput(BaseModel):

@@ -190,11 +190,16 @@ Output: ONLY valid JSON matching this exact schema. No explanation. No markdown:
       "priority": "high|medium|low",
       "effort": "high|medium|low",
       "risk_level": "high|medium|low",
+      "reason": "string",
+      "risk_reasons": ["string"],
+      "validation_expectations": ["string"],
       "dependencies": ["string"]
     }}
   ],
   "blockers": ["string"]
 }}
+
+All fields are required. Do not omit any field.
 
 [SCOUT OUTPUT]
 {scout_data}

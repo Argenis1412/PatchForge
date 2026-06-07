@@ -442,9 +442,7 @@ def _mock_scan_findings() -> ScanFindings:
     )
 
 
-def _overwrite_findings_with_scout_output(
-    workspace_dir: Path, scout_out: ScoutOutput
-) -> None:
+def _overwrite_findings_with_scout_output(workspace_dir: Path, scout_out: ScoutOutput) -> None:
     """Overwrite findings.json with ScoutOutput format for plan compatibility."""
     ws = WorkspaceManager(workspace_dir)
     runs_dir = workspace_dir / "runs"
