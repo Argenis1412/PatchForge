@@ -1,8 +1,20 @@
 from __future__ import annotations
 
+from enum import Enum
 from pathlib import Path
 
 from pydantic import BaseModel
+
+
+class ApplyCheckStatus(str, Enum):
+    """Result categories for a dry-run git apply --check call."""
+
+    # git apply --check exited with rc == 0.
+    PASSED = "PASSED"
+    # git apply --check exited with rc != 0 due to a merge conflict.
+    CONFLICT = "CONFLICT"
+    # git executable not found or the patch format caused a fatal process error.
+    ERROR = "ERROR"
 
 
 class GitCommandResult(BaseModel):

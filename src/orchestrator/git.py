@@ -3,7 +3,12 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from orchestrator.schemas.git import GitCommandResult, RepositoryState, WorkingTreeStatus
+from orchestrator.schemas.git import (
+    ApplyCheckStatus,
+    GitCommandResult,
+    RepositoryState,
+    WorkingTreeStatus,
+)
 
 
 def is_git_repo(path: Path) -> bool:
@@ -113,6 +118,41 @@ def check_patch(repo_root: Path, patch_path: Path) -> GitCommandResult:
         return GitCommandResult(return_code=res.returncode, stdout=res.stdout, stderr=res.stderr)
     except FileNotFoundError as e:
         return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {e}")
+
+
+def get_current_head(repo_path: Path) -> str:
+    """Return the full SHA of the current HEAD commit in *repo_path*.
+
+    Returns an empty string when the SHA cannot be resolved (detached HEAD,
+    git not found, not a repository, etc.).
+    """
+    return current_head(repo_path)
+
+
+def try_apply_dry_run(patch_path: Path, repo_path: Path) -> ApplyCheckStatus:
+    """Run ``git apply --check`` against *patch_path* inside *repo_path*.
+
+    Returns:
+        ApplyCheckStatus.PASSED   -- rc == 0; patch applies cleanly.
+        ApplyCheckStatus.CONFLICT -- git ran but rc != 0 (merge conflict).
+        ApplyCheckStatus.ERROR    -- git executable not found or the process
+                                     raised an unexpected OS-level error.
+    """
+    try:
+        res = subprocess.run(
+            ["git", "apply", "--check", str(patch_path)],
+            capture_output=True,
+            text=True,
+            cwd=repo_path,
+            timeout=30,
+        )
+        if res.returncode == 0:
+            return ApplyCheckStatus.PASSED
+        return ApplyCheckStatus.CONFLICT
+    except FileNotFoundError:
+        return ApplyCheckStatus.ERROR
+    except Exception:
+        return ApplyCheckStatus.ERROR
 
 
 def create_controlled_branch(repo_root: Path, branch_name: str) -> GitCommandResult:

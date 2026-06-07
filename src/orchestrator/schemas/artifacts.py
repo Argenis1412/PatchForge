@@ -1,8 +1,24 @@
 import uuid
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any, List, Literal, Optional
 
 from pydantic import BaseModel, Field
+
+
+class PatchLifecycleState(str, Enum):
+    """Lifecycle classification for a generated patch."""
+
+    # HEAD matches base_commit and git apply --check passes.
+    VALID = "VALID"
+    # HEAD diverged from base_commit but git apply --check still passes.
+    REBASEABLE = "REBASEABLE"
+    # git apply --check fails with a merge conflict.
+    CONFLICT = "CONFLICT"
+    # patch.diff is missing/empty, or git apply --check fails due to a process
+    # error (git not found, invalid patch format, etc.).
+    STALE = "STALE"
+
 
 RUN_JSON = "run.json"
 FINDINGS_JSON = "findings.json"
@@ -42,7 +58,7 @@ class RunMetadata(BaseModel):
     patch_checksum: Optional[str] = None
     validation_summary: Optional[str] = None
     model_metadata: Optional[dict[str, Any]] = None
-    lifecycle_state: Optional[str] = None
+    lifecycle_state: Optional[PatchLifecycleState] = None
     apply_status: Optional[str] = None
     failure_artifacts: Optional[List[str]] = None
 

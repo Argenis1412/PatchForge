@@ -3,7 +3,10 @@ import uuid
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from orchestrator.schemas.artifacts import RunMetadata, generate_run_id
+import pytest
+from pydantic import ValidationError
+
+from orchestrator.schemas.artifacts import PatchLifecycleState, RunMetadata, generate_run_id
 
 
 def test_generate_run_id_format():
@@ -75,3 +78,40 @@ def test_run_metadata_backward_compatibility():
     assert deserialized.risk_budget == "medium"
     assert deserialized.max_files == 5
     assert deserialized.max_diff_lines == 500
+
+
+def _base_meta(**kwargs) -> RunMetadata:
+    """Return a minimal valid RunMetadata, allowing field overrides."""
+    defaults = dict(
+        run_id="run_20260101_000000_abc123",
+        target_path="/t",
+        workspace_path="/w",
+        base_commit="a" * 40,
+        branch="main",
+        v1_supported=True,
+    )
+    defaults.update(kwargs)
+    return RunMetadata(**defaults)
+
+
+@pytest.mark.parametrize("state", list(PatchLifecycleState))
+def test_run_metadata_lifecycle_state_all_valid_values(state):
+    """Every PatchLifecycleState member must be accepted by RunMetadata."""
+    meta = _base_meta(lifecycle_state=state)
+    assert meta.lifecycle_state == state
+
+    # Serialise → deserialise round-trip preserves the value.
+    rt = RunMetadata.model_validate_json(meta.model_dump_json())
+    assert rt.lifecycle_state == state
+
+
+def test_run_metadata_lifecycle_state_accepts_string_coercion():
+    """Plain string values that match enum members must be coerced by Pydantic."""
+    meta = _base_meta(lifecycle_state="VALID")
+    assert meta.lifecycle_state is PatchLifecycleState.VALID
+
+
+def test_run_metadata_lifecycle_state_rejects_invalid_value():
+    """An unrecognised lifecycle_state string must raise ValidationError."""
+    with pytest.raises(ValidationError):
+        _base_meta(lifecycle_state="UNKNOWN_STATE")
