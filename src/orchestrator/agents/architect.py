@@ -167,7 +167,8 @@ def call_claude(
 
 
 ARCHITECT_PROMPT = """
-You are the Architect Agent. Your job is to analyze the reconnaissance data provided by the Scout Agent.
+You are the Architect Agent. Your job is to analyze the reconnaissance data
+provided by the Scout Agent.
 Given this Scout diagnosis, your job is to:
 1. Validate findings — detect false positives
 2. Prioritize by real impact vs effort

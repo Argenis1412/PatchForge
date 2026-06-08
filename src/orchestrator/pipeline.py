@@ -18,7 +18,7 @@ from orchestrator.schemas.scout_output import ScoutOutput
 from orchestrator.workspace import WorkspaceManager
 
 
-class PipelineAbort(RuntimeError):
+class PipelineAbortError(RuntimeError):
     """Raised when a stage fails and downstream stages must not execute."""
 
     def __init__(
@@ -149,7 +149,7 @@ class Pipeline:
             # ── Stage: Validator ────────────────────────────────────────────
             self._stage_validator()
 
-        except PipelineAbort as exc:
+        except PipelineAbortError as exc:
             self.run.status = "failed"
             self._log_failure(
                 error_type=exc.error_type,
@@ -186,14 +186,14 @@ class Pipeline:
         manifest = self.workspace.read_manifest()
         filename = manifest.get("latest", {}).get(stage)
         if not filename:
-            raise PipelineAbort(
+            raise PipelineAbortError(
                 f"No previous output found for stage {stage} in manifest",
                 stage=stage,
                 data={"stage": stage},
             )
         path = self.workspace.outputs / filename
         if not path.exists():
-            raise PipelineAbort(
+            raise PipelineAbortError(
                 f"Manifest points to {filename} but file does not exist",
                 stage=stage,
                 data={"stage": stage, "filename": filename},
@@ -201,7 +201,7 @@ class Pipeline:
         try:
             return model_class.model_validate_json(path.read_text())
         except Exception as e:
-            raise PipelineAbort(
+            raise PipelineAbortError(
                 f"Failed to load {stage} output: {e}. Re-run from an earlier stage.",
                 stage=stage,
                 data={"stage": stage},
@@ -224,7 +224,7 @@ class Pipeline:
             return output
         except Exception as exc:
             self.run.scout_meta = AgentMeta(status="failed", error=str(exc), latency_ms=_ms(t0))
-            raise PipelineAbort(f"scout failed: {exc}", stage="scout")
+            raise PipelineAbortError(f"scout failed: {exc}", stage="scout")
 
     def _stage_architect(self, scout_output: ScoutOutput) -> ArchitectOutput:
         self._log_event("stage_start", stage="architect")
@@ -242,17 +242,17 @@ class Pipeline:
                 data={"cost_usd": meta.get("cost_usd"), "blockers": blockers},
             )
             if blockers:
-                raise PipelineAbort(
+                raise PipelineAbortError(
                     f"architect raised blockers: {blockers}",
                     stage="architect",
                     data={"blockers": blockers},
                 )
             return output
-        except PipelineAbort:
+        except PipelineAbortError:
             raise
         except Exception as exc:
             self.run.architect_meta = AgentMeta(status="failed", error=str(exc), latency_ms=_ms(t0))
-            raise PipelineAbort(f"architect failed: {exc}", stage="architect")
+            raise PipelineAbortError(f"architect failed: {exc}", stage="architect")
 
     def _apply_executor_results(self, result: ExecutorOutput, model_used: str = "unknown") -> None:
         self.run.tasks_total = len(result.applied) + len(result.pending_review) + len(result.errors)
@@ -307,7 +307,7 @@ class Pipeline:
             )
         except Exception as exc:
             self.run.executor_meta = AgentMeta(status="failed", error=str(exc), latency_ms=_ms(t0))
-            raise PipelineAbort(f"executor failed: {exc}", stage="executor")
+            raise PipelineAbortError(f"executor failed: {exc}", stage="executor")
 
     def _stage_validator(self) -> None:
         if self.run.tasks_applied == 0:
