@@ -1,6 +1,6 @@
 [project]
 name = "orchestrator-core"
-version = "0.1.0"
+version = "1.0.0"
 description = "Target-agnostic orchestration runtime for multi-stage software engineering workflows"
 readme = "README.md"
 license = {text = "MIT"}

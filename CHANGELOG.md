@@ -7,22 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-- **Renamed CLI**: `orchestrator` → `patchforge` as primary entry point. `orchestrator` retained as legacy alias.
-- Documentation updated to use `patchforge` CLI throughout.
-- **Renamed project**: `agent-lab` → `orchestrator-core`, package import `agent_lab` → `orchestrator`
-- **Renamed CLI**: `agent-lab` → `orchestrator`
-- Full rebrand of documentation and metadata
+## [1.0.0] - 2026-06-08
 
-### Added
-- Multi-agent pipeline for code analysis (Scout, Architect, Executor, Validator)
-- Support for multiple LLM providers (Google Gemini, Anthropic Claude, Groq)
-- Dry-run mode to preview changes without applying them
-- Resume from specific pipeline stages
-- Comprehensive logging and artifact tracking
+### Highlights
 
-### Fixed
-- Improved error handling in executor stage
+- Deterministic scan workflow
+- Risk gates for plan and patch size
+- Failure-state handling and apply rollback
+- AI-assisted planning (Claude Sonnet 4.6)
+- Preview validation in isolated copy
+- Safe git-based apply workflow
+- CLI rename from `orchestrator` to `patchforge`
+- Legacy `run` command deprecated, hidden from help
+- All lint violations resolved (`ruff check .` → 0 errors)
 
 ## [0.1.0] - 2026-05-27
 
