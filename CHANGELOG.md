@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Renamed CLI**: `orchestrator` → `patchforge` as primary entry point. `orchestrator` retained as legacy alias.
+- Documentation updated to use `patchforge` CLI throughout.
 - **Renamed project**: `agent-lab` → `orchestrator-core`, package import `agent_lab` → `orchestrator`
 - **Renamed CLI**: `agent-lab` → `orchestrator`
 - Full rebrand of documentation and metadata

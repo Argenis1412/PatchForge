@@ -1,14 +1,14 @@
-# Contributing to orchestrator-core
+# Contributing to PatchForge
 
-Thank you for your interest in contributing to orchestrator-core! This document outlines our contribution guidelines and workflow.
+Thank you for your interest in contributing to PatchForge! This document outlines our contribution guidelines and workflow.
 
 ## Getting Started
 
 1. **Fork the repository** on GitHub
 2. **Clone your fork locally**:
    ```bash
-   git clone https://github.com/your-username/orchestrator-core.git
-   cd orchestrator-core
+git clone https://github.com/your-username/PatchForge.git
+cd PatchForge
    ```
 
 3. **Set up development environment**:

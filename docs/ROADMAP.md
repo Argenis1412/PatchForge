@@ -2,7 +2,7 @@
 
 ## Product North Star
 
-orchestrator-core is evolving toward a Git-native refactoring engine for real repositories.
+PatchForge is evolving toward a Git-native refactoring engine for real repositories.
 
 The core promise is:
 
@@ -13,11 +13,11 @@ Generate, validate, and apply reviewable code patches safely.
 The target user workflow is:
 
 ```bash
-orchestrator doctor .
-orchestrator scan .
-orchestrator plan .
-orchestrator preview .
-orchestrator apply run_001
+patchforge doctor .
+patchforge scan .
+patchforge plan .
+patchforge preview .
+patchforge apply run_001
 ```
 
 The implementation may use agents, typed contracts, checkpoints, model routing, and observability,
@@ -52,12 +52,12 @@ Out of scope:
 
 ## Phase 1 — `doctor`
 
-Goal: give users a safe first command that explains whether a repository is ready for orchestrator.
+Goal: give users a safe first command that explains whether a repository is ready for patchforge.
 
 Target command:
 
 ```bash
-orchestrator doctor .
+patchforge doctor .
 ```
 
 Expected checks:
@@ -85,9 +85,9 @@ Goal: separate intent from patch generation.
 Target commands:
 
 ```bash
-orchestrator scan .
-orchestrator plan .
-orchestrator preview .
+patchforge scan .
+patchforge plan .
+patchforge preview .
 ```
 
 Semantics:
@@ -148,7 +148,7 @@ Goal: make repository modification an explicit, reviewable, Git-controlled step.
 Target command:
 
 ```bash
-orchestrator apply run_001
+patchforge apply run_001
 ```
 
 Required behavior:
@@ -177,10 +177,10 @@ Goal: increase real-world success by limiting the size and risk of proposed chan
 Target options:
 
 ```bash
-orchestrator plan . --risk-budget low
-orchestrator preview . --max-files 5
-orchestrator preview . --max-diff-lines 300
-orchestrator plan . --exclude auth,payments
+patchforge plan . --risk-budget low
+patchforge preview . --max-files 5
+patchforge preview . --max-diff-lines 300
+patchforge plan . --exclude auth,payments
 ```
 
 Success criteria:
@@ -250,10 +250,10 @@ Goal: support larger version migrations through explicit, versioned migration pa
 Candidate commands:
 
 ```bash
-orchestrator migrate detect .
-orchestrator migrate plan fastapi@1
-orchestrator migrate preview run_001
-orchestrator migrate apply run_001
+patchforge migrate detect .
+patchforge migrate plan fastapi@1
+patchforge migrate preview run_001
+patchforge migrate apply run_001
 ```
 
 Migration packs should include:
@@ -278,7 +278,7 @@ Goal: bring the patch workflow into pull requests without creating noisy bots.
 Candidate command:
 
 ```bash
-orchestrator review --changed-files-only
+patchforge review --changed-files-only
 ```
 
 Success criteria:

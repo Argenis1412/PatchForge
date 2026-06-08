@@ -1,12 +1,12 @@
 # PatchForge
 
-[![CI](https://github.com/Argenis1412/orchestrator-core/actions/workflows/ci.yml/badge.svg)](https://github.com/Argenis1412/orchestrator-core/actions)
+[![CI](https://github.com/Argenis1412/PatchForge/actions/workflows/ci.yml/badge.svg)](https://github.com/Argenis1412/PatchForge/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 
-> Working title. Repository currently named **orchestrator-core**.
 
-orchestrator-core is evolving into a Git-native refactoring engine for real repositories: generate,
+
+PatchForge is a Git-native refactoring engine for real repositories: generate,
 validate, and apply reviewable code patches safely.
 
 ## Philosophy
@@ -36,16 +36,6 @@ Every change remains reviewable before repository modification.
 The long-term product workflow is intentionally simple:
 
 ```bash
-orchestrator doctor .
-orchestrator scan .
-orchestrator plan .
-orchestrator preview .
-orchestrator apply run_001
-```
-
-**Planned CLI** (subject to infrastructure rename):
-
-```bash
 patchforge doctor .
 patchforge scan .
 patchforge plan .
@@ -67,12 +57,12 @@ PatchForge SHALL NOT modify repository contents unless:
 4. User explicitly executes `apply`.
 
 Current implementation caveat: today, the default workspace is created under the target repository
-(`./workspace`). That means `orchestrator scan ./your-project` may write orchestrator artifacts inside
+(`./workspace`). That means `patchforge scan ./your-project` may write orchestrator artifacts inside
 the target working tree before `apply` is available. Until the workspace redesign lands, pass an external
 workspace path when you want strict no-target-write behavior:
 
 ```bash
-orchestrator scan ./your-project --workspace /tmp/orchestrator-workspace
+patchforge scan ./your-project --workspace /tmp/patchforge-workspace
 ```
 
 The product contract means:
@@ -163,18 +153,18 @@ packs, CI review, and autonomous bug investigation are deferred until the patch 
 ## Quickstart
 
 ```bash
-git clone https://github.com/Argenis1412/orchestrator-core.git
-cd orchestrator-core
+git clone https://github.com/Argenis1412/PatchForge.git
+cd PatchForge
 pip install -e .
 
 # Current available analysis command. Use an external workspace to avoid
 # writing orchestrator artifacts under ./your-project/workspace.
-orchestrator scan ./your-project --workspace /tmp/orchestrator-workspace
+patchforge scan ./your-project --workspace /tmp/patchforge-workspace
 ```
 
 ## Why this direction?
 
-Most agent frameworks expose internal orchestration as the product. orchestrator-core takes the
+Most agent frameworks expose internal orchestration as the product. PatchForge takes the
 opposite approach: the runtime can be agentic internally, but the product should feel like a normal
 engineering tool.
 
@@ -188,7 +178,7 @@ The design goals are:
 
 ## Non-goals for V1
 
-orchestrator-core V1 is **NOT**:
+PatchForge V1 is **NOT**:
 
 - A general-purpose agent framework.
 - A chatbot or conversational IDE.

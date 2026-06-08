@@ -1,6 +1,6 @@
-# orchestrator-core Documentation
+# PatchForge Documentation
 
-orchestrator-core is evolving into a Git-native refactoring engine for real repositories. Its goal
+PatchForge is a Git-native refactoring engine for real repositories. Its goal
 is to generate, validate, and apply reviewable code patches safely.
 
 The internal runtime can use agents, typed contracts, provider routing, checkpoints, and structured
@@ -23,11 +23,11 @@ Repository → Scan → Plan → Patch → Validation → Apply
 The target command flow is:
 
 ```bash
-orchestrator doctor .
-orchestrator scan .
-orchestrator plan .
-orchestrator preview .
-orchestrator apply run_001
+patchforge doctor .
+patchforge scan .
+patchforge plan .
+patchforge preview .
+patchforge apply run_001
 ```
 
 The target safety rule is:
@@ -35,7 +35,7 @@ The target safety rule is:
 > No command before `apply` may modify the target repository working tree.
 
 Current caveat: the implementation currently defaults workspace writes to `<target>/workspace`. Use
-`--workspace /tmp/orchestrator-workspace` for scans when you want to keep generated artifacts outside
+`--workspace /tmp/patchforge-workspace` for scans when you want to keep generated artifacts outside
 the target repository until the workspace redesign is implemented.
 
 ### Product Concepts
@@ -89,8 +89,8 @@ See [Product Roadmap](./ROADMAP.md) for details.
 ### Installation
 
 ```bash
-git clone https://github.com/Argenis1412/orchestrator-core.git
-cd orchestrator-core
+git clone https://github.com/Argenis1412/PatchForge.git
+cd PatchForge
 pip install -e .
 ```
 
@@ -106,7 +106,7 @@ cp .env.example .env
 ### First Run
 
 ```bash
-orchestrator scan /path/to/project --workspace /tmp/orchestrator-workspace
+patchforge scan /path/to/project --workspace /tmp/patchforge-workspace
 ```
 
 ## Development
@@ -115,8 +115,8 @@ orchestrator scan /path/to/project --workspace /tmp/orchestrator-workspace
 
 ```bash
 # Clone and navigate
-git clone https://github.com/Argenis1412/orchestrator-core.git
-cd orchestrator-core
+git clone https://github.com/Argenis1412/PatchForge.git
+cd PatchForge
 
 # Create virtual environment
 python -m venv .venv

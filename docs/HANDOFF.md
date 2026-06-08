@@ -2,7 +2,7 @@
 
 ## Product Direction
 
-orchestrator-core is moving from a public “multi-agent runtime” framing toward a Git-native
+PatchForge is moving from a public “multi-agent runtime” framing toward a Git-native
 reviewable patch workflow:
 
 ```text
@@ -34,7 +34,7 @@ Allowed before `apply`:
 
 - read repository files
 - inspect Git metadata
-- write orchestrator workspace artifacts
+- write PatchForge workspace artifacts
 - generate `patch.diff`
 - validate in a non-mutating way
 
