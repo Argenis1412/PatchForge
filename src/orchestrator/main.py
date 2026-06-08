@@ -106,7 +106,8 @@ def run(
     """Run the full orchestrator pipeline on a target project."""
     console.print(
         Panel(
-            f"[bold cyan]orchestrator Pipeline[/bold cyan]\nTarget: [yellow]{path.absolute()}[/yellow]",
+            "[bold cyan]orchestrator Pipeline[/bold cyan]\n"
+            f"Target: [yellow]{path.absolute()}[/yellow]",
             expand=False,
         )
     )
@@ -126,14 +127,16 @@ def run(
     if status == "completed":
         console.print(
             Panel(
-                f"[bold green]Pipeline finished successfully![/bold green]\nRun ID: {result.run_id}",
+                "[bold green]Pipeline finished successfully![/bold green]\n"
+                f"Run ID: {result.run_id}",
                 expand=False,
             )
         )
     elif status == "awaiting_review":
         console.print(
             Panel(
-                f"[bold yellow]Pipeline finished with pending review items.[/bold yellow]\nRun ID: {result.run_id}",
+                "[bold yellow]Pipeline finished with pending review items.[/bold yellow]\n"
+                f"Run ID: {result.run_id}",
                 expand=False,
             )
         )
@@ -206,7 +209,8 @@ def apply(
     """Apply the validated patch to the target repository."""
     console.print(
         Panel(
-            f"[bold red]orchestrator Apply Patch (V1)[/bold red]\nRun ID: [yellow]{run_id}[/yellow]",
+            "[bold red]orchestrator Apply Patch (V1)[/bold red]\n"
+            f"Run ID: [yellow]{run_id}[/yellow]",
             expand=False,
         )
     )
@@ -243,6 +247,23 @@ def apply(
 
     # 2. Read run.json and patch.diff
     run_metadata = workspace_mgr.read_run_json(run_id)
+
+    if run_metadata.status != "previewed":
+        _status_msgs = {
+            "validation_failed": (
+                "Patch validation failed during preview. Review validation.json, "
+                "fix the issues, and run preview again."
+            ),
+            "applied": "This patch has already been applied. Start a new run.",
+        }
+        msg = _status_msgs.get(
+            run_metadata.status,
+            f"Run status is '{run_metadata.status}'. "
+            "Only successfully previewed runs can be applied.",
+        )
+        console.print(f"[bold red]Error: {msg}[/bold red]")
+        raise typer.Exit(code=1)
+
     target_path = Path(run_metadata.target_path)
     logs_dir = workspace_path / "logs"
     run_dir = workspace_mgr.run_dir(run_id)
@@ -344,7 +365,9 @@ def apply(
     if actual_checksum != run_metadata.patch_checksum:
         console.print(
             "[bold red]Error: Patch checksum mismatch. The patch.diff has been modified "
-            f"since preview.\nExpected: {run_metadata.patch_checksum}\nActual:   {actual_checksum}[/bold red]"
+            "since preview.\n"
+            f"Expected: {run_metadata.patch_checksum}\n"
+            f"Actual:   {actual_checksum}[/bold red]"
         )
         run_metadata.status = "failed"
         run_metadata.apply_status = "failed"
@@ -404,9 +427,10 @@ def apply(
         if revert_res.return_code != 0:
             console.print(
                 "[bold red]FATAL: Patch application failed AND the automatic revert also failed. "
-                f"Your repository may be in a partially applied state.\n"
+                "Your repository may be in a partially applied state.\n"
                 f"Revert stderr: {revert_res.stderr}\n"
-                "Please run 'git checkout .' and 'git clean -fd' manually to restore a clean state.[/bold red]"
+                "Please run 'git checkout .' and 'git clean -fd' manually "
+                "to restore a clean state.[/bold red]"
             )
             log_failure(
                 trace_id=run_id,
@@ -449,7 +473,8 @@ def apply(
         except Exception as exc:
             progress.update(task, completed=100)
             console.print(
-                f"[bold yellow]Warning: post-apply validation failed to execute: {exc}[/bold yellow]"
+                "[bold yellow]Warning: post-apply validation failed to execute: "
+                f"{exc}[/bold yellow]"
             )
             post_val_output = None
 
@@ -467,9 +492,10 @@ def apply(
         if not rollback_succeeded:
             console.print(
                 "[bold red]FATAL: Post-apply validation failed AND automatic rollback also failed. "
-                f"Your repository may be in a partially applied state.\n"
+                "Your repository may be in a partially applied state.\n"
                 f"Revert stderr: {revert_res.stderr}\n"
-                "Please run 'git checkout .' and 'git clean -fd' manually to restore a clean state.[/bold red]"
+                "Please run 'git checkout .' and 'git clean -fd' manually "
+                "to restore a clean state.[/bold red]"
             )
             log_failure(
                 trace_id=run_id,
@@ -554,10 +580,11 @@ def apply(
 
     console.print(
         Panel(
-            f"[bold green]Patch applied successfully to branch [yellow]{branch_name}[/yellow]![/bold green]\n\n"
-            f"To review and commit the changes, run:\n"
-            f"  [cyan]git status[/cyan]\n"
-            f"  [cyan]git diff[/cyan]\n"
+            "[bold green]Patch applied successfully to branch "
+            f"[yellow]{branch_name}[/yellow]![/bold green]\n\n"
+            "To review and commit the changes, run:\n"
+            "  [cyan]git status[/cyan]\n"
+            "  [cyan]git diff[/cyan]\n"
             f'  [cyan]git commit -am "Apply patch {run_id}"[/cyan]',
             expand=False,
         )

@@ -242,7 +242,7 @@ def execute(
     run_metadata.patch_checksum = patch_checksum
     run_metadata.validation_summary = validation_summary
     run_metadata.model_metadata = model_metadata
-    run_metadata.status = "previewed"
+    run_metadata.status = "previewed" if validator_output.overall_passed else "validation_failed"
     run_metadata.updated_at = datetime.now(timezone.utc)
     workspace_mgr.write_run_json(run_id, run_metadata)
 
