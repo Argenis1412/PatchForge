@@ -1,5 +1,6 @@
 """Tests for CLI commands."""
 
+import re
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -10,15 +11,22 @@ from orchestrator.main import app
 
 runner = CliRunner()
 
+_ANSI_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+
+
+def _strip(text: str) -> str:
+    return _ANSI_RE.sub("", text)
+
 
 def test_run_hidden_from_help():
     result = runner.invoke(app, ["--help"])
-    assert "│ run " not in result.stdout
-    assert "│ doctor" in result.stdout
-    assert "│ scan" in result.stdout
-    assert "│ plan" in result.stdout
-    assert "│ preview" in result.stdout
-    assert "│ apply" in result.stdout
+    clean = _strip(result.stdout)
+    assert "│ run " not in clean
+    assert "│ doctor" in clean
+    assert "│ scan" in clean
+    assert "│ plan" in clean
+    assert "│ preview" in clean
+    assert "│ apply" in clean
 
 
 def test_run_still_callable():
