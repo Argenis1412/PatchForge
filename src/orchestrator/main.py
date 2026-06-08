@@ -16,7 +16,9 @@ from orchestrator.clients.bootstrap import bootstrap_environment
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.workspace import WorkspaceManager
 
-app = typer.Typer(help="orchestrator runtime - multi-stage software engineering workflows.")
+app = typer.Typer(
+    name="patchforge", help="PatchForge - deterministic patch planning and execution."
+)
 console = Console()
 
 
@@ -95,13 +97,13 @@ def run(
 ):
     """Deprecated. Use doctor, scan, plan, preview, and apply instead."""
     console.print(
-        "[yellow]Warning: `orchestrator run` is deprecated and hidden in V1.\n\n"
+        "[yellow]Warning: `patchforge run` is deprecated and hidden in V1.\n\n"
         "Use the new V1 workflow:\n"
-        "  orchestrator doctor .\n"
-        "  orchestrator scan .\n"
-        "  orchestrator plan <run_id>\n"
-        "  orchestrator preview <run_id>\n"
-        "  orchestrator apply <run_id>[/yellow]"
+        "  patchforge doctor .\n"
+        "  patchforge scan .\n"
+        "  patchforge plan <run_id>\n"
+        "  patchforge preview <run_id>\n"
+        "  patchforge apply <run_id>[/yellow]"
     )
 
 
@@ -164,8 +166,7 @@ def apply(
     """Apply the validated patch to the target repository."""
     console.print(
         Panel(
-            "[bold red]orchestrator Apply Patch (V1)[/bold red]\n"
-            f"Run ID: [yellow]{run_id}[/yellow]",
+            f"[bold red]PatchForge Apply Patch (V1)[/bold red]\nRun ID: [yellow]{run_id}[/yellow]",
             expand=False,
         )
     )

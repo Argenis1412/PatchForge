@@ -32,7 +32,7 @@ def execute(
 ) -> None:
     console.print(
         Panel(
-            f"[bold yellow]orchestrator Preview & Validation (V1)[/bold yellow]"
+            f"[bold yellow]PatchForge Preview & Validation (V1)[/bold yellow]"
             f"\nRun ID: [yellow]{run_id}[/yellow]",
             expand=False,
         )
