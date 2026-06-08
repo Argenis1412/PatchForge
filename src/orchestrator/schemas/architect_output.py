@@ -38,7 +38,9 @@ class ArchitectOutput(BaseModel):
     )
     false_positives: List[str] = Field(
         ...,
-        description="Findings from the Scout that are likely false positives or not worth the effort",
+        description=(
+            "Findings from the Scout that are likely false positives or not worth the effort"
+        ),
     )
     systemic_risks: List[str] = Field(..., description="Systemic risks not caught by the Scout")
     implementation_plan: List[Task] = Field(

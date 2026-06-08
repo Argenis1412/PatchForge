@@ -10,7 +10,9 @@ def test_scout_run_returns_tuple(mock_gemini):
     # Pass 2: returns JSON diagnostic
     pass1 = ('["file.py"]', {"input": 1, "output": 1}, 0.01)
     pass2 = (
-        '{"hotspots": [{"file": "test.py", "issue": "x", "severity": "low", "risk_level": "low", "dependencies": []}], "summary": "s", "risks": ["r"], "recommended_order": ["t1"]}',
+        '{"hotspots": [{"file": "test.py", "issue": "x", "severity": "low", '
+        '"risk_level": "low", "dependencies": []}], "summary": "s", '
+        '"risks": ["r"], "recommended_order": ["t1"]}',
         {"input": 1, "output": 1},
         0.01,
     )
@@ -26,7 +28,9 @@ def test_scout_run_returns_tuple(mock_gemini):
 def test_scout_meta_has_required_keys(mock_gemini):
     pass1 = ('["file.py"]', {"input": 1, "output": 1}, 0.01)
     pass2 = (
-        '{"hotspots": [{"file": "test.py", "issue": "x", "severity": "low", "risk_level": "low", "dependencies": []}], "summary": "s", "risks": ["r"], "recommended_order": ["t1"]}',
+        '{"hotspots": [{"file": "test.py", "issue": "x", "severity": "low", '
+        '"risk_level": "low", "dependencies": []}], "summary": "s", '
+        '"risks": ["r"], "recommended_order": ["t1"]}',
         {"input": 1, "output": 1},
         0.01,
     )

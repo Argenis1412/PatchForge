@@ -6,10 +6,9 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-SCHEMA_VERSION = "1.0"
-
-
 from orchestrator.git import resolve_git_root as _resolve_git_root
+
+SCHEMA_VERSION = "1.0"
 
 
 def _workspace_hash(root_path: Path) -> str:
@@ -131,7 +130,8 @@ class TargetConfig(BaseModel):
                 # Merge capabilities overrides from file
                 if "capabilities" in file_data and isinstance(file_data["capabilities"], dict):
                     for cap_key, val in file_data["capabilities"].items():
-                        eff_key = f"effective_{cap_key.replace('effective_', '').replace('detected_', '')}"
+                        stripped = cap_key.replace("effective_", "").replace("detected_", "")
+                        eff_key = f"effective_{stripped}"
                         if hasattr(detected_caps, eff_key):
                             setattr(detected_caps, eff_key, bool(val))
             except Exception as e:

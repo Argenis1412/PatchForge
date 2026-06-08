@@ -14,8 +14,8 @@ from orchestrator.risk import (
 from orchestrator.schemas.architect_output import ArchitectOutput, Task
 from orchestrator.schemas.artifacts import RunMetadata
 from orchestrator.schemas.executor_output import ExecutorOutput, FileChange
+from orchestrator.schemas.findings import PyProjectInfo, ScanFindings, TestSuiteInfo, ToolInfo
 from orchestrator.schemas.scout_output import ScoutOutput
-from orchestrator.schemas.findings import ScanFindings, PyProjectInfo, ToolInfo, TestSuiteInfo
 from orchestrator.schemas.validator_output import ToolResult, ValidatorOutput
 from orchestrator.workspace import WorkspaceManager
 
