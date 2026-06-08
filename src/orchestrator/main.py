@@ -13,7 +13,6 @@ if sys.stdout.encoding != "utf-8":
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from orchestrator.clients.bootstrap import bootstrap_environment
-from orchestrator.pipeline import Pipeline
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.workspace import WorkspaceManager
 
@@ -87,67 +86,23 @@ def doctor(
         raise typer.Exit(code=1)
 
 
-@app.command()
+@app.command(hidden=True)
 def run(
-    path: Path = typer.Argument(..., help="Target project path"),
-    dry_run: bool = typer.Option(
-        False,
-        "--dry-run",
-        help="Run the pipeline until the Executor stage, but don't apply changes",
-    ),
-    from_stage: Optional[str] = typer.Option(
-        None, "--from-stage", help="Stage to resume from (scout, architect, executor)"
-    ),
-    env_file: Optional[Path] = typer.Option(None, "--env-file", help="Path to a custom .env file"),
-    workspace: Optional[Path] = typer.Option(
-        None, "--workspace", help="Path to the workspace directory"
+    path: Optional[Path] = typer.Argument(
+        default=None,
+        help="Ignored. Deprecated command.",
     ),
 ):
-    """Run the full orchestrator pipeline on a target project."""
+    """Deprecated. Use doctor, scan, plan, preview, and apply instead."""
     console.print(
-        Panel(
-            "[bold cyan]orchestrator Pipeline[/bold cyan]\n"
-            f"Target: [yellow]{path.absolute()}[/yellow]",
-            expand=False,
-        )
+        "[yellow]Warning: `orchestrator run` is deprecated and hidden in V1.\n\n"
+        "Use the new V1 workflow:\n"
+        "  orchestrator doctor .\n"
+        "  orchestrator scan .\n"
+        "  orchestrator plan <run_id>\n"
+        "  orchestrator preview <run_id>\n"
+        "  orchestrator apply <run_id>[/yellow]"
     )
-
-    with Progress(
-        SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console
-    ) as progress:
-        progress.add_task("[cyan]Bootstrapping environment...", total=None)
-        config = _load_target_config(path=path, workspace=workspace, env_file=env_file)
-
-    pipeline = Pipeline(config=config, from_stage=from_stage)
-
-    console.print("[bold blue]Starting pipeline execution...[/bold blue]")
-    result = pipeline.execute(dry_run=dry_run)
-
-    status = result.status
-    if status == "completed":
-        console.print(
-            Panel(
-                "[bold green]Pipeline finished successfully![/bold green]\n"
-                f"Run ID: {result.run_id}",
-                expand=False,
-            )
-        )
-    elif status == "awaiting_review":
-        console.print(
-            Panel(
-                "[bold yellow]Pipeline finished with pending review items.[/bold yellow]\n"
-                f"Run ID: {result.run_id}",
-                expand=False,
-            )
-        )
-    else:
-        console.print(
-            Panel(
-                f"[bold red]Pipeline failed ({status}).[/bold red]\nRun ID: {result.run_id}",
-                expand=False,
-            )
-        )
-        raise typer.Exit(code=1)
 
 
 @app.command()
