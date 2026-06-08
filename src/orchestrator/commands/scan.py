@@ -37,7 +37,7 @@ def execute(config: TargetConfig) -> None:
     """
     console.print(
         Panel(
-            f"[bold magenta]orchestrator Scanner (V1)[/bold magenta]\n"
+            f"[bold magenta]PatchForge Scanner (V1)[/bold magenta]\n"
             f"Target: [yellow]{config.target_path}[/yellow]",
             expand=False,
         )

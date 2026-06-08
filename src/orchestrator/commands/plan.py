@@ -27,8 +27,7 @@ def execute(
 ) -> None:
     console.print(
         Panel(
-            f"[bold cyan]orchestrator Architect (V1)[/bold cyan]"
-            f"\nRun ID: [yellow]{run_id}[/yellow]",
+            f"[bold cyan]PatchForge Architect (V1)[/bold cyan]\nRun ID: [yellow]{run_id}[/yellow]",
             expand=False,
         )
     )
@@ -64,7 +63,7 @@ def execute(
         console.print("[bold red]Error: This run used V1 deterministic scan (no AI).[/bold red]")
         console.print("[red]`plan` requires AI-based analysis from the legacy Scout agent.[/red]")
         console.print(
-            "[red]Run `orchestrator run .` to execute the full AI pipeline, "
+            "[red]Run `patchforge run .` to execute the full AI pipeline, "
             "or use `scan` for V1 deterministic results.[/red]"
         )
         run_metadata.status = "failed"

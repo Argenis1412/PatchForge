@@ -34,6 +34,7 @@ Documentation = "https://github.com/Argenis1412/orchestrator-core#readme"
 "Bug Tracker" = "https://github.com/Argenis1412/orchestrator-core/issues"
 
 [project.scripts]
+patchforge = "orchestrator.main:app"
 orchestrator = "orchestrator.main:app"
 
 [project.optional-dependencies]
