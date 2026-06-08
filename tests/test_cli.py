@@ -1,8 +1,8 @@
-"""Tests for CLI exit code mapping based on pipeline status."""
+"""Tests for CLI commands."""
 
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from typer.testing import CliRunner
 
@@ -11,37 +11,35 @@ from orchestrator.main import app
 runner = CliRunner()
 
 
-def _invoke(status: str, args: list[str] | None = None):
-    mock_result = MagicMock()
-    mock_result.status = status
-    mock_result.run_id = "test"
-    mock = MagicMock()
-    mock.return_value = mock_result
-
-    with (
-        patch("orchestrator.main.bootstrap_environment"),
-        patch("orchestrator.main.TargetConfig.load"),
-        patch("orchestrator.main.Pipeline") as mock_pipeline_cls,
-    ):
-        mock_pipeline_cls.return_value.execute.return_value = mock_result
-        result = runner.invoke(app, args or ["run", str(Path.cwd())])
-    return result
+def test_run_hidden_from_help():
+    result = runner.invoke(app, ["--help"])
+    assert "│ run " not in result.stdout
+    assert "│ doctor" in result.stdout
+    assert "│ scan" in result.stdout
+    assert "│ plan" in result.stdout
+    assert "│ preview" in result.stdout
+    assert "│ apply" in result.stdout
 
 
-def test_completed_exit_zero():
-    assert _invoke("completed").exit_code == 0
+def test_run_still_callable():
+    result = runner.invoke(app, ["run"])
+    assert result.exit_code == 0
 
 
-def test_awaiting_review_exit_zero():
-    assert _invoke("awaiting_review").exit_code == 0
+def test_run_shows_deprecation_warning():
+    result = runner.invoke(app, ["run", str(Path.cwd())])
+    assert result.exit_code == 0
+    assert "deprecated" in result.stdout
+    assert "orchestrator scan" in result.stdout
+    assert "orchestrator plan" in result.stdout
+    assert "orchestrator preview" in result.stdout
+    assert "orchestrator apply" in result.stdout
 
 
-def test_failed_exit_one():
-    assert _invoke("failed").exit_code == 1
-
-
-def test_validation_failed_exit_one():
-    assert _invoke("validation_failed").exit_code == 1
+def test_run_rejects_legacy_flags():
+    result = runner.invoke(app, ["run", str(Path.cwd()), "--dry-run"])
+    assert result.exit_code != 0
+    assert "No such option" in result.stderr
 
 
 def test_scan_rejects_workspace_inside_target(tmp_path):
