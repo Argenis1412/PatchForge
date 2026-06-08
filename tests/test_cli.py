@@ -38,6 +38,7 @@ def test_run_shows_deprecation_warning():
     result = runner.invoke(app, ["run", str(Path.cwd())])
     assert result.exit_code == 0
     assert "deprecated" in result.stdout
+    assert "orchestrator doctor" in result.stdout
     assert "orchestrator scan" in result.stdout
     assert "orchestrator plan" in result.stdout
     assert "orchestrator preview" in result.stdout
