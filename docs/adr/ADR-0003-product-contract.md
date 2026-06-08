@@ -6,7 +6,7 @@ Accepted as product direction (May 2026, Updated June 2026)
 
 ## Context
 
-The system, conceptually named **PatchForge** (implemented in this repository as `orchestrator-core`), began as a multi-stage agent runtime. While internal agent roles (Scout, Architect, Executor, Validator) remain useful internally for planning and execution, they are implementation details.
+The system, conceptually named **PatchForge** (implemented in this repository), began as a multi-stage agent runtime. While internal agent roles (Scout, Architect, Executor, Validator) remain useful internally for planning and execution, they are implementation details.
 
 The core user-facing value is a safe, reviewable patch for a real repository.
 
@@ -33,17 +33,18 @@ This ADR defines the binding product contract and constraints that govern safety
 The system SHALL be developed and operated as a Git-native refactoring engine that generates, validates, and applies reviewable patches.
 
 - **Conceptual Product Name**: PatchForge
-- **Current Internal Repository & Python Package**: `orchestrator-core`
-- **CLI Executable Name**: `orchestrator` (retained for infrastructure and backwards compatibility)
+- **Current Repository**: `PatchForge`
+- **Python Package**: `orchestrator`
+- **CLI Executable Name**: `patchforge` (primary), `orchestrator` (legacy alias, retained for V1 compatibility, candidate for removal in V2)
 
 The CLI workflow remains:
 
 ```bash
-orchestrator doctor .
-orchestrator scan .
-orchestrator plan .
-orchestrator preview .
-orchestrator apply run_001
+patchforge doctor .
+patchforge scan .
+patchforge plan .
+patchforge preview .
+patchforge apply run_001
 ```
 
 ---
@@ -59,7 +60,7 @@ The system SHALL NOT modify repository contents unless:
 
 This contract is the core trust boundary of the product. No action taken by the system before an explicit `apply` command may mutate the target repository's working tree.
 
-> **⚠ Current implementation caveat**: `TargetConfig.load()` still defaults `workspace_path` to `<target>/workspace`, which means `scan` and `run` commands write logs and artifacts inside the target repository before any `apply` command. Until the workspace redesign lands, users must pass an explicit `--workspace /tmp/orchestrator-workspace` (or equivalent path outside the target tree) to satisfy this contract today.
+> **⚠ Current implementation caveat**: `TargetConfig.load()` still defaults `workspace_path` to `<target>/workspace`, which means `scan` and `run` commands write logs and artifacts inside the target repository before any `apply` command. Until the workspace redesign lands, users must pass an explicit `--workspace /tmp/patchforge-workspace` (or equivalent path outside the target tree) to satisfy this contract today.
 
 ---
 
