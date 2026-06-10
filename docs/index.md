@@ -13,8 +13,10 @@ Repository → Scan → Plan → Patch → Validation → Apply
 ## Quick Links
 
 - [README](../README.md) - Project overview and quickstart
+- [Product Thesis V2](./product-thesis-v2.md) - Product definition, artifact contract, and non-goals (post-adversarial)
 - [Product Thesis](./PRODUCT_THESIS.md) - Why PatchForge exists, its principles, and competitive moat
 - [Product Roadmap](./ROADMAP.md) - Phased plan toward the reviewable patch workflow
+- [Issue Registry](./planning/issue-registry.md) - Tracked issues with ACs, priorities, and dependencies (ADR-01 decomposed)
 - [ADR-0003: Product Contract](./adr/ADR-0003-product-contract.md) - Binding repository safety contract and patch lifecycle
 - [Quality Gate](./QUALITY_GATE.md) - Pre-merge checklist
 
