@@ -41,17 +41,22 @@ def parse_llm_response(text: str, schema: type[T]) -> T:
 
     decoder = json.JSONDecoder()
     idx = 0
+    last_decode_error: json.JSONDecodeError | None = None
 
     while True:
         start = text.find("{", idx)
         if start == -1:
+            if last_decode_error is not None:
+                raise LLMParseError(text=text) from last_decode_error
             raise LLMParseError(text=text)
 
         try:
             value, end = decoder.raw_decode(text, start)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            last_decode_error = e
             idx = start + 1
             continue
+        last_decode_error = None
 
         if not isinstance(value, dict):
             raise LLMParseError(text=text)

@@ -51,7 +51,6 @@ Custom exceptions are introduced to distinguish between parsing and validation f
 - Both inherit from `Exception` (with a `# TODO` to migrate to `PatchForgeError` in T-07).
 
 > **`text` attribute semantics:** `SchemaValidationError.text` is the extracted JSON substring (the string that passed `raw_decode()` but failed Pydantic). `LLMParseError.text` is the full input to the parser (for diagnostic purposes when no valid JSON was found).
-
 > **Type guard condition (AC5):** The parser MUST validate the `schema` argument via:
 > ```python
 > if not (isinstance(schema, type) and issubclass(schema, BaseModel)):

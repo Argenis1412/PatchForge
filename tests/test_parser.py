@@ -1,5 +1,7 @@
 """Tests for orchestrator/llm/parser.py -- AC2 through AC5, AC8, AC11."""
 
+import json
+
 import pytest
 from pydantic import BaseModel, ValidationError
 
@@ -69,11 +71,13 @@ class TestAc3LlmpParseError:
         with pytest.raises(LLMParseError) as exc_info:
             parse_llm_response("{invalid json here", ArchitectOutput)
         assert exc_info.value.text == "{invalid json here"
+        assert isinstance(exc_info.value.__cause__, json.JSONDecodeError)
 
     def test_truncated_json(self):
         with pytest.raises(LLMParseError) as exc_info:
             parse_llm_response('{"key": "value', ArchitectOutput)
         assert exc_info.value.text == '{"key": "value'
+        assert isinstance(exc_info.value.__cause__, json.JSONDecodeError)
 
     def test_top_level_primitive_null(self):
         with pytest.raises(LLMParseError) as exc_info:
