@@ -50,6 +50,7 @@ Custom exceptions are introduced to distinguish between parsing and validation f
 - `SchemaValidationError(text: str, schema: type)`: Raised when JSON is syntactically correct but fails Pydantic validation.
 - Both inherit from `Exception` (with a `# TODO` to migrate to `PatchForgeError` in T-07).
 
+> **`text` attribute semantics:** `SchemaValidationError.text` is the extracted JSON substring (the string that passed `raw_decode()` but failed Pydantic). `LLMParseError.text` is the full input to the parser (for diagnostic purposes when no valid JSON was found).
 > **Type guard condition (AC5):** The parser MUST validate the `schema` argument via:
 > ```python
 > if not (isinstance(schema, type) and issubclass(schema, BaseModel)):
@@ -79,6 +80,8 @@ Custom exceptions are introduced to distinguish between parsing and validation f
   - (f) JSON object with braces inside string values: `'{"summary": "Fix {user_input} parser", "files": ["a.py"]}'` → parses correctly
   - (g) Prose with placeholders before JSON: `"Use {file_path} and {issue_id}.\n\nResult:\n{\"summary\": \"...\"}"` → parses correctly, ignores `{file_path}` and `{issue_id}`
   - (h) JSON dict auxiliar before contractual object: `'Template: {"file_path": "src/foo.py"}\n\n{"summary": "...", "files": [...]}'` → `SchemaValidationError` with `text='{"file_path": "src/foo.py"}'` (intentional — LLM violated the single-response contract)
+
+  > **Note on numbering:** Sub-case (d) was intentionally removed during adversarial refinement — its edge case was absorbed into existing items. The jump from (c) to (e) is deliberate; no case is missing.
 - **AC3:** Raises `LLMParseError` (including raw text) for: malformed JSON, truncated JSON, top-level primitives (null, 42), **top-level arrays**, or empty text. *(Issue A scope: the parser extracts exclusively the first top-level JSON object (`dict`). Support for `RootModel[list[...]]` constitutes a deliberate semantic modification — not an additive extension — requiring its own issue, ACs, and an explicit behavioral change note for existing consumers.)*
 - **AC4:** Raises `SchemaValidationError` (including extracted JSON and target schema) for: valid JSON object `{...}` that fails Pydantic validation against the schema.
 - **AC5:** Raises `TypeError` if `schema` is not a `BaseModel` subclass. The guard condition is: `not (isinstance(schema, type) and issubclass(schema, BaseModel))`. `BaseModel` itself is accepted.
@@ -89,4 +92,4 @@ Custom exceptions are introduced to distinguish between parsing and validation f
 - **AC10:** The module docstring of `parser.py` documents:
   - The architectural invariant: the `orchestrator/llm/` module is the canonical location for all LLM text → Pydantic transformations in PatchForge. No component may perform LLM text parsing outside this module without explicit ADR approval. `parse_llm_response()` is the canonical entry point for the object-root case (dict-rooted JSON). Non-object-root schemas require a dedicated function in `orchestrator/llm/` under a separate issue.
   - The validation amplitude: the function guarantees the returned object is a valid instance of `T` per the provided schema. The strictness of validation is a function of the schema chosen by the caller — from permissive (`BaseModel`) to strict (`ArchitectOutput`). Choosing a permissive schema is the caller's decision, not a parser error.
-- **AC11:** Exception chaining is enforced: `SchemaValidationError.__cause__` preserves the Pydantic `ValidationError`; `LLMParseError.__cause__` preserves the `JSONDecodeError` when applicable. Tests verify that `e.__cause__` is of the expected type.
+- **AC11:** Exception chaining is enforced: `SchemaValidationError.__cause__` preserves the Pydantic `ValidationError`; `LLMParseError.__cause__` preserves the `JSONDecodeError` when applicable. When `LLMParseError` originates from absence of `{` or from a non-dict result (no `JSONDecodeError` available), it is raised without chaining (`__cause__` is `None`). Tests must verify that `e.__cause__` is of the expected type, or `None` in the two specific non-JSONDecodeError paths.

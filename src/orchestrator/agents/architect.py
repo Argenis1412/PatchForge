@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Optional, Union
 
 from orchestrator.clients.anthropic_client import get_anthropic_client
+from orchestrator.exceptions import LLMParseError, SchemaValidationError
+from orchestrator.llm.parser import parse_llm_response
 from orchestrator.observability.events import FailureType, log_failure
 from orchestrator.observability.logger import log_call
 from orchestrator.schemas.architect_output import ArchitectOutput
@@ -16,61 +18,6 @@ MODEL = "claude-sonnet-4-6"
 
 COST_PER_1M_INPUT = 3.00
 COST_PER_1M_OUTPUT = 15.00
-
-
-def _extract_json(text: str) -> str:
-    """Extract the first complete JSON object from *text*.
-
-    Handles leading/trailing prose, markdown fences anywhere in the
-    text, braces inside JSON string values, and escaped quotes.
-    """
-    raw = text.strip()
-
-    # Attempt to locate a fenced JSON block (```json ... ```)
-    fence_tag = "```json"
-    idx = raw.find(fence_tag)
-    if idx != -1:
-        rest = raw[idx + len(fence_tag) :]
-        end_fence = rest.find("```")
-        if end_fence != -1:
-            raw = rest[:end_fence].strip()
-    else:
-        # Fallback: generic fences ```...```
-        idx = raw.find("```")
-        if idx != -1:
-            rest = raw[idx + 3 :]
-            end_fence = rest.find("```")
-            if end_fence != -1:
-                raw = rest[:end_fence].strip()
-
-    # Brace-balancing scan
-    depth = 0
-    in_string = False
-    escaped = False
-    start = -1
-
-    for i, ch in enumerate(raw):
-        if escaped:
-            escaped = False
-            continue
-        if ch == "\\" and in_string:
-            escaped = True
-            continue
-        if ch == '"':
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if ch == "{":
-            if depth == 0:
-                start = i
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0 and start != -1:
-                return raw[start : i + 1]
-
-    return raw
 
 
 def call_claude(
@@ -93,15 +40,6 @@ def call_claude(
             )
             latency_ms = int((time.monotonic() - call_started) * 1000)
             raw = response.content[0].text.strip()
-
-            # Strip markdown fences if present
-            if raw.startswith("```"):
-                parts = raw.split("```")
-                if len(parts) >= 3:
-                    raw = parts[1]
-                    if raw.startswith("json"):
-                        raw = raw[4:]
-                raw = raw.strip()
 
             tokens = {
                 "input": response.usage.input_tokens,
@@ -236,10 +174,10 @@ def run(
 
     print(f"[Architect] Done | tokens: {tokens} | cost: ${cost:.5f}")
 
-    # Validate JSON
+    # Validate JSON via canonical parser
     try:
-        data = json.loads(_extract_json(raw_response))
-    except json.JSONDecodeError as e:
+        output = parse_llm_response(raw_response, ArchitectOutput)
+    except LLMParseError as e:
         print(f"[Architect] JSON parse error: {e}")
         print(f"[Architect] Raw output:\n{raw_response}")
         log_failure(
@@ -252,10 +190,7 @@ def run(
             logs_dir=logs_dir,
         )
         raise
-
-    try:
-        output = ArchitectOutput(**data)
-    except Exception as e:
+    except SchemaValidationError as e:
         print(f"[Architect] Schema validation error: {e}")
         log_failure(
             trace_id=trace_id or "",
