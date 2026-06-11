@@ -29,14 +29,16 @@ from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
 
+from orchestrator.exceptions import PatchForgeError
 
-class LLMParseError(Exception):
+
+class LLMParseError(PatchForgeError):
     def __init__(self, *, text: str) -> None:
         self.text = text
         super().__init__(f"No valid JSON object found in LLM response ({len(text)} chars)")
 
 
-class SchemaValidationError(Exception):
+class SchemaValidationError(PatchForgeError):
     def __init__(self, *, text: str, schema: type) -> None:
         self.text = text
         self.schema = schema
