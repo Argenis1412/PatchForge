@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Union
 
 from orchestrator.clients.gemini_client import get_gemini_client
+from orchestrator.exceptions import ProviderError
 from orchestrator.observability.events import FailureType, log_failure
 from orchestrator.observability.logger import log_call
 from orchestrator.schemas.config import TargetConfig
@@ -143,7 +144,7 @@ def call_gemini(
             )
             raise
 
-    raise RuntimeError(f"[{orchestratorel}] Failed after retry.")
+    raise ProviderError("gemini", f"[{orchestratorel}] Failed after retry.")
 
 
 # ── prompts ────────────────────────────────────────────────────────────────

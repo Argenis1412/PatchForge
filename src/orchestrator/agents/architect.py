@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 from orchestrator.clients.anthropic_client import get_anthropic_client
+from orchestrator.exceptions import ProviderError
 from orchestrator.llm.parser import LLMParseError, SchemaValidationError, parse_llm_response
 from orchestrator.observability.events import FailureType, log_failure
 from orchestrator.observability.logger import log_call
@@ -98,9 +99,9 @@ def call_claude(
                 duration_ms=latency_ms,
                 logs_dir=logs_dir,
             )
-            raise RuntimeError(f"[{orchestratorel}] Failed: {e}")
+            raise ProviderError("anthropic", f"[{orchestratorel}] Failed: {e}")
 
-    raise RuntimeError(f"[{orchestratorel}] Failed after retry.")
+    raise ProviderError("anthropic", f"[{orchestratorel}] Failed after retry.")
 
 
 ARCHITECT_PROMPT = """
