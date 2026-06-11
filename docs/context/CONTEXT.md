@@ -177,8 +177,8 @@ These must not change without a new ADR in `docs/adr/`:
 
 ---
 
-For reference materials (known technical debt, failed approaches, design questions, QA history), see `CONTEXT/reference.md`.
+For reference materials (known technical debt, failed approaches, design questions, QA history), see `docs/context/reference.md`.
 
-For technical debt discovered during implementation, see `CONTEXT/discoveries.md`.
+For technical debt discovered during implementation, see `docs/context/discoveries.md`.
 
 For the product thesis (product definition, non-goals, artifact contract), see `docs/product-thesis-v2.md`.
