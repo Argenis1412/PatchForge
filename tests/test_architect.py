@@ -1,7 +1,7 @@
 import pytest
 
 from orchestrator.agents.architect import run
-from orchestrator.exceptions import LLMParseError
+from orchestrator.llm.parser import LLMParseError
 from orchestrator.schemas.architect_output import ArchitectOutput
 from orchestrator.schemas.scout_output import ScoutOutput
 
