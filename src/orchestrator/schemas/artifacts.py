@@ -44,6 +44,7 @@ class RunMetadata(BaseModel):
     base_commit: str
     branch: str
     status: str = "scanning"
+    schema_version: int = 1
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     v1_supported: bool

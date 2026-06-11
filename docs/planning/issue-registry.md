@@ -2,7 +2,7 @@
 
 > **Date:** 2026-06-11
 > **Source:** Roadmap decomposition (`roadmap-phase2.md`) + adversarial audit (`adversarial-audit.md`)
-> **Total:** 18 issues (3 completed, 2 specified, 13 scoped but needing detailed ACs)
+> **Total:** 18 issues (4 completed, 1 specified, 13 scoped but needing detailed ACs)
 
 ---
 
@@ -140,8 +140,9 @@ ADR-0004 must answer exactly five questions:
 
 ---
 
-### 🎯 ADR-01/2: Add `schema_version` to RunMetadata
-- **Priority:** P2 entry | **Status:** 🎯 **Specified**
+### ✅ ADR-01/2: Add `schema_version` to RunMetadata
+- **Priority:** P2 entry | **Status:** ✅ **Completed**
+- **Commit:** `2546e3b`
 - **Goal:** Implement the `schema_version: int = 1` field on `RunMetadata` per ADR-0004.
 - **Precondition:** ADR-01/1 complete (ADR-0004 must exist)
 
@@ -151,18 +152,18 @@ ADR-0004 must answer exactly five questions:
 - No comparison logic in this issue
 
 #### Acceptance criteria
-- [ ] `RunMetadata.schema_version` exists as `int` field with default `1`
-- [ ] Serialized `run.json` includes `"schema_version": 1`
-- [ ] An existing `run.json` without the field loads correctly with `schema_version=1`
-- [ ] Round-trip stability: `RunMetadata.model_validate_json(m.model_dump_json()) == m` for any valid instance
-- [ ] `ruff check` — 0 new findings
-- [ ] `pytest` — 207+N passed / 1 skipped
+- [x] `RunMetadata.schema_version` exists as `int` field with default `1`
+- [x] Serialized `run.json` includes `"schema_version": 1`
+- [x] An existing `run.json` without the field loads correctly with `schema_version=1`
+- [x] Round-trip stability: `RunMetadata.model_validate_json(m.model_dump_json()) == m` for any valid instance
+- [x] `ruff check` — 0 new findings
+- [x] `pytest` — 222 passed / 1 skipped
 
-#### Files to change
+#### Files changed
 | File | Change |
 |------|--------|
-| `src/orchestrator/schemas/run_metadata.py` | Add `schema_version: int = 1` |
-| `tests/test_run_metadata.py` | Add serialization and round-trip test |
+| `src/orchestrator/schemas/artifacts.py` | Add `schema_version: int = 1` |
+| `tests/test_run_metadata.py` | Add 4 tests (default, serialization, backward compat, round-trip) |
 
 #### Non-goals
 - Version validation at load time (next issue)
