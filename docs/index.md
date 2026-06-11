@@ -64,6 +64,7 @@ Scan, Plan, Patch, Validation, Apply, and Run.
 
 Design and architecture decisions are documented in Architecture Decision Records (ADRs):
 
+- [ADR-0004: Schema Versioning Policy](./adr/ADR-0004-schema-versioning.md)
 - [ADR-0003: Product Contract — Reviewable Patch Workflow](./adr/ADR-0003-product-contract.md)
 - [ADR-0002: Runtime Boundaries & Operational Hygiene](./adr/ADR-0002-runtime-boundaries.md)
 - [ADR-0001: Architect Model Comparison](./adr/ADR-0001-architect-comparison.md)

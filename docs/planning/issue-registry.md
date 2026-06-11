@@ -1,8 +1,8 @@
 # Issue Registry — PatchForge Phase 2 & Beyond
 
-> **Date:** 2026-06-10
+> **Date:** 2026-06-11
 > **Source:** Roadmap decomposition (`roadmap-phase2.md`) + adversarial audit (`adversarial-audit.md`)
-> **Total:** 18 issues (5 fully specified, 13 scoped but needing detailed ACs)
+> **Total:** 18 issues (3 completed, 2 specified, 13 scoped but needing detailed ACs)
 
 ---
 
@@ -13,6 +13,7 @@
 | 🎯 **Specified** | Full ACs, scope, non-goals, and files defined |
 | 📐 **Scoped** | Goal and priority known; ACs and files need decomposition |
 | 🔒 **Blocked** | Waiting on precondition (e.g. ADR-01 must precede P2) |
+| ✅ **Completed** | All ACs verified, merged |
 
 ---
 
@@ -31,20 +32,24 @@
 - **Precondition:** None
 
 ### T-07: Exception Hierarchy + Circuit Breaker
-- **Priority:** P0 | **Status:** 📐 Scoped
+- **Priority:** P0 | **Status:** 📐 Scoped | Part A ✅ (#71)
 - **Goal:** Replace generic `RuntimeError` with typed exceptions (`PatchForgeError` base) and implement a circuit breaker for provider failures.
 - **Source:** `roadmap-phase2.md`
 - **Precondition:** None
+- **Sub-issues:**
+  - Part A ✅ — Exception hierarchy (structural) — completed #71
+  - Part B — Circuit breaker implementation (pending)
+  - Part C — Tightening except clauses (pending)
 
-### 🎯 Issue A: Structured Contract Parsing
-- **Priority:** P0 | **Status:** 🎯 **Specified**
+### ✅ Issue A: Structured Contract Parsing
+- **Priority:** P0 | **Status:** ✅ **Completed**
 - **Goal:** Replace fragile `_extract_json()` with a robust, schema-aware parser that converts LLM text outputs directly into validated Pydantic models.
 - **Source:** `issue-a-design.md` (11 ACs, complete)
 - **Precondition:** None
 - **Files:** `src/orchestrator/llm/parser.py`, `tests/`, `src/orchestrator/exceptions.py`
 
-### 🎯 DOC-01: Consolidate adversarial session documentation
-- **Priority:** P0 | **Status:** 🎯 **Specified**
+### ✅ DOC-01: Consolidate adversarial session documentation
+- **Priority:** P0 | **Status:** ✅ **Completed**
 - **Goal:** Finalize all documentation produced during the 27-attack adversarial session. Translate remaining Spanish content, bump metadata dates, and verify cross-references across all planning documents.
 - **Precondition:** None (independent, can run in parallel with Issue A)
 
@@ -65,8 +70,8 @@ Six files need final verification or touch-up. No structural changes — only co
 - [x] `docs/planning/adversarial-audit.md` — Line 69 attack title is in English. No Spanish text remains in any planning document.
 - [x] `docs/index.md` — Quick Links includes entries for `issue-registry.md` and `product-thesis-v2.md`.
 - [x] `docs/planning/issue-registry.md` — This issue (DOC-01) is listed in the registry.
-- [ ] `ruff check .` — 0 errors (linting markdown-referenced code is unaffected).
-- [ ] No code files are modified. This issue is documentation only.
+- [x] `ruff check .` — 0 errors (linting markdown-referenced code is unaffected).
+- [x] No code files are modified. This issue is documentation only.
 
 #### Files to change
 | File | Change |
@@ -98,8 +103,8 @@ Six files need final verification or touch-up. No structural changes — only co
 
 > **Context:** ADR-01 was promoted from "empirical evidence precondition" to "P2 entry condition" per Attack #23. Dogfooding produces artifacts that cross software versions by construction. These three issues must be resolved before P2 begins.
 
-### 🎯 ADR-01/1: Write ADR-0004 — Schema Versioning Policy
-- **Priority:** P2 entry | **Status:** 🎯 **Specified**
+### ✅ ADR-01/1: Write ADR-0004 — Schema Versioning Policy
+- **Priority:** P2 entry | **Status:** ✅ **Completed**
 - **Goal:** Produce the decision document that defines schema versioning format, scope, breaking change semantics, increment trigger, and mismatch behavior.
 - **Source:** Adversarial audit Attack #23
 
@@ -113,13 +118,13 @@ ADR-0004 must answer exactly five questions:
 5. **Mismatch behavior:** `SchemaVersionError` (typed). No warning. No migration. No silent load.
 
 #### Acceptance criteria
-- [ ] `docs/adr/ADR-0004-schema-versioning.md` exists with sections: Context, Decision, Consequences, Rejected alternatives, Known debt
-- [ ] Document specifies `schema_version: int` with initial value `1` on `RunMetadata`
-- [ ] Document defines "breaking change" with one breaking and one additive concrete example
-- [ ] Document names the increment trigger explicitly (same commit, code review enforcement)
-- [ ] Document names `SchemaVersionError` as the mismatch exception
-- [ ] Document has a "Known debt" section documenting the expiration of "RunMetadata only" at P3
-- [ ] No code modified in this issue
+- [x] `docs/adr/ADR-0004-schema-versioning.md` exists with sections: Context, Decision, Consequences, Rejected alternatives, Known debt
+- [x] Document specifies `schema_version: int` with initial value `1` on `RunMetadata`
+- [x] Document defines "breaking change" with one breaking and one additive concrete example
+- [x] Document names the increment trigger explicitly (same commit, code review enforcement)
+- [x] Document names `SchemaVersionError` as the mismatch exception
+- [x] Document has a "Known debt" section documenting the expiration of "RunMetadata only" at P3
+- [x] No code modified in this issue
 
 #### Files to change
 | File | Change |

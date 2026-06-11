@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-06-10 | Session: Post-adversarial (27 attacks) + Workflow.md English translation
+> Last updated: 2026-06-11 | Session: Post-adversarial (27 attacks) + T-07 Part A exception hierarchy
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -173,7 +173,7 @@ These must not change without a new ADR in `docs/adr/`:
 
 ## Next Task
 
-*To be determined.*
+**ADR-01/1** — Write ADR-0004: Schema Versioning Policy (#73)
 
 ---
 
