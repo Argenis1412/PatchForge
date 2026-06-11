@@ -21,6 +21,13 @@
 
 *(No entries yet)*
 
+### [2026-06-11] Issue #77 — Pre-existing ruff formatting violations
+
+- **File:** `scripts/bootstrap_check.py`, `tests/test_run_metadata.py`
+- **Debt:** Two files have formatting violations per `ruff format --check .` that were not introduced by this issue. Blocking `ruff format --check .` from passing.
+- **Discovered by:** Implementation
+- **Why deferred:** Outside issue scope; auto-fix via `ruff format` is needed for pre-commit compliance.
+
 ### [2026-06-11] Issue #71 — Exception hierarchy (T-07 Part A)
 
 - **File:** `src/orchestrator/agents/scout.py:145`
