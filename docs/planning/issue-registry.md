@@ -2,7 +2,7 @@
 
 > **Date:** 2026-06-11
 > **Source:** Roadmap decomposition (`roadmap-phase2.md`) + adversarial audit (`adversarial-audit.md`)
-> **Total:** 18 issues (4 completed, 1 specified, 13 scoped but needing detailed ACs)
+> **Total:** 18 issues (5 completed, 0 specified, 13 scoped but needing detailed ACs)
 
 ---
 
@@ -172,34 +172,36 @@ ADR-0004 must answer exactly five questions:
 
 ---
 
-### 🎯 ADR-01/3: Version Guard at Pipeline Load Point
-- **Priority:** P2 entry | **Status:** 🎯 **Specified**
+### ✅ ADR-01/3: Version Guard at Pipeline Load Point
+- **Priority:** P2 entry | **Status:** ✅ **Completed**
+- **Commit:** `1bae3dd`
 - **Goal:** Implement the version guard that raises `SchemaVersionError` on mismatch per ADR-0004.
 - **Precondition:** ADR-01/2 complete (`schema_version` field exists)
 
 #### Scope
-- `workspace.load_run()` deserializes and returns `RunMetadata` — no version logic in workspace
-- `pipeline.py` compares `loaded.schema_version` against `CURRENT_SCHEMA_VERSION` after `workspace.load_run()`
+- `workspace.read_run_json()` deserializes and returns `RunMetadata` — no version logic in workspace
+- `pipeline.py` compares `loaded.schema_version` against `CURRENT_SCHEMA_VERSION` after `workspace.read_run_json()`
 - On mismatch: `raise SchemaVersionError(found=loaded.schema_version, expected=CURRENT_SCHEMA_VERSION)`
-- `SchemaVersionError` inherits from `Exception` with attributes `found: int` and `expected: int`, with `# TODO: migrate to PatchForgeError in T-07`
-- `CURRENT_SCHEMA_VERSION = 1` defined as constant in `src/orchestrator/schemas/run_metadata.py`
+- `SchemaVersionError` already existed from T-07 Part A (#71), inherits from `PatchForgeError` with keyword-only `found`/`expected` args
+- `CURRENT_SCHEMA_VERSION = 1` defined as constant in `src/orchestrator/schemas/artifacts.py`
 
 #### Acceptance criteria
-- [ ] `SchemaVersionError` exists in `src/orchestrator/exceptions.py` with `found: int` and `expected: int`
-- [ ] `workspace.load_run()` contains no version comparison logic
-- [ ] `pipeline.py` raises `SchemaVersionError` when `loaded.schema_version != CURRENT_SCHEMA_VERSION`
-- [ ] `pipeline.py` proceeds normally when `loaded.schema_version == CURRENT_SCHEMA_VERSION`
-- [ ] Tests cover: valid load, future version load, past version load
-- [ ] `ruff check` — 0 new findings
-- [ ] `pytest` — 207+N passed / 1 skipped
+- [x] `SchemaVersionError` exists in `src/orchestrator/exceptions.py` with `found: int` and `expected: int`
+- [x] `workspace.read_run_json()` contains no version comparison logic
+- [x] `pipeline.py` raises `SchemaVersionError` when `loaded.schema_version != CURRENT_SCHEMA_VERSION`
+- [x] `pipeline.py` proceeds normally when `loaded.schema_version == CURRENT_SCHEMA_VERSION`
+- [x] Tests cover: valid load, future version load, past version load, no existing artifact
+- [x] `ruff check .` — 0 errors
+- [x] `ruff format --check .` — clean
+- [x] `pytest` — 226 passed, 1 skipped
 
-#### Files to change
+#### Files changed
 | File | Change |
 |------|--------|
-| `src/orchestrator/exceptions.py` | Add `SchemaVersionError` |
-| `src/orchestrator/pipeline.py` | Add version guard after `workspace.load_run()` |
-| `src/orchestrator/schemas/run_metadata.py` | Add `CURRENT_SCHEMA_VERSION = 1` |
-| `tests/test_pipeline.py` | Version guard tests |
+| `src/orchestrator/schemas/artifacts.py` | Add `CURRENT_SCHEMA_VERSION = 1` |
+| `src/orchestrator/exceptions.py` | Fix docstring reference: `run_metadata.py` → `artifacts.py` |
+| `src/orchestrator/pipeline.py` | Add version guard in `execute()` with `try/except FileNotFoundError` |
+| `tests/test_pipeline.py` | 4 guard tests (no-artifact, valid, future, past) |
 
 #### Non-goals
 - Comparison logic in `workspace.py`

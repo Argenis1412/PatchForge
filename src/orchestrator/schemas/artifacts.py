@@ -30,6 +30,9 @@ APPLY_JSON = "apply.json"
 POST_APPLY_VALIDATION_JSON = "post_apply_validation.json"
 
 
+CURRENT_SCHEMA_VERSION: int = 1
+
+
 def generate_run_id() -> str:
     now = datetime.now(timezone.utc)
     short = uuid.uuid4().hex[:6]

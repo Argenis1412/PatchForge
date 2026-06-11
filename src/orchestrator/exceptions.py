@@ -27,7 +27,7 @@ class SchemaVersionError(PatchForgeError):
 
     Attributes:
         found: The schema_version read from the artifact.
-        expected: The CURRENT_SCHEMA_VERSION defined in run_metadata.py.
+        expected: The CURRENT_SCHEMA_VERSION defined in artifacts.py.
     """
 
     def __init__(self, *, found: int, expected: int) -> None:

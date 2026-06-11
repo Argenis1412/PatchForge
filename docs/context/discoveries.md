@@ -21,6 +21,20 @@
 
 *(No entries yet)*
 
+### [2026-06-11] Issue #77 — Pre-existing ruff formatting violations
+
+- **File:** `scripts/bootstrap_check.py`, `tests/test_run_metadata.py`
+- **Debt:** Two files have formatting violations per `ruff format --check .` that were not introduced by this issue. Blocking `ruff format --check .` from passing.
+- **Discovered by:** Implementation
+- **Why deferred:** Outside issue scope; auto-fix via `ruff format` is needed for pre-commit compliance.
+
+### [2026-06-11] Issue #77 — RunMetadata.schema_version default duplicado
+
+- **File:** `src/orchestrator/schemas/artifacts.py:47`
+- **Debt:** `schema_version: int = 1` hardcodea el valor en lugar de usar `schema_version: int = CURRENT_SCHEMA_VERSION`. Si alguien incrementa la constante pero omite el default del campo, `RunMetadata` produciría artifacts con versión incorrecta.
+- **Discovered by:** AI review bot (CodeRabbit)
+- **Why deferred:** Modificar field defaults de `RunMetadata` está fuera del scope de ADR-01/3. Corregible en cualquier issue futuro que toque `artifacts.py`.
+
 ### [2026-06-11] Issue #71 — Exception hierarchy (T-07 Part A)
 
 - **File:** `src/orchestrator/agents/scout.py:145`

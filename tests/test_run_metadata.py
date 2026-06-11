@@ -21,6 +21,7 @@ def test_schema_version_default():
 
 def test_schema_version_serialization():
     import json
+
     meta = _minimal_meta()
     data = json.loads(meta.model_dump_json())
     assert data["schema_version"] == 1

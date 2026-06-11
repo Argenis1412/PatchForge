@@ -9,9 +9,10 @@ from orchestrator.agents.architect import run as run_architect
 from orchestrator.agents.executor import run as run_executor
 from orchestrator.agents.scout import run as run_scout
 from orchestrator.agents.validator import run as run_validator
-from orchestrator.exceptions import PatchForgeError
+from orchestrator.exceptions import PatchForgeError, SchemaVersionError
 from orchestrator.observability.events import FailureType, log_event, log_failure
 from orchestrator.schemas.architect_output import ArchitectOutput
+from orchestrator.schemas.artifacts import CURRENT_SCHEMA_VERSION
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.executor_output import ExecutorOutput
 from orchestrator.schemas.pipeline_run import AgentMeta, PipelineRun, TaskResult
@@ -109,6 +110,17 @@ class Pipeline:
     def execute(self, dry_run: bool = False) -> PipelineRun:
         self._log_event("pipeline_start", data={"target": str(self.target_path)})
         t0_pipeline = time.monotonic()
+
+        try:
+            loaded = self.workspace.read_run_json(self.run.run_id)
+        except FileNotFoundError:
+            pass
+        else:
+            if loaded.schema_version != CURRENT_SCHEMA_VERSION:
+                raise SchemaVersionError(
+                    found=loaded.schema_version,
+                    expected=CURRENT_SCHEMA_VERSION,
+                )
 
         try:
             scout_output = None

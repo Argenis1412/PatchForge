@@ -8,18 +8,13 @@ from dotenv import load_dotenv
 # Load env to validate variables
 load_dotenv()
 
-REQUIRED_PKGS = [
-    "pydantic",
-    "httpx",
-    "dotenv",
-    "google.genai",
-    "anthropic"
-]
+REQUIRED_PKGS = ["pydantic", "httpx", "dotenv", "google.genai", "anthropic"]
 
 REQUIRED_ENV = [
     "ANTHROPIC_API_KEY",
     "GOOGLE_API_KEY",
 ]
+
 
 def check():
     print("--- Environment Health Check ---")
@@ -29,7 +24,6 @@ def check():
     if sys.version_info < (3, 12):
         print("[FAIL] Python 3.12+ required")
         sys.exit(1)
-
 
     # 2. Package Check
     for pkg in REQUIRED_PKGS:
@@ -56,6 +50,7 @@ def check():
                 print(f"[FAIL] Missing {var}")
                 sys.exit(1)
             print(f"[OK] {var} present")
+
 
 if __name__ == "__main__":
     check()

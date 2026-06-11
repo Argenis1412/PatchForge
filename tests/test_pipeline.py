@@ -4,8 +4,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from orchestrator.exceptions import SchemaVersionError
 from orchestrator.pipeline import Pipeline
 from orchestrator.schemas.architect_output import ArchitectOutput, Task
+from orchestrator.schemas.artifacts import CURRENT_SCHEMA_VERSION, RunMetadata
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.executor_output import ExecutorOutput, FileChange
 from orchestrator.schemas.scout_output import ScoutOutput
@@ -325,3 +327,100 @@ def test_failure_artifacts_populated_on_pipeline_abort(config, monkeypatch):
     assert len(updated_meta.failure_artifacts) > 0
     assert "architect_failure.json" in updated_meta.failure_artifacts
     assert updated_meta.status == "failed"
+
+
+def _run_metadata(schema_version: int = CURRENT_SCHEMA_VERSION) -> RunMetadata:
+    from datetime import datetime, timezone
+
+    return RunMetadata(
+        run_id="test_guard",
+        target_path="/tmp/test",
+        workspace_path="/tmp/ws",
+        base_commit="abc123",
+        branch="main",
+        status="scanning",
+        schema_version=schema_version,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        v1_supported=True,
+        support_reasons=["test"],
+    )
+
+
+def test_guard_no_existing_artifact(config, monkeypatch):
+    """No RunMetadata in workspace → guard passes silently."""
+    monkeypatch.setattr(
+        "orchestrator.pipeline.WorkspaceManager.read_run_json",
+        MagicMock(side_effect=FileNotFoundError),
+    )
+    pipeline = Pipeline(config=config)
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_scout", MagicMock(return_value=(_scout_output(), _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_architect",
+        MagicMock(return_value=(_architect_output(), _meta())),
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_executor", MagicMock(return_value=(_executor_output(), _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_validator",
+        MagicMock(return_value=(_validator_output(passed=True), _meta())),
+    )
+    result = pipeline.execute(dry_run=False)
+    assert result.status == "completed"
+
+
+def test_guard_valid_version(config, monkeypatch):
+    """schema_version matches CURRENT_SCHEMA_VERSION → no error."""
+    mock_read = MagicMock(return_value=_run_metadata(schema_version=CURRENT_SCHEMA_VERSION))
+    monkeypatch.setattr("orchestrator.pipeline.WorkspaceManager.read_run_json", mock_read)
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_scout", MagicMock(return_value=(_scout_output(), _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_architect",
+        MagicMock(return_value=(_architect_output(), _meta())),
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_executor", MagicMock(return_value=(_executor_output(), _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_validator",
+        MagicMock(return_value=(_validator_output(passed=True), _meta())),
+    )
+    result = Pipeline(config=config).execute(dry_run=False)
+    assert result.status == "completed"
+
+
+def test_guard_future_version(config, monkeypatch):
+    """schema_version > CURRENT_SCHEMA_VERSION → SchemaVersionError."""
+    mock_read = MagicMock(return_value=_run_metadata(schema_version=2))
+    monkeypatch.setattr("orchestrator.pipeline.WorkspaceManager.read_run_json", mock_read)
+    mock_scout = MagicMock(return_value=(_scout_output(), _meta()))
+    mock_architect = MagicMock(return_value=(_architect_output(), _meta()))
+    monkeypatch.setattr("orchestrator.pipeline.run_scout", mock_scout)
+    monkeypatch.setattr("orchestrator.pipeline.run_architect", mock_architect)
+    with pytest.raises(SchemaVersionError) as exc_info:
+        Pipeline(config=config).execute(dry_run=False)
+    mock_scout.assert_not_called()
+    mock_architect.assert_not_called()
+    assert exc_info.value.found == 2
+    assert exc_info.value.expected == CURRENT_SCHEMA_VERSION
+
+
+def test_guard_past_version(config, monkeypatch):
+    """schema_version < CURRENT_SCHEMA_VERSION → SchemaVersionError."""
+    mock_read = MagicMock(return_value=_run_metadata(schema_version=0))
+    monkeypatch.setattr("orchestrator.pipeline.WorkspaceManager.read_run_json", mock_read)
+    mock_scout = MagicMock(return_value=(_scout_output(), _meta()))
+    mock_architect = MagicMock(return_value=(_architect_output(), _meta()))
+    monkeypatch.setattr("orchestrator.pipeline.run_scout", mock_scout)
+    monkeypatch.setattr("orchestrator.pipeline.run_architect", mock_architect)
+    with pytest.raises(SchemaVersionError) as exc_info:
+        Pipeline(config=config).execute(dry_run=False)
+    mock_scout.assert_not_called()
+    mock_architect.assert_not_called()
+    assert exc_info.value.found == 0
+    assert exc_info.value.expected == CURRENT_SCHEMA_VERSION
