@@ -53,7 +53,7 @@ Six files need final verification or touch-up. No structural changes — only co
 
 | File | What to do | Status |
 |---|---|---|
-| `CONTEXT/CONTEXT.md` | Bump `Last updated` to `2026-06-10`. Verify all 9 invariants match the delta sections in `adversarial-audit.md`. | Done |
+| `docs/context/CONTEXT.md` | Bump `Last updated` to `2026-06-10`. Verify all 9 invariants match the delta sections in `adversarial-audit.md`. | Done |
 | `docs/planning/adversarial-audit.md` | Translate line 69: "Ausencia de identidad canónica de ejecución" → "Missing canonical execution identity" | Done |
 | `docs/planning/issue-registry.md` | Add this entry (DOC-01) to the registry | Done |
 | `docs/product-thesis-v2.md` | No changes needed — verify it is referenced in `docs/index.md` | Done |
@@ -61,7 +61,7 @@ Six files need final verification or touch-up. No structural changes — only co
 | `docs/planning/roadmap-phase2.md` | No changes needed — verify Critical path update references ADR-01 correctly | Done |
 
 #### Acceptance criteria
-- [x] `CONTEXT/CONTEXT.md` — Last updated date is `2026-06-10`. All 9 invariants match the audit delta sections.
+- [x] `docs/context/CONTEXT.md` — Last updated date is `2026-06-10`. All 9 invariants match the audit delta sections.
 - [x] `docs/planning/adversarial-audit.md` — Line 69 attack title is in English. No Spanish text remains in any planning document.
 - [x] `docs/index.md` — Quick Links includes entries for `issue-registry.md` and `product-thesis-v2.md`.
 - [x] `docs/planning/issue-registry.md` — This issue (DOC-01) is listed in the registry.
@@ -71,7 +71,7 @@ Six files need final verification or touch-up. No structural changes — only co
 #### Files to change
 | File | Change |
 |---|---|
-| `CONTEXT/CONTEXT.md` | Bump date, verify invariant text |
+| `docs/context/CONTEXT.md` | Bump date, verify invariant text |
 | `docs/planning/adversarial-audit.md` | Translate one line (line 69) |
 | `docs/index.md` | Add links to `issue-registry.md` and `product-thesis-v2.md` |
 | `docs/planning/issue-registry.md` | Add this entry as DOC-01 |

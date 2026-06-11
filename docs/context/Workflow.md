@@ -179,7 +179,7 @@ Do not implement during planning.
 
 If you discover technical debt outside the issue scope (not caused by the issue):
 
-- Document it in `CONTEXT/discoveries.md` following the defined format
+- Document it in `docs/context/discoveries.md` following the defined format
 - Do not fix or modify it
 - The discovery commit goes separately: `chore(docs): log td discovery in issue #N` (only if there are changes to discoveries.md)
 
@@ -480,7 +480,7 @@ Review:
 - Are the findings still accurate?
 - Are QA metrics holding?
 
-Document results in `CONTEXT/reference.md` (Known Technical Debt or Open Design Questions).
+Document results in `docs/context/reference.md` (Known Technical Debt or Open Design Questions).
 
 ---
 
