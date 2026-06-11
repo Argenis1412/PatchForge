@@ -18,6 +18,10 @@ The function guarantees the returned object is a valid instance of
 function of the schema chosen by the caller -- from permissive
 (``BaseModel``) to strict (``ArchitectOutput``).  Choosing a permissive
 schema is the caller's decision, not a parser error.
+
+Input size guard: inputs exceeding ``_MAX_LLM_RESPONSE_CHARS`` (500 000 chars)
+raise ``LLMParseError`` immediately. This is a resource-containment mechanism,
+not a complexity guarantee.
 """
 
 import json
@@ -25,7 +29,19 @@ from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from orchestrator.exceptions import LLMParseError, SchemaValidationError
+
+class LLMParseError(Exception):
+    def __init__(self, *, text: str) -> None:
+        self.text = text
+        super().__init__(f"No valid JSON object found in LLM response ({len(text)} chars)")
+
+
+class SchemaValidationError(Exception):
+    def __init__(self, *, text: str, schema: type) -> None:
+        self.text = text
+        self.schema = schema
+        super().__init__(f"Extracted JSON failed validation against {schema.__name__}")
+
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -64,4 +80,4 @@ def parse_llm_response(text: str, schema: type[T]) -> T:
         try:
             return schema.model_validate(value)
         except ValidationError as e:
-            raise SchemaValidationError(text=text[start:end], schema=schema) from e
+            raise SchemaValidationError(text=json.dumps(value), schema=schema) from e
