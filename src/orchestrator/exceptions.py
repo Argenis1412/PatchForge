@@ -8,6 +8,7 @@ Exceptions defined here:
 - PatchForgeError     — base for all PatchForge errors
 - SchemaVersionError  — schema version mismatch on artifact load
 - ProviderError       — LLM provider failure (Anthropic, Gemini)
+- RollbackError       — git rollback failure (T-02)
 
 Parser exceptions (LLMParseError, SchemaValidationError) are defined in
 orchestrator/llm/parser.py and also inherit from PatchForgeError.
@@ -15,6 +16,8 @@ orchestrator/llm/parser.py and also inherit from PatchForgeError.
 PipelineAbortError is defined in pipeline.py and also inherits from
 PatchForgeError.
 """
+
+from pathlib import Path
 
 
 class PatchForgeError(Exception):
@@ -46,3 +49,19 @@ class ProviderError(PatchForgeError):
     def __init__(self, provider: str, message: str) -> None:
         self.provider = provider
         super().__init__(f"[{provider}] {message}")
+
+
+class RollbackError(PatchForgeError):
+    """Raised when a rollback operation fails unrecoverably.
+
+    Attributes:
+        repo_root: Path to the repository that failed to roll back.
+        target_sha: The commit SHA that the rollback attempted to reach.
+        stderr: stderr output from the failed git commands.
+    """
+
+    def __init__(self, repo_root: Path, target_sha: str, stderr: str) -> None:
+        self.repo_root = repo_root
+        self.target_sha = target_sha
+        self.stderr = stderr
+        super().__init__(f"Rollback failed for {repo_root} to {target_sha}: {stderr}")
