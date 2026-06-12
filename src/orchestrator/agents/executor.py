@@ -222,8 +222,8 @@ def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) 
 
     relative_path = task.files_to_modify[0]
 
-    from orchestrator.safety import ensure_safe_relative     # lazy (file convention)
-    from orchestrator.exceptions import PathSafetyError      # lazy (file convention)
+    from orchestrator.exceptions import PathSafetyError  # lazy (file convention)
+    from orchestrator.safety import ensure_safe_relative  # lazy (file convention)
 
     # SAFETY: MUST remain outside the retry try/except (L242+).
     # The except (ValueError, Exception) at L264 would silently swallow
