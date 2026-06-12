@@ -98,3 +98,38 @@ def test_accumulated_changes_same_file(tmp_path, monkeypatch):
     # Final staged file must contain the accumulated result
     staged_file = staging_dir / "test.py"
     assert staged_file.read_text(encoding="utf-8") == "x = 3\n"
+
+
+def test_rollback_to_commit_success(monkeypatch):
+    from pathlib import Path
+
+    from orchestrator.git import GitCommandResult
+
+    def mock_force_reset(repo, sha):
+        return GitCommandResult(return_code=0, stdout="", stderr="")
+
+    monkeypatch.setattr("orchestrator.git.force_reset_apply", mock_force_reset)
+
+    from orchestrator.agents.executor import rollback_to_commit
+
+    rollback_to_commit(Path("/fake"), "abc123")
+
+
+def test_rollback_to_commit_failure(monkeypatch):
+    from pathlib import Path
+
+    from orchestrator.exceptions import RollbackError
+    from orchestrator.git import GitCommandResult
+
+    def mock_force_reset(repo, sha):
+        return GitCommandResult(return_code=1, stdout="", stderr="error detail")
+
+    monkeypatch.setattr("orchestrator.git.force_reset_apply", mock_force_reset)
+
+    from orchestrator.agents.executor import rollback_to_commit
+
+    with pytest.raises(RollbackError) as exc_info:
+        rollback_to_commit(Path("/fake"), "abc123")
+    assert exc_info.value.repo_root == Path("/fake")
+    assert exc_info.value.target_sha == "abc123"
+    assert exc_info.value.stderr == "error detail"
