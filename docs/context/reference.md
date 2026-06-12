@@ -93,7 +93,7 @@ The configured working directory was `orchestrator-core/` but the actual project
 
 | ID | Blocker | Target | Risk |
 |----|---------|--------|------|
-| T-02 | Atomic rollback validation | `pipeline.py` | Missing rollback primitive for Executor |
+| T-02 ✅ | Atomic rollback validation | `executor.py` | Resolved in #81 — `rollback_to_commit()` raises `RollbackError` |
 | T-03 | Hardened JSON parsing | `architect.py`, `risk.py` | Brittle `_extract_json()` multiplies risk with new agents |
 | T-05 | Enum-based risk levels | `risk.py` | Stringly-typed risk levels across schemas |
 | T-07 | Exception hierarchy + circuit breaker | `agents/*.py` | No typed failure isolation for providers |

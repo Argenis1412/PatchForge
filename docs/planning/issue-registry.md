@@ -19,8 +19,9 @@
 
 ## P0 — Core Stability (Phase 2 Blockers)
 
-### T-02: Atomic Rollback Validation
-- **Priority:** P0 | **Status:** 📐 Scoped
+### ✅ T-02: Atomic Rollback Validation
+- **Priority:** P0 | **Status:** ✅ **Completed**
+- **PR:** #81
 - **Goal:** Implement a reliable rollback primitive for the Executor to ensure the repository returns to a clean state upon failure.
 - **Source:** `roadmap-phase2.md`
 - **Precondition:** None

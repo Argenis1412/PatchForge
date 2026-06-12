@@ -34,7 +34,7 @@ When choosing between **Defense in Depth** (solving test-zero repos) and **Async
 ### P0 — Core Stability (Phase 2 Blockers)
 These must be resolved before any self-improvement experiments begin.
 
-1. **T-02: Atomic Rollback Validation**
+1. ✅ **T-02: Atomic Rollback Validation**
    - Goal: Implement a reliable rollback primitive for the Executor to ensure the repository returns to a clean state upon failure.
 2. **T-01: Path Traversal Hardening**
    - Goal: Enforce strict path construction contracts to prevent directory traversal attacks and workspace leakage.

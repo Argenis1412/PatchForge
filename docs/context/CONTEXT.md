@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-06-11 | Session: Post-adversarial (27 attacks) + T-07 Part A exception hierarchy
+> Last updated: 2026-06-12 | Session: T-02 atomic rollback extraction
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -110,15 +110,16 @@ tests/                     (20 test files, 208 tests)
 | 24 | Translate all Spanish to English | Jun 4 |
 | 21 | Deterministic Git safety primitives + V1 isolated validation | Jun 3 |
 | 20 | Enforce external workspace safety | Jun 2 |
-| 18 | PatchForge thesis (initial scaffold) | May 27 |
+ | 81 | Atomic Rollback Validation (T-02) | Jun 12 |
+ | 18 | PatchForge thesis (initial scaffold) | May 27 |
 
 ### QA Metrics
 
 | Check | Result |
 |-------|--------|
-| `pytest` | **208 collected, 207 passed, 1 skipped** |
+| `pytest` | **237 collected, 236 passed, 1 skipped** |
 | `ruff check .` | **0 errors** — clean across all files |
-| `ruff format --check` | **Clean** (61 files formatted) |
+| `ruff format --check` | **Clean** (70 files formatted) |
 
 ### V1 Complete
 
