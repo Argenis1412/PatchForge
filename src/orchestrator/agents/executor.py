@@ -347,6 +347,25 @@ def _make_diff(original: str, modified: str, filename: str) -> str:
     return "".join(diff_lines)
 
 
+def rollback_to_commit(repo_root: Path, target_sha: str) -> None:
+    """Reset working tree to target_sha, raising RollbackError on failure.
+
+    Uses ``git reset --hard <target_sha>`` followed by ``git clean -fd``.
+    Raises RollbackError if either command fails — the caller must not
+    proceed if this raises.
+    """
+    from orchestrator.exceptions import RollbackError
+    from orchestrator.git import force_reset_apply
+
+    result = force_reset_apply(repo_root, target_sha)
+    if result.return_code != 0:
+        raise RollbackError(
+            repo_root=repo_root,
+            target_sha=target_sha,
+            stderr=result.stderr,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Public Entrypoint
 # ---------------------------------------------------------------------------
