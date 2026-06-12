@@ -4,6 +4,7 @@ import json
 import re
 from pathlib import Path
 
+from orchestrator.safety import validate_filename
 from orchestrator.schemas.artifacts import RunMetadata
 
 # Only allow alphanumeric characters, underscores, and hyphens in run IDs.
@@ -84,7 +85,7 @@ class WorkspaceManager:
         """
         self.ensure_run_exists(run_id)
         run_dir = self.run_dir(run_id)
-        path = run_dir / filename
+        path = run_dir / validate_filename(filename)
         path.write_text(content, encoding="utf-8")
         return path
 
@@ -95,13 +96,13 @@ class WorkspaceManager:
         inside scan (after create_run_directory but before the first run.json exists).
         """
         run_dir = self.run_dir(run_id)
-        path = run_dir / filename
+        path = run_dir / validate_filename(filename)
         path.write_text(content, encoding="utf-8")
         return path
 
     def read_artifact(self, run_id: str, filename: str) -> str:
         """Read content from an artifact file in the run directory."""
-        path = self.run_dir(run_id) / filename
+        path = self.run_dir(run_id) / validate_filename(filename)
         if not path.exists():
             raise FileNotFoundError(f"Artifact {filename} not found for run {run_id} in {path}")
         return path.read_text(encoding="utf-8")
