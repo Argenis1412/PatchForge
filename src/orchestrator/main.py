@@ -174,13 +174,14 @@ def apply(
     import hashlib
     from datetime import datetime, timezone
 
+    from orchestrator.agents.executor import rollback_to_commit
     from orchestrator.agents.validator import run as run_validator
+    from orchestrator.exceptions import RollbackError
     from orchestrator.git import (
         apply_patch,
         create_controlled_branch,
         current_branch,
         current_head,
-        force_reset_apply,
         repository_state,
     )
     from orchestrator.lifecycle import classify_lifecycle
@@ -379,12 +380,13 @@ def apply(
             run_dir=run_dir,
         )
         # Revert: force reset to pre-apply state
-        revert_res = force_reset_apply(target_path, pre_apply_head)
-        if revert_res.return_code != 0:
+        try:
+            rollback_to_commit(target_path, pre_apply_head)
+        except RollbackError as exc:
             console.print(
                 "[bold red]FATAL: Patch application failed AND the automatic revert also failed. "
                 "Your repository may be in a partially applied state.\n"
-                f"Revert stderr: {revert_res.stderr}\n"
+                f"Revert stderr: {exc.stderr}\n"
                 "Please run 'git checkout .' and 'git clean -fd' manually "
                 "to restore a clean state.[/bold red]"
             )
@@ -393,7 +395,7 @@ def apply(
                 run_id=run_id,
                 stage="apply",
                 error_type="revert_failed",
-                message=revert_res.stderr,
+                message=exc.stderr,
                 logs_dir=logs_dir,
                 run_dir=run_dir,
             )
@@ -442,14 +444,15 @@ def apply(
     # 10. Handle post-apply validation failure: rollback automatically
     if post_val_output is not None and not post_val_output.overall_passed:
         console.print("[bold yellow]Post-apply validation failed. Rolling back...[/bold yellow]")
-        revert_res = force_reset_apply(target_path, pre_apply_head)
-        rollback_succeeded = revert_res.return_code == 0
-
-        if not rollback_succeeded:
+        rollback_succeeded = False
+        try:
+            rollback_to_commit(target_path, pre_apply_head)
+            rollback_succeeded = True
+        except RollbackError as exc:
             console.print(
                 "[bold red]FATAL: Post-apply validation failed AND automatic rollback also failed. "
                 "Your repository may be in a partially applied state.\n"
-                f"Revert stderr: {revert_res.stderr}\n"
+                f"Revert stderr: {exc.stderr}\n"
                 "Please run 'git checkout .' and 'git clean -fd' manually "
                 "to restore a clean state.[/bold red]"
             )
@@ -458,7 +461,7 @@ def apply(
                 run_id=run_id,
                 stage="apply",
                 error_type="rollback_failed",
-                message=revert_res.stderr,
+                message=exc.stderr,
                 logs_dir=logs_dir,
                 run_dir=run_dir,
             )
