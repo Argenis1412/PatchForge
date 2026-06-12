@@ -100,6 +100,7 @@ def test_accumulated_changes_same_file(tmp_path, monkeypatch):
     assert staged_file.read_text(encoding="utf-8") == "x = 3\n"
 
 
+@pytest.mark.unit
 def test_rollback_to_commit_success(monkeypatch):
     from pathlib import Path
 
@@ -115,6 +116,7 @@ def test_rollback_to_commit_success(monkeypatch):
     rollback_to_commit(Path("/fake"), "abc123")
 
 
+@pytest.mark.unit
 def test_rollback_to_commit_failure(monkeypatch):
     from pathlib import Path
 

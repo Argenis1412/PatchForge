@@ -90,7 +90,7 @@ def _setup_apply_run(tmp_path):
         ["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True, text=True
     )
     head = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
     ).stdout.strip()
 
     ws = tmp_path / "workspace"
