@@ -24,7 +24,8 @@
 |------|---------|--------------|
 | `ScanFindings.warnings` not implemented | TypeScript warnings mixed into `support_reasons` | Functional but semantically impure. Low priority. |
 | Workspace path mismatch | `scan` writes to `~/.cache/patchforge/` by default, other commands use `--workspace` | Would require unify CLI options across 3 commands. |
-| `force_reset_apply` not reusable | Exists in `apply` (main.py) but not as primitive for `executor.py` | T-03 blocker for Phase 2. |
+| `force_reset_apply` not reusable ✓ | Resolved in T-02 (#81): `rollback_to_commit()` in executor.py raises `RollbackError`. | `main.py` no longer calls `force_reset_apply` directly. |
+| `pre_apply_head` capture in caller | `main.py:apply`; Low | `rollback_to_commit(repo_root, target_sha)` requires caller to provide a valid SHA. If apply moves to executor.py in the future, HEAD capture must move too. |
 | Architect not budget-aware | Generates ideal plan; gate filters post-hoc | $0.04 spent on plans blocked at `risk_budget=low`. Open design question. |
 | Self-audit limited by environment | V1 `scan` succeeded but V1 not supported (ruff/pytest missing from PATH) | Environment issue, not product gap. |
 
