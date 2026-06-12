@@ -135,3 +135,29 @@ def test_rollback_to_commit_failure(monkeypatch):
     assert exc_info.value.repo_root == Path("/fake")
     assert exc_info.value.target_sha == "abc123"
     assert exc_info.value.stderr == "error detail"
+
+
+@pytest.mark.unit
+def test_apply_task_rejects_path_traversal(tmp_path):
+    from orchestrator.agents.executor import _apply_task
+    from orchestrator.exceptions import PathSafetyError
+    from orchestrator.schemas.architect_output import Task
+
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    task = Task(
+        task_id="t1",
+        title="traversal",
+        description="attempt escape",
+        files_to_modify=["../../evil.py"],
+        priority="high",
+        effort="low",
+        risk_level="low",
+        dependencies=[],
+    )
+
+    with pytest.raises(PathSafetyError) as exc_info:
+        _apply_task(task, "run_test", tmp_path, staging)
+    assert exc_info.value.path == "../../evil.py"
+    assert exc_info.value.base == tmp_path
