@@ -2,7 +2,7 @@
 
 > **Date:** 2026-06-11
 > **Source:** Roadmap decomposition (`roadmap-phase2.md`) + adversarial audit (`adversarial-audit.md`)
-> **Total:** 18 issues (5 completed, 0 specified, 13 scoped but needing detailed ACs)
+> **Total:** 18 issues (6 completed, 0 specified, 12 scoped but needing detailed ACs)
 
 ---
 
@@ -213,11 +213,45 @@ ADR-0004 must answer exactly five questions:
 
 ## P2 — Experimentation Infrastructure & Dogfooding
 
-### Experiment Artifacts Schema
-- **Priority:** P2 | **Status:** 📐 Scoped
-- **Goal:** Implement structured record for every run (`issue.md`, `plan.json`, `patch.diff`, `qa_logs`, `verdict.md`).
+### ✅ Experiment Artifacts Schema
+- **Priority:** P2 | **Status:** ✅ **Completed**
+- **Commit:** `26b4155`
+- **Goal:** Define `Verdict` schema and `write_verdict()` persistence utility; document canonical run directory layout.
 - **Source:** `dogfooding-vision.md`
 - **Precondition:** ADR-01/1/2/3 complete, Issue A complete
+
+#### Scope
+- `Verdict(BaseModel)` with `run_id`, `status`, `validation_passed`, `apply_succeeded`, `error_message`, `generated_at`
+- `write_verdict(run_dir, verdict)` writes `verdict.json` and `verdict.md`
+- No pipeline logic touched — `write_verdict()` is standalone
+- Architectural debt: I/O co-located with schema (documented in `discoveries.md`)
+
+#### Acceptance criteria
+- [x] `Verdict` exists in `experiment.py` with all 6 required fields
+- [x] Round-trip stable: `v.model_dump() == Verdict.model_validate_json(v.model_dump_json()).model_dump()`
+- [x] `write_verdict()` writes `verdict.json` and `verdict.md` to `run_dir`
+- [x] `write_verdict()` raises `FileNotFoundError` on missing directory
+- [x] No `IssueMd` class exists — `issue.md` is a path convention only
+- [x] `exp-artifact-layout.md` documents canonical layout with issue.md absence note and schema_version debt note
+- [x] `Verdict` has no `schema_version` field
+- [x] Debt entry added to `discoveries.md`
+- [x] 5 tests cover: passed/failed construction, round-trip, both files written, FileNotFoundError
+- [x] `ruff check .` — 0 errors; `ruff format --check .` — clean; `pytest` — 231 passed, 1 skipped
+- [x] `git diff --stat` — exactly 4 files
+
+#### Files changed
+| File | Action |
+|------|--------|
+| `src/orchestrator/schemas/experiment.py` | CREATE — Verdict schema + write_verdict utility |
+| `tests/test_experiment_schema.py` | CREATE — 5 tests |
+| `docs/planning/exp-artifact-layout.md` | CREATE — canonical layout documentation |
+| `docs/context/discoveries.md` | EDIT — add I/O debt entry |
+
+#### Non-goals
+- Wiring `write_verdict()` into `pipeline.py` (Experiment 001)
+- Moving `write_verdict()` to `workspace.py` (documented debt)
+- `IssueMd` Pydantic schema
+- `schema_version` on `Verdict`
 
 ### Experiment 001 (POC) — Clone Workflow
 - **Priority:** P2 | **Status:** 📐 Scoped

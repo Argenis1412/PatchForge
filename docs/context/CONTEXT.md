@@ -176,6 +176,7 @@ These must not change without a new ADR in `docs/adr/`:
 ✅ **ADR-01/1** — Write ADR-0004: Schema Versioning Policy (#73)
 ✅ **ADR-01/2** — Add `schema_version` to `RunMetadata` (#75)
 ✅ **ADR-01/3** — Version Guard at Pipeline Load Point (#77)
+✅ **Experiment Artifacts Schema** — Verdict + write_verdict utility (#79)
 
 ---
 
