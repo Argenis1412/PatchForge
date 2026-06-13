@@ -125,6 +125,9 @@ def scan(
 @app.command()
 def plan(
     run_id: str = typer.Argument(..., help="Run ID of an existing run"),
+    issue_file: Optional[Path] = typer.Option(
+        None, "--issue-file", help="Path to a markdown issue file with frontmatter"
+    ),
     env_file: Optional[Path] = typer.Option(None, "--env-file", help="Path to a custom .env file"),
     workspace: Optional[Path] = typer.Option(
         None, "--workspace", help="Path to the workspace directory"
@@ -133,7 +136,7 @@ def plan(
     """Run the Architect agent to generate an implementation plan for a run."""
     from orchestrator.commands.plan import execute as execute_plan
 
-    execute_plan(run_id=run_id, workspace=workspace, env_file=env_file)
+    execute_plan(run_id=run_id, workspace=workspace, env_file=env_file, issue_file=issue_file)
 
 
 @app.command()

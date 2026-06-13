@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-06-13 | Session: T-07B circuit breaker
+> Last updated: 2026-06-13 | Session: ISS-B --issue-file
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -54,7 +54,7 @@ src/orchestrator/          (41 Python files)
 │   └── bootstrap.py
 ├── commands/
 │   ├── scan.py            # V1 deterministic scan (non-AI)
-│   ├── plan.py            # V1 AI-assisted planning
+│   ├── plan.py            # V1 AI-assisted planning (+ --issue-file)
 │   └── preview.py         # Patch preview + validation
 ├── observability/
 │   ├── events.py
@@ -67,6 +67,7 @@ src/orchestrator/          (41 Python files)
 │   ├── config.py          # TargetConfig + TargetCapabilities
 │   ├── executor_output.py
 │   ├── findings.py        # ScanFindings — V1 deterministic scan schema
+│   ├── issue.py           # IssueInput — human issue frontmatter parser
 │   ├── git.py              # GitCommandResult, ValidationWorkspace, etc.
 │   ├── pipeline_run.py
 │   ├── risk.py
@@ -113,16 +114,17 @@ tests/                     (20 test files, 208 tests)
 | 20 | Enforce external workspace safety | Jun 2 |
   | 81 | Atomic Rollback Validation (T-02) | Jun 12 |
    | 85 | Path Traversal Hardening (T-01) | Jun 12 |
-  | 87 | Circuit Breaker — LLM Provider Failure Isolation (T-07B) | Jun 13 |
-  | 18 | PatchForge thesis (initial scaffold) | May 27 |
+   | 87 | Circuit Breaker — LLM Provider Failure Isolation (T-07B) | Jun 13 |
+   | 92 | Issue Contracts — --issue-file (ISS-B) | Jun 13 |
+   | 18 | PatchForge thesis (initial scaffold) | May 27 |
 
 ### QA Metrics
 
 | Check | Result |
 |-------|--------|
-| `pytest` | **267 collected, 265 passed, 2 skipped** |
+| `pytest` | **283 collected, 281 passed, 2 skipped** |
 | `ruff check .` | **0 errors** — clean across all files |
-| `ruff format --check` | **Clean** (70 files formatted) |
+| `ruff format --check` | **Clean** (77 files formatted) |
 
 ### V1 Complete
 

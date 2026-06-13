@@ -21,9 +21,11 @@ runs/<run_id>/
 
 ### `issue.md`
 
-`issue.md` is not written by the pipeline until Issue B implements
-`--issue-file`. Its absence does not indicate a failed run. A run
-directory without `issue.md` is valid for the POC.
+`issue.md` is written by the `--issue-file` flag on the `plan` command
+(ISS-B, issue #92). It contains the original markdown content (frontmatter
++ body) of the human-submitted issue. Absent in runs that used the standard
+Scout input path — `issue.md` is optional by design and its absence does
+not indicate a failed run.
 
 ### `schema_version`
 
