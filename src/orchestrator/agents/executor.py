@@ -294,29 +294,33 @@ def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) 
             modified_content = raw
             break
 
-        except CircuitBreakerOpenError as cb_err:
+        except CircuitBreakerOpenError:
             if task.risk_level == "low":
                 try:
                     raw, input_tokens, output_tokens = _call_groq(prompt, run_id)
-                except CircuitBreakerOpenError as fb_err:
-                    raise CircuitBreakerOpenError(
-                        provider="gemini",
-                        state=fb_err.state,
-                        retry_after=max(cb_err.retry_after, fb_err.retry_after),
-                        message="gemini is open; fallback groq is also open",
-                    ) from fb_err
+                except CircuitBreakerOpenError:
+                    return FileChange(
+                        task_id=task.task_id,
+                        file=relative_path,
+                        status="error",
+                        error="gemini is open; fallback groq is also open",
+                    )
+                if not raw:
+                    raise ValueError("Empty model response from fallback Groq")
                 modified_content = raw
                 break
             elif task.risk_level == "medium":
                 try:
                     raw, input_tokens, output_tokens = _call_gemini(prompt, run_id)
-                except CircuitBreakerOpenError as fb_err:
-                    raise CircuitBreakerOpenError(
-                        provider="groq",
-                        state=fb_err.state,
-                        retry_after=max(cb_err.retry_after, fb_err.retry_after),
-                        message="groq is open; fallback gemini is also open",
-                    ) from fb_err
+                except CircuitBreakerOpenError:
+                    return FileChange(
+                        task_id=task.task_id,
+                        file=relative_path,
+                        status="error",
+                        error="groq is open; fallback gemini is also open",
+                    )
+                if not raw:
+                    raise ValueError("Empty model response from fallback Gemini")
                 modified_content = raw
                 break
             elif task.risk_level == "high":

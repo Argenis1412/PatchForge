@@ -68,6 +68,10 @@ class CircuitBreaker:
         failure_threshold: int = 3,
         recovery_timeout: float = 60.0,
     ) -> None:
+        if failure_threshold < 1:
+            raise ValueError("failure_threshold must be >= 1")
+        if recovery_timeout < 0:
+            raise ValueError("recovery_timeout must be >= 0")
         self._provider_name = provider_name
         self._failure_threshold = failure_threshold
         self._recovery_timeout = recovery_timeout
