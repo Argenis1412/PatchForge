@@ -122,7 +122,7 @@ tests/                     (20 test files, 208 tests)
 
 | Check | Result |
 |-------|--------|
-| `pytest` | **283 collected, 281 passed, 2 skipped** |
+| `pytest` | **290 collected, 288 passed, 2 skipped** |
 | `ruff check .` | **0 errors** — clean across all files |
 | `ruff format --check` | **Clean** (77 files formatted) |
 
@@ -183,6 +183,7 @@ These must not change without a new ADR in `docs/adr/`:
 ✅ **ADR-01/2** — Add `schema_version` to `RunMetadata` (#75)
 ✅ **ADR-01/3** — Version Guard at Pipeline Load Point (#77)
 ✅ **Experiment Artifacts Schema** — Verdict + write_verdict utility (#79)
+✅ **Issue B** — Issue Contracts (`--issue-file`) (#92)
 ✅ **T-01** — Path Traversal Hardening (#85)
 ✅ **T-07B** — Circuit Breaker — LLM Provider Failure Isolation (#87)
 
