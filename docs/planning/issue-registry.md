@@ -2,7 +2,7 @@
 
 > **Date:** 2026-06-13
 > **Source:** Roadmap decomposition (`roadmap-phase2.md`) + adversarial audit (`adversarial-audit.md`)
-> **Total:** 18 issues (7 completed, 0 specified, 11 scoped but needing detailed ACs)
+> **Total:** 18 issues (8 completed, 0 specified, 10 scoped but needing detailed ACs)
 
 ---
 
@@ -26,8 +26,9 @@
 - **Source:** `roadmap-phase2.md`
 - **Precondition:** None
 
-### T-01: Path Traversal Hardening
-- **Priority:** P0 | **Status:** 📐 Scoped
+### ✅ T-01: Path Traversal Hardening
+- **Priority:** P0 | **Status:** ✅ **Completed**
+- **PR:** #86
 - **Goal:** Enforce strict path construction contracts to prevent directory traversal attacks and workspace leakage.
 - **Source:** `roadmap-phase2.md`
 - **Precondition:** None
