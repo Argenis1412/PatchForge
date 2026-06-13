@@ -97,8 +97,6 @@ The configured working directory was `orchestrator-core/` but the actual project
 |----|---------|--------|------|
 | T-03 | Hardened JSON parsing | `architect.py`, `risk.py` | Brittle `_extract_json()` multiplies risk with new agents |
 | T-05 | Enum-based risk levels | `risk.py` | Stringly-typed risk levels across schemas |
-| T-07 | Exception hierarchy + circuit breaker | `agents/*.py` | No typed failure isolation for providers |
 | T-01 | Path traversal hardening | `executor.py`, `workspace.py` | No path construction contract enforcement |
 | T-06 | Risk gate policy config | `risk.py` | Thresholds are hardcoded, not configurable |
 | — | Integration test suite | `pipeline/*` | No baseline E2E tests for refactor safety |
-| — | LLM provider circuit breaker | `clients/*.py` | No graceful degradation for provider failures |
