@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
+from orchestrator.circuit_breaker import CircuitBreakerOpenError, circuit_breaker_for
 from orchestrator.observability.logging import get_file_logger
 from orchestrator.schemas.validator_output import ToolResult, ValidatorOutput
 
@@ -52,6 +53,9 @@ SUBPROCESS_TIMEOUT = 120  # seconds — pytest can be slow
 # ---------------------------------------------------------------------------
 
 _logger = None
+
+# Shared circuit breaker for the Gemini provider used by the Validator
+_cb_validator = circuit_breaker_for("gemini")
 
 
 def _get_logger(logs_dir: Path | None = None):
@@ -307,9 +311,11 @@ ERRORS
         from orchestrator.clients.gemini_client import get_gemini_client
 
         client = get_gemini_client()
-        response = client.models.generate_content(
-            model=MODEL_GEMINI,
-            contents=prompt,
+        response = _cb_validator.call(
+            lambda: client.models.generate_content(
+                model=MODEL_GEMINI,
+                contents=prompt,
+            )
         )
         elapsed = time.perf_counter() - t0
         summary = response.text.strip()
@@ -327,6 +333,10 @@ ERRORS
             output_tok,
         )
         return summary
+
+    except CircuitBreakerOpenError:
+        _get_logger().warning("[%s] Gemini CB open — using raw stderr fallback", run_id)
+        return "\n".join(f"[{r.tool}] {(r.stderr or r.stdout)[:500]}" for r in failed_tools)
 
     except Exception as exc:  # noqa: BLE001
         _get_logger().error("[%s] Gemini summary failed: %s — using raw stderr", run_id, exc)

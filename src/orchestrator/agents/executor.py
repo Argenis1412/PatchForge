@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Union
 
+from orchestrator.circuit_breaker import CircuitBreakerOpenError, circuit_breaker_for
 from orchestrator.clients.anthropic_client import get_anthropic_client
 from orchestrator.clients.gemini_client import get_gemini_client
 from orchestrator.clients.groq_client import get_groq_client
@@ -51,6 +52,14 @@ MAX_RETRIES = 1
 PROJECT_ROOT = Path(os.getenv("PROJECT_ROOT", str(Path(__file__).resolve().parent.parent.parent)))
 
 LOGS_DIR = Path(__file__).parent.parent / "logs"
+
+# ---------------------------------------------------------------------------
+# Shared circuit breakers per provider (process-wide via registry)
+# ---------------------------------------------------------------------------
+
+_cb_gemini = circuit_breaker_for("gemini")
+_cb_groq = circuit_breaker_for("groq")
+_cb_claude = circuit_breaker_for("claude")
 
 # ---------------------------------------------------------------------------
 # Logger (lazy-initialized)
@@ -105,7 +114,7 @@ def _strip_markdown(content: str) -> str:
     return content.strip()
 
 
-def _call_gemini(prompt: str, run_id: str) -> tuple[str, int, int]:
+def _do_gemini_call(prompt: str, run_id: str) -> tuple[str, int, int]:
     from google.genai import types
 
     client = get_gemini_client()
@@ -135,7 +144,11 @@ def _call_gemini(prompt: str, run_id: str) -> tuple[str, int, int]:
     return content, input_tokens, output_tokens
 
 
-def _call_groq(prompt: str, run_id: str) -> tuple[str, int, int]:
+def _call_gemini(prompt: str, run_id: str) -> tuple[str, int, int]:
+    return _cb_gemini.call(lambda: _do_gemini_call(prompt, run_id))
+
+
+def _do_groq_call(prompt: str, run_id: str) -> tuple[str, int, int]:
     log = _get_logger()
     client = get_groq_client()
     headers = {
@@ -178,7 +191,11 @@ def _call_groq(prompt: str, run_id: str) -> tuple[str, int, int]:
     return content, input_tokens, output_tokens
 
 
-def _call_claude(prompt: str, run_id: str) -> tuple[str, int, int]:
+def _call_groq(prompt: str, run_id: str) -> tuple[str, int, int]:
+    return _cb_groq.call(lambda: _do_groq_call(prompt, run_id))
+
+
+def _do_claude_call(prompt: str, run_id: str) -> tuple[str, int, int]:
     client = get_anthropic_client()
     log = _get_logger()
     log.debug("[%s] Claude request | model=%s | prompt_chars=%d", run_id, MODEL_CLAUDE, len(prompt))
@@ -206,6 +223,10 @@ def _call_claude(prompt: str, run_id: str) -> tuple[str, int, int]:
     )
 
     return content, input_tokens, output_tokens
+
+
+def _call_claude(prompt: str, run_id: str) -> tuple[str, int, int]:
+    return _cb_claude.call(lambda: _do_claude_call(prompt, run_id))
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +294,40 @@ def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) 
             modified_content = raw
             break
 
+        except CircuitBreakerOpenError:
+            if task.risk_level == "low":
+                try:
+                    raw, input_tokens, output_tokens = _call_groq(prompt, run_id)
+                except CircuitBreakerOpenError as fb_err:
+                    raise CircuitBreakerOpenError(
+                        provider="gemini",
+                        state=fb_err.state,
+                        retry_after=fb_err.retry_after,
+                        message="gemini is open; fallback groq is also open",
+                    ) from fb_err
+                modified_content = raw
+                break
+            elif task.risk_level == "medium":
+                try:
+                    raw, input_tokens, output_tokens = _call_gemini(prompt, run_id)
+                except CircuitBreakerOpenError as fb_err:
+                    raise CircuitBreakerOpenError(
+                        provider="groq",
+                        state=fb_err.state,
+                        retry_after=fb_err.retry_after,
+                        message="groq is open; fallback gemini is also open",
+                    ) from fb_err
+                modified_content = raw
+                break
+            elif task.risk_level == "high":
+                raise
+            else:
+                raise
+
         except (ValueError, Exception) as exc:
+            # HALF_OPEN failures propagate the original exception here, not
+            # CircuitBreakerOpenError — fallback activates on the *subsequent*
+            # retry after CB transitions to OPEN.
             log = _get_logger()
             log.warning(
                 "[%s] Attempt %d/%d failed for task %s: %s",
