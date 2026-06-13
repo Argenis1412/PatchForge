@@ -40,7 +40,7 @@ def parse_issue_markdown(content: str) -> IssueInput:
     Raises ``ValueError`` if *content* is empty or frontmatter is
     structurally malformed.
     """
-    if not content:
+    if not content or not content.strip():
         raise ValueError("Issue file is empty")
 
     raw = content
@@ -50,15 +50,18 @@ def parse_issue_markdown(content: str) -> IssueInput:
     body = content
 
     if content.startswith("---"):
-        # Find the closing --- delimiter
-        rest = content[3:]
-        end_idx = rest.find("---")
-        if end_idx == -1:
+        # Find the closing --- delimiter (line-aware, avoid mid-line match)
+        rest_lines = content[3:].splitlines(keepends=True)
+        closing_idx = next(
+            (i for i, line in enumerate(rest_lines) if line.strip() == "---"),
+            None,
+        )
+        if closing_idx is None:
             # No closing delimiter — treat everything as body
             body = content
         else:
-            fm_block = rest[:end_idx]
-            body = rest[end_idx + 3 :]
+            fm_block = "".join(rest_lines[:closing_idx])
+            body = "".join(rest_lines[closing_idx + 1 :])
 
             for line in fm_block.splitlines():
                 stripped = line.strip()

@@ -66,6 +66,10 @@ body
         with pytest.raises(ValueError, match="empty"):
             parse_issue_markdown("")
 
+    def test_whitespace_only_raises(self):
+        with pytest.raises(ValueError, match="empty"):
+            parse_issue_markdown("   \n\t  ")
+
     def test_malformed_frontmatter_raises(self):
         content = """---
 : broken key

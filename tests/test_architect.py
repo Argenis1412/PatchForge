@@ -104,3 +104,14 @@ class TestArchitectRunFromIssue:
         mock_claude.return_value = ("not json at all", {"input": 1, "output": 1}, 0.01)
         with pytest.raises(LLMParseError):
             run_from_issue(_make_issue())
+
+    @pytest.mark.unit
+    def test_braces_in_body_do_not_crash(self, mock_claude):
+        issue = IssueInput(
+            title="Braces",
+            body="{x: 1, y: 2}",
+            raw="---\ntitle: Braces\n---\n{x: 1, y: 2}",
+        )
+        mock_claude.return_value = (_CLEAN_JSON, {"input": 1, "output": 1}, 0.01)
+        output, meta = run_from_issue(issue)
+        assert isinstance(output, ArchitectOutput)

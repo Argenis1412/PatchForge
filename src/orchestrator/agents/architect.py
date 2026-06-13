@@ -308,11 +308,15 @@ def run_from_issue(
         logs_dir = config.workspace_path / "logs"
 
     print("[Architect] Processing IssueInput object...")
+
+    def _escape(v: str) -> str:
+        return v.replace("{", "{{").replace("}", "}}")
+
     issue_data = ISSUE_ARCHITECT_PROMPT.format(
-        title=issue_input.title,
-        severity=issue_input.severity,
-        labels=", ".join(issue_input.labels),
-        body=issue_input.body,
+        title=_escape(issue_input.title),
+        severity=_escape(issue_input.severity),
+        labels=_escape(", ".join(issue_input.labels)),
+        body=_escape(issue_input.body),
     )
     print(f"[Architect] Asking {MODEL} to structure the implementation plan...")
 
