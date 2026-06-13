@@ -12,6 +12,7 @@ from orchestrator.observability.events import FailureType, log_failure
 from orchestrator.observability.logger import log_call
 from orchestrator.schemas.architect_output import ArchitectOutput
 from orchestrator.schemas.config import TargetConfig
+from orchestrator.schemas.issue import IssueInput
 from orchestrator.schemas.scout_output import ScoutOutput
 
 MODEL = "claude-sonnet-4-6"
@@ -176,6 +177,49 @@ All fields are required. Do not omit any field.
 {scout_data}
 """
 
+ISSUE_ARCHITECT_PROMPT = """
+You are the Architect Agent. A human has reported an issue that needs
+to be addressed in the codebase.
+
+Given this issue description, your job is to:
+1. Understand the problem and its scope
+2. Propose which files likely need to be modified
+3. Design a safe implementation order
+4. Identify risks and blockers
+
+Do not implement anything.
+Output: ONLY valid JSON matching this exact schema. No explanation. No markdown:
+{{
+  "validated_findings": ["list the key problems described in the issue"],
+  "false_positives": [],
+  "systemic_risks": ["risks or affected areas beyond the immediate issue"],
+  "implementation_plan": [
+    {{
+      "task_id": "string",
+      "title": "string",
+      "description": "string",
+      "files_to_modify": ["string"],
+      "priority": "high|medium|low",
+      "effort": "high|medium|low",
+      "risk_level": "high|medium|low",
+      "reason": "string",
+      "risk_reasons": ["string"],
+      "validation_expectations": ["string"],
+      "dependencies": ["string"]
+    }}
+  ],
+  "blockers": ["string"]
+}}
+
+All fields are required. Do not omit any field.
+
+[ISSUE]
+Title: {title}
+Severity: {severity}
+Labels: {labels}
+Body: {body}
+"""
+
 
 def run(
     scout_output: ScoutOutput,
@@ -202,6 +246,84 @@ def run(
         run_id=run_id,
         stage="architect",
         span_id="architect",
+    )
+
+    print(f"[Architect] Done | tokens: {tokens} | cost: ${cost:.5f}")
+
+    # Validate JSON via canonical parser
+    try:
+        output = parse_llm_response(raw_response, ArchitectOutput)
+    except LLMParseError as e:
+        print(f"[Architect] JSON parse error: {e}")
+        print(f"[Architect] Raw output:\n{raw_response}")
+        log_failure(
+            trace_id=trace_id or "",
+            run_id=run_id or "",
+            stage="architect",
+            error_type=FailureType.SCHEMA_VALIDATION_ERROR,
+            message=f"Architect JSON parsing failed: {e}",
+            source="agent",
+            logs_dir=logs_dir,
+        )
+        raise
+    except SchemaValidationError as e:
+        print(f"[Architect] Schema validation error: {e}")
+        log_failure(
+            trace_id=trace_id or "",
+            run_id=run_id or "",
+            stage="architect",
+            error_type=FailureType.SCHEMA_VALIDATION_ERROR,
+            message=f"Architect schema validation failed: {e}",
+            source="agent",
+            logs_dir=logs_dir,
+        )
+        raise
+
+    meta = {
+        "tokens_input": tokens["input"],
+        "tokens_output": tokens["output"],
+        "cost_usd": cost,
+        "model_used": MODEL,
+    }
+
+    return output, meta
+
+
+def run_from_issue(
+    issue_input: IssueInput,
+    config: Optional[Union[str, Path, TargetConfig]] = None,
+    *,
+    trace_id: str | None = None,
+    run_id: str | None = None,
+) -> tuple[ArchitectOutput, dict]:
+    """Run the Architect agent from a human-written issue file.
+
+    Uses :data:`ISSUE_ARCHITECT_PROMPT` instead of the Scout-based prompt.
+    Returns the same ``(ArchitectOutput, meta)`` tuple as :func:`run`.
+    """
+    logs_dir: Optional[Path] = None
+    if config is not None:
+        if isinstance(config, (str, Path)):
+            config = TargetConfig.load(target_path=Path(config))
+        logs_dir = config.workspace_path / "logs"
+
+    print("[Architect] Processing IssueInput object...")
+    issue_data = ISSUE_ARCHITECT_PROMPT.format(
+        title=issue_input.title,
+        severity=issue_input.severity,
+        labels=", ".join(issue_input.labels),
+        body=issue_input.body,
+    )
+    print(f"[Architect] Asking {MODEL} to structure the implementation plan...")
+
+    raw_response, tokens, cost = call_claude(
+        issue_data,
+        orchestratorel="architect",
+        logs_dir=logs_dir,
+        trace_id=trace_id,
+        run_id=run_id,
+        stage="architect",
+        span_id="architect-issue",
     )
 
     print(f"[Architect] Done | tokens: {tokens} | cost: ${cost:.5f}")
