@@ -64,4 +64,4 @@
 - **File:** `src/orchestrator/agents/scout.py:145`
 - **Debt:** Bare `raise` in `call_gemini()` except block propagates the original exception type instead of `ProviderError`, making downstream `except PatchForgeError` handlers unable to catch it. The `raise ProviderError("gemini", ...)` on line 147 is dead code — it never executes because the bare `raise` always exits before reaching it.
 - **Discovered by:** AI review bot during T-07 Part A implementation
-- **Why deferred:** Fix would be a behavioral change; explicitly out of scope for T-07 Part A (structural only). Deferred to T-07 Part C (tightening except clauses).
+- **Why deferred:** Fix would be a behavioral change; explicitly out of scope for T-07 Part A (structural only). Deferred to T-07 Part C (#90) which also explicitly excluded it. Remains unresolved — needs a future issue.

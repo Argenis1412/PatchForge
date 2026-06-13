@@ -2,7 +2,7 @@
 
 > **Date:** 2026-06-13
 > **Source:** Roadmap decomposition (`roadmap-phase2.md`) + adversarial audit (`adversarial-audit.md`)
-> **Total:** 18 issues (8 completed, 0 specified, 10 scoped but needing detailed ACs)
+> **Total:** 18 issues (9 completed, 0 specified, 9 scoped but needing detailed ACs)
 
 ---
 
@@ -41,7 +41,7 @@
 - **Sub-issues:**
   - Part A ✅ — Exception hierarchy (structural) — completed #71
   - Part B ✅ — Circuit breaker implementation — completed #87
-  - Part C 📐 — Tightening except clauses (pending)
+  - Part C ✅ — Tightening except clauses — completed #90
 
 ### ✅ Issue A: Structured Contract Parsing
 - **Priority:** P0 | **Status:** ✅ **Completed**
