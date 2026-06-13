@@ -32,6 +32,8 @@ def call_claude(
 ) -> tuple[str, dict, float]:
     """Wrapper with retry and logging for Claude."""
     client = get_anthropic_client()
+    from anthropic import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
+
     for attempt in range(2):
         call_started = time.monotonic()
         try:
@@ -67,13 +69,43 @@ def call_claude(
 
             return raw, tokens, cost
 
-        except Exception as e:
+        except RateLimitError as e:
             latency_ms = int((time.monotonic() - call_started) * 1000)
-            if "rate" in str(e).lower() and attempt == 0:
+            if attempt == 0:
+                # attempt 0: retry without logging — not a terminal failure
                 print(f"[{orchestratorel}] Rate limit. Waiting 60s...")
                 time.sleep(60)
                 continue
 
+            log_call(
+                agent=orchestratorel,
+                prompt=prompt[:500],
+                response="",
+                tokens={"input": 0, "output": 0},
+                cost_usd=0.0,
+                logs_dir=logs_dir,
+                trace_id=trace_id,
+                run_id=run_id,
+                stage=stage,
+                span_id=span_id,
+                model=MODEL,
+                latency_ms=latency_ms,
+                error=str(e),
+            )
+            log_failure(
+                trace_id=trace_id or "",
+                run_id=run_id or "",
+                stage=stage,
+                error_type=FailureType.LLM_ERROR,
+                message=f"Claude call {orchestratorel} failed: {e}",
+                source="agent",
+                duration_ms=latency_ms,
+                logs_dir=logs_dir,
+            )
+            raise ProviderError("anthropic", f"[{orchestratorel}] Failed: {e}")
+
+        except (APIConnectionError, APITimeoutError, APIStatusError) as e:
+            latency_ms = int((time.monotonic() - call_started) * 1000)
             log_call(
                 agent=orchestratorel,
                 prompt=prompt[:500],

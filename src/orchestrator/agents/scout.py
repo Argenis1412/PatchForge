@@ -64,6 +64,8 @@ def call_gemini(
 ) -> tuple[str, dict, float]:
     """Wrapper with retry and logging."""
     client = get_gemini_client()
+    from google.genai.errors import APIError, ClientError, ServerError
+
     for attempt in range(2):
         call_started = time.monotonic()
         try:
@@ -109,10 +111,11 @@ def call_gemini(
 
             return raw, tokens, cost
 
-        except Exception as e:
+        except (APIError, ClientError, ServerError) as e:
             latency_ms = int((time.monotonic() - call_started) * 1000)
-            if "429" in str(e) or "ResourceExhausted" in str(e):
+            if isinstance(e, ClientError) and e.code == 429:
                 if attempt == 0:
+                    # attempt 0: retry without logging — not a terminal failure
                     print(f"[{orchestratorel}] Rate limit. Waiting 60s...")
                     time.sleep(60)
                     continue
