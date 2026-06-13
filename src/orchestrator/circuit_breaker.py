@@ -21,7 +21,7 @@ import time
 from enum import Enum
 from typing import Callable, TypeVar
 
-from orchestrator.exceptions import CircuitBreakerOpenError, PatchForgeError  # noqa: F401
+from orchestrator.exceptions import CircuitBreakerOpenError  # re-exported for callers
 from orchestrator.observability.events import FailureType, log_event, log_failure
 
 T = TypeVar("T")
@@ -164,18 +164,27 @@ class CircuitBreaker:
         # flag permanently blocks recovery.
         self._half_open_in_flight = False
         if self._consecutive_failures >= self._failure_threshold:
+            previous_state = self._state
             self._state = CircuitBreakerState.OPEN
             self._last_failure_time = time.monotonic()
+            # Differentiate message: first opening vs re-opening after a probe.
+            if previous_state == CircuitBreakerState.HALF_OPEN:
+                log_msg = (
+                    f"CircuitBreaker for '{self._provider_name}' re-opened after "
+                    f"probe failure (was HALF_OPEN)."
+                )
+            else:
+                log_msg = (
+                    f"CircuitBreaker for '{self._provider_name}' opened after "
+                    f"{self._consecutive_failures} consecutive failures."
+                )
             # Auto-observability: emit only on transition to OPEN.
             log_failure(
                 trace_id="circuit_breaker",
                 run_id=self._provider_name,
                 stage="circuit_breaker",
                 error_type=FailureType.CIRCUIT_BREAKER_OPEN,
-                message=(
-                    f"CircuitBreaker for '{self._provider_name}' opened after "
-                    f"{self._consecutive_failures} consecutive failures."
-                ),
+                message=log_msg,
                 source="circuit_breaker",
                 data={"provider": self._provider_name, "failures": self._consecutive_failures},
             )

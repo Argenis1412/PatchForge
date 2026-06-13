@@ -294,7 +294,7 @@ def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) 
             modified_content = raw
             break
 
-        except CircuitBreakerOpenError:
+        except CircuitBreakerOpenError as cb_err:
             if task.risk_level == "low":
                 try:
                     raw, input_tokens, output_tokens = _call_groq(prompt, run_id)
@@ -302,7 +302,7 @@ def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) 
                     raise CircuitBreakerOpenError(
                         provider="gemini",
                         state=fb_err.state,
-                        retry_after=fb_err.retry_after,
+                        retry_after=max(cb_err.retry_after, fb_err.retry_after),
                         message="gemini is open; fallback groq is also open",
                     ) from fb_err
                 modified_content = raw
@@ -314,7 +314,7 @@ def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) 
                     raise CircuitBreakerOpenError(
                         provider="groq",
                         state=fb_err.state,
-                        retry_after=fb_err.retry_after,
+                        retry_after=max(cb_err.retry_after, fb_err.retry_after),
                         message="groq is open; fallback gemini is also open",
                     ) from fb_err
                 modified_content = raw
