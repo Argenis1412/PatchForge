@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-06-12 | Session: T-02 atomic rollback extraction
+> Last updated: 2026-06-13 | Session: T-07B circuit breaker
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -46,6 +46,7 @@ src/orchestrator/          (41 Python files)
 │   ├── executor.py        # Multi-LLM routing — applies changes
 │   ├── scout.py           # Gemini — repository analysis (legacy, AI)
 │   └── validator.py       # subprocess — ruff + pytest
+├── circuit_breaker.py       # Per-provider circuit breaker (T-07B)
 ├── clients/
 │   ├── anthropic_client.py
 │   ├── gemini_client.py
@@ -111,13 +112,14 @@ tests/                     (20 test files, 208 tests)
 | 21 | Deterministic Git safety primitives + V1 isolated validation | Jun 3 |
 | 20 | Enforce external workspace safety | Jun 2 |
  | 81 | Atomic Rollback Validation (T-02) | Jun 12 |
- | 18 | PatchForge thesis (initial scaffold) | May 27 |
+  | 87 | Circuit Breaker — LLM Provider Failure Isolation (T-07B) | Jun 13 |
+  | 18 | PatchForge thesis (initial scaffold) | May 27 |
 
 ### QA Metrics
 
 | Check | Result |
 |-------|--------|
-| `pytest` | **237 collected, 236 passed, 1 skipped** |
+| `pytest` | **267 collected, 265 passed, 2 skipped** |
 | `ruff check .` | **0 errors** — clean across all files |
 | `ruff format --check` | **Clean** (70 files formatted) |
 
@@ -178,6 +180,7 @@ These must not change without a new ADR in `docs/adr/`:
 ✅ **ADR-01/2** — Add `schema_version` to `RunMetadata` (#75)
 ✅ **ADR-01/3** — Version Guard at Pipeline Load Point (#77)
 ✅ **Experiment Artifacts Schema** — Verdict + write_verdict utility (#79)
+✅ **T-07B** — Circuit Breaker — LLM Provider Failure Isolation (#87)
 
 ---
 

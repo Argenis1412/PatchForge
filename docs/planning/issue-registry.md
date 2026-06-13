@@ -1,8 +1,8 @@
 # Issue Registry — PatchForge Phase 2 & Beyond
 
-> **Date:** 2026-06-11
+> **Date:** 2026-06-13
 > **Source:** Roadmap decomposition (`roadmap-phase2.md`) + adversarial audit (`adversarial-audit.md`)
-> **Total:** 18 issues (6 completed, 0 specified, 12 scoped but needing detailed ACs)
+> **Total:** 18 issues (7 completed, 0 specified, 11 scoped but needing detailed ACs)
 
 ---
 
@@ -32,15 +32,15 @@
 - **Source:** `roadmap-phase2.md`
 - **Precondition:** None
 
-### T-07: Exception Hierarchy + Circuit Breaker
-- **Priority:** P0 | **Status:** 📐 Scoped | Part A ✅ (#71)
+### ✅ T-07: Exception Hierarchy + Circuit Breaker
+- **Priority:** P0 | **Status:** ✅ **Completed** | Part A ✅ (#71) | Part B ✅ (#87)
 - **Goal:** Replace generic `RuntimeError` with typed exceptions (`PatchForgeError` base) and implement a circuit breaker for provider failures.
 - **Source:** `roadmap-phase2.md`
 - **Precondition:** None
 - **Sub-issues:**
   - Part A ✅ — Exception hierarchy (structural) — completed #71
-  - Part B — Circuit breaker implementation (pending)
-  - Part C — Tightening except clauses (pending)
+  - Part B ✅ — Circuit breaker implementation — completed #87
+  - Part C 📐 — Tightening except clauses (pending)
 
 ### ✅ Issue A: Structured Contract Parsing
 - **Priority:** P0 | **Status:** ✅ **Completed**

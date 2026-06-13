@@ -47,6 +47,18 @@
 - **Discovered by:** AI review bot (CodeRabbit)
 - **Why deferred:** Modificar field defaults de `RunMetadata` está fuera del scope de ADR-01/3. Corregible en cualquier issue futuro que toque `artifacts.py`.
 
+### [2026-06-13] Issue #87 — Circuit Breaker (T-07 Part B)
+
+- **File:** `src/orchestrator/circuit_breaker.py`
+- **Debt:** `CircuitBreaker._consecutive_failures` y `_half_open_in_flight` no tienen protección thread-safe. Consistente con el patrón existente de `clients/*.py` (sin locks, GIL-dependent), pero si P3 introduce threading o async workers, será un race condition.
+- **Discovered by:** Adversarial audit durante diseño de la issue
+- **Why deferred:** No-threading es invariante del proyecto en V1. Revisar con P3 (async workers).
+
+- **File:** `src/orchestrator/exceptions.py:101`
+- **Debt:** `CircuitBreakerOpenError.state` tiene type hint `object` en vez de `CircuitBreakerState` para evitar import circular entre `circuit_breaker.py` y `exceptions.py`. No afecta runtime.
+- **Discovered by:** Implementation
+- **Why deferred:** Romper el import circular requiere mover `CircuitBreakerState` a un tercer módulo o hacer `exceptions.py` importar de `circuit_breaker`. Fuera de scope de T-07B.
+
 ### [2026-06-11] Issue #71 — Exception hierarchy (T-07 Part A)
 
 - **File:** `src/orchestrator/agents/scout.py:145`

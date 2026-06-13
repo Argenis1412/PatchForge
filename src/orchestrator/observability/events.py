@@ -11,6 +11,7 @@ class FailureType(StrEnum):
     TIMEOUT_ERROR = "timeout_error"
     TOOL_ERROR = "tool_error"
     PIPELINE_ABORT = "pipeline_abort"
+    CIRCUIT_BREAKER_OPEN = "circuit_breaker_open"
     UNKNOWN = "unknown"
 
 
