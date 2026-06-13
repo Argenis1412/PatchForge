@@ -15,7 +15,7 @@
 | Item | File(s) | Severity | Notes |
 |------|---------|----------|-------|
 | `main.py` god object (551 lines) | `main.py` | High | CLI + business logic mixed. Bigger than `pipeline.py`. |
-| `_extract_json()` fragility | `agents/architect.py` | High | 52-line manual JSON parser. Single point of failure if LLM format changes. |
+| ~~`_extract_json()` fragility~~ ✓ | ~~`agents/architect.py`~~ | ~~High~~ | Resolved by Issue A: replaced with `parse_llm_response()` in `src/orchestrator/llm/parser.py` |
 | Docstring coverage <80% | All | Medium | CodeRabbit flagged post-#9. Not a blocker for V1. |
 
 ### V1-Specific

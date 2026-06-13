@@ -2,7 +2,7 @@
 
 > **Date:** 2026-06-13
 > **Source:** Roadmap decomposition (`roadmap-phase2.md`) + adversarial audit (`adversarial-audit.md`)
-> **Total:** 18 issues (9 completed, 0 specified, 9 scoped but needing detailed ACs)
+> **Total:** 18 issues (10 completed, 0 specified, 8 scoped but needing detailed ACs)
 
 ---
 
@@ -93,11 +93,49 @@ Six files need final verification or touch-up. No structural changes — only co
 
 ## P1 — Input Contracts
 
-### Issue B: Issue Contracts (`--issue-file`)
-- **Priority:** P1 | **Status:** 📐 Scoped
+### ✅ Issue B: Issue Contracts (`--issue-file`)
+- **Priority:** P1 | **Status:** ✅ **Completed**
+- **Commit:** `5077252`
+- **PR:** #93
 - **Goal:** Enable the pipeline to consume human-written markdown issues as the primary source of truth.
 - **Source:** `roadmap-phase2.md`
 - **Precondition:** Issue A complete (parser must exist first)
+
+#### Scope
+- `parse_issue_markdown()` — parse frontmatter (title, severity, labels) + body from markdown
+- `run_from_issue()` — bypass Scout, feed parsed issue directly to Claude
+- `--issue-file` CLI flag on `plan` command
+- `issue.md` copied to run directory as input artifact
+- Escape braces in `str.format()` to prevent crash on `{`/`}` in body
+- Reject whitespace-only files
+- Line-aware `---` frontmatter delimiter parsing
+
+#### Acceptance criteria
+- [x] `parse_issue_markdown()` returns `IssueInput` with `title`, `severity`, `labels`, `body`, `raw`
+- [x] Frontmatter-less input returns defaults (title="Untitled", severity="medium", labels=[])
+- [x] Braces (`{}`) in body do not crash `run_from_issue()`
+- [x] Whitespace-only content raises `ValueError("Issue file is empty")`
+- [x] Mid-line `---` content inside frontmatter does not break delimiter detection
+- [x] `run --issue-file <path>` plans from issue, not from scan findings
+- [x] Missing `--issue-file` path exits with code 1
+- [x] `ruff check .` — 0 errors
+- [x] `pytest` — 288 passed, 2 skipped
+
+#### Files changed
+| File | Action |
+|------|--------|
+| `src/orchestrator/schemas/issue.py` | CREATE — IssueInput schema + parse_issue_markdown() |
+| `src/orchestrator/agents/architect.py` | EDIT — add run_from_issue() + brace escaping |
+| `src/orchestrator/commands/plan.py` | EDIT — add --issue-file path |
+| `src/orchestrator/main.py` | EDIT — pass --issue-file from CLI to plan |
+| `tests/test_issue_schema.py` | CREATE — 12 parser tests |
+| `tests/test_architect.py` | EDIT — 4 run_from_issue tests (incl. braces) |
+| `tests/test_v1_commands.py` | EDIT — 3 integration tests (flow, not-found, override) |
+
+#### Non-goals
+- Full end-to-end dogfooding (Experiment 001)
+- Formal experiment schema
+- Issue markdown validation beyond frontmatter structure
 
 ---
 
