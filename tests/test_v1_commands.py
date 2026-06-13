@@ -478,3 +478,246 @@ def test_rebaseable_blocks_apply(target_repo: Path, workspace_dir: Path):
 
     # Verify target was not modified
     assert (target_repo / "README.md").read_text() == "Hello\n"
+
+
+# ---------------------------------------------------------------------------
+# --issue-file integration tests
+# ---------------------------------------------------------------------------
+
+
+def test_v1_issue_file_flow(target_repo: Path, workspace_dir: Path, tmp_path: Path):
+    """Full pipeline with --issue-file: scan -> plan --issue-file -> preview -> apply."""
+    mock_arch_out = ArchitectOutput(
+        validated_findings=[],
+        false_positives=[],
+        systemic_risks=[],
+        implementation_plan=[
+            Task(
+                task_id="T1",
+                title="Modify README",
+                description="Modify README file",
+                files_to_modify=["README.md"],
+                priority="high",
+                effort="low",
+                risk_level="low",
+            )
+        ],
+        blockers=[],
+    )
+    mock_arch_meta = {"latency_ms": 200, "cost_usd": 0.02}
+
+    mock_exec_out = ExecutorOutput(
+        applied=[
+            FileChange(
+                task_id="T1",
+                file="README.md",
+                status="applied",
+                diff="""diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -1 +1 @@
+-Hello
++Hello World Issue
+""",
+            )
+        ]
+    )
+    mock_exec_meta = {"latency_ms": 300, "cost_usd": 0.03}
+
+    mock_val_out = ValidatorOutput(
+        overall_passed=True,
+        tools=[ToolResult(tool="ruff", passed=True, return_code=0)],
+        llm_summary=None,
+    )
+
+    issue_path = tmp_path / "test-issue.md"
+    issue_content = (
+        "---\ntitle: Fix README title\nseverity: low\nlabels: docs\n---\n"
+        "The README should say Hello World Issue."
+    )
+    issue_path.write_text(issue_content, encoding="utf-8")
+
+    def _mock_scan(target_path, ignore_dirs=None):
+        root = resolve_git_root(target_path)
+        head = current_head(root)
+        return ScanFindings(
+            repository_root=str(root),
+            base_commit=head,
+            branch="main",
+            v1_supported=True,
+            support_reasons=["mocked"],
+            unsupported_reasons=[],
+            pyproject=PyProjectInfo(exists=True, valid=True, build_backend="hatchling.build"),
+            ruff=ToolInfo(available=True, version="ruff 0.4.0"),
+            pytest=ToolInfo(available=True, version="pytest 8.0.0"),
+            test_suite=TestSuiteInfo(detected=True, type="tests_dir"),
+            total_python_files=0,
+            packages=[],
+            modules=[],
+            hotspots=[],
+        )
+
+    with (
+        patch("orchestrator.commands.scan.scan", side_effect=_mock_scan),
+        patch(
+            "orchestrator.agents.architect.run_from_issue",
+            return_value=(mock_arch_out, mock_arch_meta),
+        ),
+        patch("orchestrator.agents.executor.run", return_value=(mock_exec_out, mock_exec_meta)),
+        patch(
+            "orchestrator.validation_workspace.run_validation_in_copy", return_value=mock_val_out
+        ),
+        patch("orchestrator.agents.validator.run", return_value=(mock_val_out, {})),
+    ):
+        scan_res = runner.invoke(app, ["scan", str(target_repo), "--workspace", str(workspace_dir)])
+        assert scan_res.exit_code == 0
+
+        runs_dir = workspace_dir / "runs"
+        run_id = list(runs_dir.iterdir())[0].name
+
+        plan_res = runner.invoke(
+            app,
+            [
+                "plan",
+                run_id,
+                "--workspace",
+                str(workspace_dir),
+                "--issue-file",
+                str(issue_path),
+            ],
+        )
+        assert plan_res.exit_code == 0, plan_res.stdout
+        assert "Plan generated successfully!" in plan_res.stdout
+
+        issue_md_path = runs_dir / run_id / "issue.md"
+        assert issue_md_path.exists()
+        assert issue_md_path.read_text(encoding="utf-8") == issue_content
+
+        plan_json_path = runs_dir / run_id / "plan.json"
+        assert plan_json_path.exists()
+        plan_data = json.loads(plan_json_path.read_text())
+        assert len(plan_data["implementation_plan"]) == 1
+
+        run_data = json.loads((runs_dir / run_id / "run.json").read_text())
+        assert run_data["status"] == "planned"
+        assert run_data["goal"] == "Fix README title"
+        assert run_data["affected_files"] == ["README.md"]
+
+        preview_res = runner.invoke(app, ["preview", run_id, "--workspace", str(workspace_dir)])
+        assert preview_res.exit_code == 0, preview_res.stdout
+        assert "Preview and validation completed successfully!" in preview_res.stdout
+        patch_diff_path = runs_dir / run_id / "patch.diff"
+        assert patch_diff_path.exists()
+
+        apply_res = runner.invoke(app, ["apply", run_id, "--workspace", str(workspace_dir)])
+        assert apply_res.exit_code == 0, apply_res.stdout
+        assert "Patch applied successfully" in apply_res.stdout
+        assert (target_repo / "README.md").read_text() == "Hello World Issue\n"
+
+
+def test_plan_with_issue_file_not_found(target_repo: Path, workspace_dir: Path, tmp_path: Path):
+    """--issue-file pointing to nonexistent path exits with code 1."""
+
+    def _mock_scan(target_path, ignore_dirs=None):
+        root = resolve_git_root(target_path)
+        head = current_head(root)
+        return ScanFindings(
+            repository_root=str(root),
+            base_commit=head,
+            branch="main",
+            v1_supported=True,
+            support_reasons=["mocked"],
+            unsupported_reasons=[],
+            pyproject=PyProjectInfo(exists=True, valid=True, build_backend="hatchling.build"),
+            ruff=ToolInfo(available=True, version="ruff 0.4.0"),
+            pytest=ToolInfo(available=True, version="pytest 8.0.0"),
+            test_suite=TestSuiteInfo(detected=True, type="tests_dir"),
+            total_python_files=0,
+            packages=[],
+            modules=[],
+            hotspots=[],
+        )
+
+    with patch("orchestrator.commands.scan.scan", side_effect=_mock_scan):
+        scan_res = runner.invoke(app, ["scan", str(target_repo), "--workspace", str(workspace_dir)])
+        assert scan_res.exit_code == 0
+
+        runs_dir = workspace_dir / "runs"
+        run_id = list(runs_dir.iterdir())[0].name
+
+    missing_path = tmp_path / "does-not-exist.md"
+    plan_res = runner.invoke(
+        app,
+        ["plan", run_id, "--workspace", str(workspace_dir), "--issue-file", str(missing_path)],
+    )
+    assert plan_res.exit_code == 1
+    assert "Issue file not found" in plan_res.stdout
+
+
+def test_plan_issue_file_overrides_findings(target_repo: Path, workspace_dir: Path, tmp_path: Path):
+    """When findings.json exists and --issue-file is used, a warning is printed."""
+    mock_arch_out = ArchitectOutput(
+        validated_findings=[],
+        false_positives=[],
+        systemic_risks=[],
+        implementation_plan=[
+            Task(
+                task_id="T1",
+                title="Fix README",
+                description="Fix README",
+                files_to_modify=["README.md"],
+                priority="low",
+                effort="low",
+                risk_level="low",
+            )
+        ],
+        blockers=[],
+    )
+    mock_arch_meta = {"latency_ms": 100, "cost_usd": 0.01}
+
+    issue_path = tmp_path / "override.md"
+    issue_path.write_text("---\ntitle: Override test\n---\nBody", encoding="utf-8")
+
+    def _mock_scan(target_path, ignore_dirs=None):
+        root = resolve_git_root(target_path)
+        head = current_head(root)
+        return ScanFindings(
+            repository_root=str(root),
+            base_commit=head,
+            branch="main",
+            v1_supported=True,
+            support_reasons=["mocked"],
+            unsupported_reasons=[],
+            pyproject=PyProjectInfo(exists=True, valid=True, build_backend="hatchling.build"),
+            ruff=ToolInfo(available=True, version="ruff 0.4.0"),
+            pytest=ToolInfo(available=True, version="pytest 8.0.0"),
+            test_suite=TestSuiteInfo(detected=True, type="tests_dir"),
+            total_python_files=0,
+            packages=[],
+            modules=[],
+            hotspots=[],
+        )
+
+    with (
+        patch("orchestrator.commands.scan.scan", side_effect=_mock_scan),
+        patch(
+            "orchestrator.agents.architect.run_from_issue",
+            return_value=(mock_arch_out, mock_arch_meta),
+        ),
+    ):
+        scan_res = runner.invoke(app, ["scan", str(target_repo), "--workspace", str(workspace_dir)])
+        assert scan_res.exit_code == 0
+
+        runs_dir = workspace_dir / "runs"
+        run_id = list(runs_dir.iterdir())[0].name
+
+        plan_res = runner.invoke(
+            app,
+            ["plan", run_id, "--workspace", str(workspace_dir), "--issue-file", str(issue_path)],
+        )
+        assert plan_res.exit_code == 0, plan_res.stdout
+        assert "takes precedence" in plan_res.stdout
+        assert "Plan generated successfully!" in plan_res.stdout
+
+        run_data = json.loads((runs_dir / run_id / "run.json").read_text())
+        assert run_data["goal"] == "Override test"
