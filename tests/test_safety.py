@@ -42,7 +42,7 @@ def test_ensure_safe_relative_rejects_absolute():
 
 
 def test_ensure_safe_relative_rejects_traversal():
-    with pytest.raises(ValueError, match="escapes base"):
+    with pytest.raises(ValueError, match="parent directory traversal"):
         ensure_safe_relative("../../etc", Path("/base"))
 
 
@@ -66,5 +66,20 @@ def test_ensure_safe_relative_symlink_escape(tmp_path):
 
 
 def test_ensure_safe_relative_nonexistent_base():
-    with pytest.raises(ValueError, match="escapes base"):
+    with pytest.raises(ValueError, match="parent directory traversal"):
         ensure_safe_relative("../../etc", Path("/nonexistent_12345"))
+
+
+def test_validate_filename_rejects_windows_absolute():
+    with pytest.raises(ValueError, match="absolute"):
+        validate_filename("C:\\foo\\bar.py")
+
+
+def test_validate_filename_rejects_windows_traversal():
+    with pytest.raises(ValueError, match="directory traversal"):
+        validate_filename("..\\..\\etc\\passwd")
+
+
+def test_ensure_safe_relative_rejects_parent_segment():
+    with pytest.raises(ValueError, match="parent directory traversal"):
+        ensure_safe_relative("sub/../file.py", Path("/base"))
