@@ -111,7 +111,8 @@ tests/                     (20 test files, 208 tests)
 | 24 | Translate all Spanish to English | Jun 4 |
 | 21 | Deterministic Git safety primitives + V1 isolated validation | Jun 3 |
 | 20 | Enforce external workspace safety | Jun 2 |
- | 81 | Atomic Rollback Validation (T-02) | Jun 12 |
+  | 81 | Atomic Rollback Validation (T-02) | Jun 12 |
+   | 85 | Path Traversal Hardening (T-01) | Jun 12 |
   | 87 | Circuit Breaker — LLM Provider Failure Isolation (T-07B) | Jun 13 |
   | 18 | PatchForge thesis (initial scaffold) | May 27 |
 
@@ -180,6 +181,7 @@ These must not change without a new ADR in `docs/adr/`:
 ✅ **ADR-01/2** — Add `schema_version` to `RunMetadata` (#75)
 ✅ **ADR-01/3** — Version Guard at Pipeline Load Point (#77)
 ✅ **Experiment Artifacts Schema** — Verdict + write_verdict utility (#79)
+✅ **T-01** — Path Traversal Hardening (#85)
 ✅ **T-07B** — Circuit Breaker — LLM Provider Failure Isolation (#87)
 
 ---
