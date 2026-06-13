@@ -61,6 +61,35 @@ def test_read_write_artifact(workspace_mgr: WorkspaceManager):
     assert read_content == content
 
 
+def test_write_artifact_rejects_traversal(workspace_mgr: WorkspaceManager):
+    run_id = "run_20260603_120000_123456"
+    workspace_mgr.create_run_directory(run_id)
+    meta = RunMetadata(
+        run_id=run_id,
+        target_path="/dummy/target",
+        workspace_path=str(workspace_mgr.root),
+        base_commit="abc",
+        branch="main",
+        v1_supported=True,
+    )
+    workspace_mgr.write_run_json(run_id, meta)
+    with pytest.raises(ValueError):
+        workspace_mgr.write_artifact(run_id, "../../evil.txt", "")
+
+
+def test_write_artifact_unchecked_rejects_traversal(workspace_mgr: WorkspaceManager):
+    run_id = "run_20260603_120000_123456"
+    workspace_mgr.create_run_directory(run_id)
+    with pytest.raises(ValueError):
+        workspace_mgr._write_artifact_unchecked(run_id, "../../evil.txt", "")
+
+
+def test_read_artifact_rejects_traversal(workspace_mgr: WorkspaceManager):
+    run_id = "run_20260603_120000_123456"
+    with pytest.raises(ValueError):
+        workspace_mgr.read_artifact(run_id, "../../evil.txt")
+
+
 def test_read_write_run_json(workspace_mgr: WorkspaceManager):
     run_id = "run_20260603_120000_123456"
     meta = RunMetadata(

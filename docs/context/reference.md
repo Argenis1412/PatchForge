@@ -28,6 +28,8 @@
 | `pre_apply_head` capture in caller | `main.py:apply`; Low | `rollback_to_commit(repo_root, target_sha)` requires caller to provide a valid SHA. If apply moves to executor.py in the future, HEAD capture must move too. |
 | Architect not budget-aware | Generates ideal plan; gate filters post-hoc | $0.04 spent on plans blocked at `risk_budget=low`. Open design question. |
 | Self-audit limited by environment | V1 `scan` succeeded but V1 not supported (ruff/pytest missing from PATH) | Environment issue, not product gap. |
+| TOCTOU race (validation vs file open) | `workspace.py`, `executor.py`; Low | P3 — use `O_NOFOLLOW` if Docker worker deployment requires. |
+| Windows backslash traversal not detected ✓ | `safety.py` | Resolved in T-01 (#85) — `PureWindowsPath` checks added to `validate_filename` and `ensure_safe_relative`. |
 
 ---
 

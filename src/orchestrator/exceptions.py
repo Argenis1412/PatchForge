@@ -9,6 +9,7 @@ Exceptions defined here:
 - SchemaVersionError  — schema version mismatch on artifact load
 - ProviderError       — LLM provider failure (Anthropic, Gemini)
 - RollbackError       — git rollback failure (T-02)
+- PathSafetyError     — path traversal / escape from base directory (T-01)
 
 Parser exceptions (LLMParseError, SchemaValidationError) are defined in
 orchestrator/llm/parser.py and also inherit from PatchForgeError.
@@ -65,3 +66,17 @@ class RollbackError(PatchForgeError):
         self.target_sha = target_sha
         self.stderr = stderr
         super().__init__(f"Rollback failed for {repo_root} to {target_sha}: {stderr}")
+
+
+class PathSafetyError(PatchForgeError):
+    """Raised when a file path escapes its intended base directory.
+
+    Attributes:
+        path: The user-supplied path string that caused the violation.
+        base: The base directory the path was validated against.
+    """
+
+    def __init__(self, *, path: str, base: Path) -> None:
+        self.path = path
+        self.base = base
+        super().__init__(f"Path safety violation: {path!r} escapes base {base}")
