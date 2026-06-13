@@ -328,7 +328,7 @@ def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) 
             else:
                 raise
 
-        except (ValueError, Exception) as exc:
+        except ValueError as exc:
             # HALF_OPEN failures propagate the original exception here, not
             # CircuitBreakerOpenError — fallback activates on the *subsequent*
             # retry after CB transitions to OPEN.
