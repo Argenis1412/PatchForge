@@ -184,6 +184,7 @@ These must not change without a new ADR in `docs/adr/`:
 ✅ **ADR-01/3** — Version Guard at Pipeline Load Point (#77)
 ✅ **Experiment Artifacts Schema** — Verdict + write_verdict utility (#79)
 ✅ **Issue B** — Issue Contracts (`--issue-file`) (#92)
+✅ **Experiment 002** — Move `write_verdict()` to `workspace.py`
 ✅ **Experiment 001** — First successful self-modification workflow
 ✅ **T-01** — Path Traversal Hardening (#85)
 ✅ **T-07B** — Circuit Breaker — LLM Provider Failure Isolation (#87)

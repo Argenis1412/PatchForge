@@ -293,6 +293,35 @@ ADR-0004 must answer exactly five questions:
 - `IssueMd` Pydantic schema
 - `schema_version` on `Verdict`
 
+### ✅ Experiment 002 — Move write_verdict() to workspace.py
+- **Priority:** P2 | **Status:** ✅ **Completed**
+- **Branch:** `refactor/experiment-002-move-write-verdict`
+- **Milestone:** Second successful dogfooding workflow. `write_verdict()` moved from `schemas/experiment.py` to `WorkspaceManager` in `workspace.py`, resolving debt entry #79.
+- **Source:** `discoveries.md` (debt #79)
+- **Precondition:** Experiment 001 complete, Issue B complete
+
+#### Scope
+- Add `WorkspaceManager.write_verdict(run_id, verdict)` method
+- Remove standalone `write_verdict()` and `_write_verdict_markdown()` from `schemas/experiment.py`
+- Update tests to use new method
+- Mark debt #79 as resolved in `discoveries.md`
+
+#### Acceptance criteria
+- [x] `WorkspaceManager.write_verdict(run_id, verdict)` writes `verdict.json` and `verdict.md`
+- [x] `schemas/experiment.py` contains only `Verdict(BaseModel)` — no I/O functions
+- [x] `ruff check .` — 0 errors
+- [x] `pytest` — 288 passed, 2 skipped
+- [x] Debt entry #79 updated to resolved state
+
+#### Bugs discovered
+| # | Bug | Impact | Fix |
+|---|-----|--------|-----|
+| 1 | Executor skipped T2 when T1 was "already applied" | Incomplete patch, validation failed | Task dependency chain confused executor |
+
+#### Non-goals
+- Wiring `write_verdict()` into `pipeline.py`
+- `schema_version` on `Verdict`
+
 ### ✅ Experiment 001 — First successful self-modification workflow
 - **Priority:** P2 | **Status:** ✅ **Completed**
 - **Commit:** `887ad5a`
