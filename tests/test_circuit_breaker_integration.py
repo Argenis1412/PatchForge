@@ -1,7 +1,7 @@
 """
 tests/test_circuit_breaker_integration.py
 
-2 integration tests using MagicMock to replace CB singletons.
+Integration tests using MagicMock to replace CB singletons.
 No real LLM calls are made.
 """
 
@@ -13,77 +13,257 @@ import pytest
 
 from orchestrator.circuit_breaker import CircuitBreakerState
 from orchestrator.exceptions import CircuitBreakerOpenError
+from orchestrator.schemas.architect_output import ArchitectOutput, Task
+from orchestrator.schemas.config import TargetConfig
 
 # ---------------------------------------------------------------------------
-# Test 1 — Executor falls back to Groq when Gemini CB is OPEN
+# Helpers
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.integration
-def test_executor_falls_back_when_primary_open(monkeypatch, tmp_path):
-    """
-    When _cb_gemini is OPEN and rejects the call, a LOW-risk task must
-    automatically fall back to Groq. The result status must be 'applied'.
-    """
-    from orchestrator.schemas.architect_output import ArchitectOutput, Task
-    from orchestrator.schemas.config import TargetConfig
-
-    # ---- set up the source file ----
-    source_file = tmp_path / "hello.py"
-    source_file.write_text("x = 1\n", encoding="utf-8")
-
-    task = Task(
-        task_id="t-cb-01",
+def _make_task(risk_level: str, task_id: str = "t-cb-01") -> Task:
+    return Task(
+        task_id=task_id,
         title="bump x",
         description="change x to 2",
         files_to_modify=["hello.py"],
         priority="high",
         effort="low",
-        risk_level="low",
+        risk_level=risk_level,
         dependencies=[],
     )
-    arch_out = ArchitectOutput(
+
+
+def _make_arch_out(tasks) -> ArchitectOutput:
+    return ArchitectOutput(
         validated_findings=[],
         false_positives=[],
         systemic_risks=[],
-        implementation_plan=[task],
+        implementation_plan=tasks,
         blockers=[],
     )
+
+
+def _run(tmp_path, arch_out, staging_dir=None):
+    from orchestrator.agents.executor import run
+
     workspace = tmp_path.parent / f"{tmp_path.name}-workspace"
     config = TargetConfig(target_path=tmp_path, workspace_path=workspace)
-    staging_dir = tmp_path / "staging"
+    return run(arch_out, config=config, staging_dir=staging_dir or tmp_path / "staging")
 
-    # ---- mock: Gemini CB is OPEN → raises CircuitBreakerOpenError ----
-    cb_gemini_mock = MagicMock()
-    cb_gemini_mock.call.side_effect = CircuitBreakerOpenError(
+
+# ---------------------------------------------------------------------------
+# Test 1 — Low risk: Gemini CB open → Groq succeeds (1 hop)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_low_fallback_to_groq(monkeypatch, tmp_path):
+    """Gemini CB open → Groq succeeds."""
+    (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
+    arch_out = _make_arch_out([_make_task("low")])
+
+    cb_gemini = MagicMock()
+    cb_gemini.call.side_effect = CircuitBreakerOpenError(
         provider="gemini",
         state=CircuitBreakerState.OPEN,
         retry_after=999_999.0,
     )
-    monkeypatch.setattr("orchestrator.agents.executor._cb_gemini", cb_gemini_mock)
+    monkeypatch.setattr("orchestrator.agents.executor._cb_gemini", cb_gemini)
 
-    # ---- mock: Groq CB succeeds ----
-    cb_groq_mock = MagicMock()
-    cb_groq_mock.call.return_value = ("x = 2\n", 10, 20)
-    monkeypatch.setattr("orchestrator.agents.executor._cb_groq", cb_groq_mock)
+    cb_groq = MagicMock()
+    cb_groq.call.return_value = ("x = 2\n", 10, 20)
+    monkeypatch.setattr("orchestrator.agents.executor._cb_groq", cb_groq)
 
-    from orchestrator.agents.executor import run
+    output, _ = _run(tmp_path, arch_out)
 
-    output, meta = run(arch_out, config=config, staging_dir=staging_dir)
-
-    # Gemini CB was called (rejected)
-    cb_gemini_mock.call.assert_called_once()
-    # Groq CB was called as fallback
-    cb_groq_mock.call.assert_called_once()
-
-    # Task must have been applied (not errored)
-    assert len(output.applied) == 1, f"Expected 1 applied, got errors={output.errors}"
-    assert output.errors == []
+    cb_gemini.call.assert_called_once()
+    cb_groq.call.assert_called_once()
+    assert len(output.applied) == 1, f"errors={output.errors}"
     assert output.applied[0].task_id == "t-cb-01"
 
 
 # ---------------------------------------------------------------------------
-# Test 2 — Validator returns raw stderr when Gemini CB is OPEN
+# Test 2 — Low risk: Gemini CB open → Groq CB open → Claude succeeds (2 hops)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_low_fallback_groq_then_claude(monkeypatch, tmp_path):
+    """Gemini CB open → Groq CB open → Claude succeeds."""
+    (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
+    arch_out = _make_arch_out([_make_task("low")])
+
+    for provider in ("gemini", "groq"):
+        cb = MagicMock()
+        cb.call.side_effect = CircuitBreakerOpenError(
+            provider=provider,
+            state=CircuitBreakerState.OPEN,
+            retry_after=999_999.0,
+        )
+        monkeypatch.setattr(f"orchestrator.agents.executor._cb_{provider}", cb)
+
+    cb_claude = MagicMock()
+    cb_claude.call.return_value = ("x = 2\n", 10, 20)
+    monkeypatch.setattr("orchestrator.agents.executor._cb_claude", cb_claude)
+
+    output, _ = _run(tmp_path, arch_out)
+
+    assert len(output.applied) == 1, f"errors={output.errors}"
+    assert output.errors == []
+
+
+# ---------------------------------------------------------------------------
+# Test 3 — Low risk: Gemini ClientError(403) → Groq HTTPStatusError(403) →
+#           Claude succeeds (non-CB exceptions trigger fallback)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_low_recoverable_sdk_exception(monkeypatch, tmp_path):
+    """
+    When a provider raises a non-CB recoverable exception (e.g. HTTP 403),
+    the chain must fall through to the next provider.
+    """
+    import httpx
+    from google.genai import errors as gemini_errors
+
+    (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
+    arch_out = _make_arch_out([_make_task("low")])
+
+    # Mock _call_gemini to raise a google APIError (403 equivalent)
+    cb_gemini = MagicMock()
+    cb_gemini.call.side_effect = gemini_errors.APIError(403, response_json={})
+    monkeypatch.setattr("orchestrator.agents.executor._cb_gemini", cb_gemini)
+
+    # Mock _call_groq to raise httpx HTTPStatusError (403)
+    cb_groq = MagicMock()
+    cb_groq.call.side_effect = httpx.HTTPStatusError(
+        "403 Forbidden",
+        request=MagicMock(),
+        response=MagicMock(status_code=403),
+    )
+    monkeypatch.setattr("orchestrator.agents.executor._cb_groq", cb_groq)
+
+    # Mock _call_claude succeeds
+    cb_claude = MagicMock()
+    cb_claude.call.return_value = ("x = 2\n", 10, 20)
+    monkeypatch.setattr("orchestrator.agents.executor._cb_claude", cb_claude)
+
+    output, _ = _run(tmp_path, arch_out)
+
+    assert len(output.applied) == 1, f"errors={output.errors}"
+    assert output.errors == []
+
+
+# ---------------------------------------------------------------------------
+# Test 4 — Medium risk: Groq CB open → Gemini succeeds (1 hop)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_medium_fallback_to_gemini(monkeypatch, tmp_path):
+    """Groq CB open → Gemini succeeds."""
+    (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
+    arch_out = _make_arch_out([_make_task("medium")])
+
+    cb_groq = MagicMock()
+    cb_groq.call.side_effect = CircuitBreakerOpenError(
+        provider="groq",
+        state=CircuitBreakerState.OPEN,
+        retry_after=999_999.0,
+    )
+    monkeypatch.setattr("orchestrator.agents.executor._cb_groq", cb_groq)
+
+    cb_gemini = MagicMock()
+    cb_gemini.call.return_value = ("x = 2\n", 10, 20)
+    monkeypatch.setattr("orchestrator.agents.executor._cb_gemini", cb_gemini)
+
+    output, _ = _run(tmp_path, arch_out)
+
+    cb_groq.call.assert_called_once()
+    cb_gemini.call.assert_called_once()
+    assert len(output.applied) == 1, f"errors={output.errors}"
+
+
+# ---------------------------------------------------------------------------
+# Test 5 — Medium risk: Groq returns empty → Gemini succeeds
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_medium_empty_then_gemini(monkeypatch, tmp_path):
+    """Groq returns empty string → chain continues to Gemini."""
+    (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
+    arch_out = _make_arch_out([_make_task("medium")])
+
+    cb_groq = MagicMock()
+    cb_groq.call.return_value = ("", 0, 0)
+    monkeypatch.setattr("orchestrator.agents.executor._cb_groq", cb_groq)
+
+    cb_gemini = MagicMock()
+    cb_gemini.call.return_value = ("x = 2\n", 10, 20)
+    monkeypatch.setattr("orchestrator.agents.executor._cb_gemini", cb_gemini)
+
+    output, _ = _run(tmp_path, arch_out)
+
+    assert len(output.applied) == 1, f"errors={output.errors}"
+    assert output.errors == []
+
+
+# ---------------------------------------------------------------------------
+# Test 6 — High risk: Claude CB open → ERROR (no fallback)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_high_fails_no_fallback(monkeypatch, tmp_path):
+    """High-risk task must fail when Claude is unavailable."""
+    (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
+    arch_out = _make_arch_out([_make_task("high")])
+
+    cb_claude = MagicMock()
+    cb_claude.call.side_effect = CircuitBreakerOpenError(
+        provider="claude",
+        state=CircuitBreakerState.OPEN,
+        retry_after=999_999.0,
+    )
+    monkeypatch.setattr("orchestrator.agents.executor._cb_claude", cb_claude)
+
+    output, _ = _run(tmp_path, arch_out)
+
+    assert len(output.errors) == 1
+    assert "failed" in output.errors[0].error
+
+
+# ---------------------------------------------------------------------------
+# Test 7 — All providers exhausted for low risk
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_all_providers_exhausted(monkeypatch, tmp_path):
+    """When all 3 providers are OPEN, task returns error."""
+    (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
+    arch_out = _make_arch_out([_make_task("low")])
+
+    for provider in ("gemini", "groq", "claude"):
+        cb = MagicMock()
+        cb.call.side_effect = CircuitBreakerOpenError(
+            provider=provider,
+            state=CircuitBreakerState.OPEN,
+            retry_after=999_999.0,
+        )
+        monkeypatch.setattr(f"orchestrator.agents.executor._cb_{provider}", cb)
+
+    output, _ = _run(tmp_path, arch_out)
+
+    assert len(output.errors) == 1
+    assert "failed" in output.errors[0].error
+
+
+# ---------------------------------------------------------------------------
+# Test 8 — Validator returns raw stderr when Gemini CB is OPEN
 # ---------------------------------------------------------------------------
 
 
@@ -93,14 +273,11 @@ def test_validator_uses_raw_stderr_when_cb_open(monkeypatch):
     When _cb_validator raises CircuitBreakerOpenError, _summarize_errors
     must return the raw stderr fallback string — not an LLM summary.
     """
-
     from orchestrator.agents.validator import _summarize_errors
     from orchestrator.schemas.validator_output import ToolResult
 
-    # Ensure GOOGLE_API_KEY is set so the function doesn't early-return
     monkeypatch.setenv("GOOGLE_API_KEY", "fake-key-for-test")
 
-    # ---- mock: validator CB is OPEN ----
     cb_mock = MagicMock()
     cb_mock.call.side_effect = CircuitBreakerOpenError(
         provider="gemini",
@@ -109,7 +286,6 @@ def test_validator_uses_raw_stderr_when_cb_open(monkeypatch):
     )
     monkeypatch.setattr("orchestrator.agents.validator._cb_validator", cb_mock)
 
-    # ---- create a failed tool result with identifiable stderr ----
     failed_tool = ToolResult(
         tool="ruff",  # type: ignore[arg-type]
         passed=False,
@@ -120,9 +296,6 @@ def test_validator_uses_raw_stderr_when_cb_open(monkeypatch):
 
     result = _summarize_errors([failed_tool], run_id="test-run-id")
 
-    # CB was invoked
     cb_mock.call.assert_called_once()
-
-    # Result must be the raw stderr fallback, not an LLM response
     assert "ruff" in result
     assert "E501" in result

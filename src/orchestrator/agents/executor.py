@@ -50,6 +50,17 @@ COST_PER_1M_OUTPUT_CLAUDE = 15.00
 TIMEOUT_SECONDS = 60
 MAX_RETRIES = 1
 
+# Provider fallback chain per risk level.
+# Each list is tried in order; the first provider to return a valid
+# non-empty response wins.  HIGH risk has no fallback by policy:
+# if Claude is unavailable the task must fail rather than silently
+# degrade to a less capable model.
+_PROVIDER_CHAIN: dict[str, list] = {
+    "low": [],  # defined below after the _call_* functions
+    "medium": [],
+    "high": [],
+}
+
 PROJECT_ROOT = Path(os.getenv("PROJECT_ROOT", str(Path(__file__).resolve().parent.parent.parent)))
 
 LOGS_DIR = Path(__file__).parent.parent / "logs"
@@ -113,6 +124,18 @@ def _strip_markdown(content: str) -> str:
             if "\n" in content:
                 content = content.split("\n", 1)[1]
     return content.strip()
+
+
+def _is_valid_provider_response(raw: str) -> bool:
+    return bool(raw and raw.strip())
+
+
+def _compute_cost(provider, input_tokens: int, output_tokens: int) -> float:
+    if provider is _call_claude:
+        return (input_tokens / 1_000_000) * COST_PER_1M_INPUT_CLAUDE + (
+            output_tokens / 1_000_000
+        ) * COST_PER_1M_OUTPUT_CLAUDE
+    return 0.0
 
 
 def _do_gemini_call(prompt: str, run_id: str) -> tuple[str, int, int]:
@@ -231,6 +254,62 @@ def _call_claude(prompt: str, run_id: str) -> tuple[str, int, int]:
 
 
 # ---------------------------------------------------------------------------
+# Provider fallback chain (populated after all _call_* defs)
+# ---------------------------------------------------------------------------
+
+_PROVIDER_CHAIN["low"] = [_call_gemini, _call_groq, _call_claude]
+_PROVIDER_CHAIN["medium"] = [_call_groq, _call_gemini, _call_claude]
+_PROVIDER_CHAIN["high"] = [_call_claude]
+
+
+def _recoverable_exceptions() -> tuple:
+    """Lazy-init tuple of recoverable provider exceptions.
+
+    Not a module-level constant because it imports SDK exception classes
+    (google.genai.errors, httpx, anthropic) that should remain loaded
+    on demand, consistent with the project's lazy-import convention.
+    First call triggers imports; subsequent calls return the cached tuple.
+    """
+    if not hasattr(_recoverable_exceptions, "_cache"):
+        import anthropic as _anthropic
+        import httpx as _httpx
+        from google.genai.errors import APIError as _GeminiAPIError
+
+        _recoverable_exceptions._cache = (
+            CircuitBreakerOpenError,
+            _GeminiAPIError,
+            _httpx.HTTPError,
+            _anthropic.APIError,
+        )
+    return _recoverable_exceptions._cache
+
+
+def _call_chain(chain: list, prompt: str, run_id: str) -> tuple[str, int, int, float] | None:
+    """Try each provider in *chain*; return first valid response or *None*."""
+    for provider in chain:
+        try:
+            raw, input_tokens, output_tokens = provider(prompt, run_id)
+            if not _is_valid_provider_response(raw):
+                _get_logger().warning(
+                    "[%s] Invalid/empty response from %s, trying next",
+                    run_id,
+                    provider.__name__,
+                )
+                continue
+            cost = _compute_cost(provider, input_tokens, output_tokens)
+            return raw, input_tokens, output_tokens, cost
+        except _recoverable_exceptions() as exc:
+            _get_logger().info(
+                "[%s] %s unavailable: %s, trying next",
+                run_id,
+                provider.__name__,
+                exc,
+            )
+            continue
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Core: apply task
 # ---------------------------------------------------------------------------
 
@@ -247,9 +326,9 @@ def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) 
     from orchestrator.exceptions import PathSafetyError  # lazy (file convention)
     from orchestrator.safety import ensure_safe_relative  # lazy (file convention)
 
-    # SAFETY: MUST remain outside the retry try/except (L242+).
-    # The except (ValueError, Exception) at L264 would silently swallow
-    # PathSafetyError as FileChange(status="error") if placed inside.
+    # SAFETY: MUST remain outside the provider chain loop.
+    # If placed inside, any exception from ensure_safe_relative could be
+    # misinterpreted as a recoverable provider failure.
     try:
         ensure_safe_relative(relative_path, project_root)
     except ValueError as exc:
@@ -273,84 +352,30 @@ def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) 
     input_tokens = output_tokens = 0
     cost_this_call = 0.0
 
+    chain = _PROVIDER_CHAIN.get(task.risk_level)
+    if not chain:
+        raise ValueError(f"Unknown risk level: {task.risk_level}")
+
     for attempt in range(MAX_RETRIES + 1):
-        try:
-            if task.risk_level == "low":
-                raw, input_tokens, output_tokens = _call_gemini(prompt, run_id)
-                cost_this_call = 0.0
-            elif task.risk_level == "medium":
-                raw, input_tokens, output_tokens = _call_groq(prompt, run_id)
-                cost_this_call = 0.0
-            elif task.risk_level == "high":
-                raw, input_tokens, output_tokens = _call_claude(prompt, run_id)
-                cost_this_call = (input_tokens / 1_000_000) * COST_PER_1M_INPUT_CLAUDE + (
-                    output_tokens / 1_000_000
-                ) * COST_PER_1M_OUTPUT_CLAUDE
-            else:
-                raise ValueError(f"Unknown risk level: {task.risk_level}")
-
-            if not raw:
-                raise ValueError("Empty model response")
-
+        result = _call_chain(chain, prompt, run_id)
+        if result is not None:
+            raw, input_tokens, output_tokens, cost_this_call = result
             modified_content = raw
             break
-
-        except CircuitBreakerOpenError:
-            if task.risk_level == "low":
-                try:
-                    raw, input_tokens, output_tokens = _call_groq(prompt, run_id)
-                except CircuitBreakerOpenError:
-                    return FileChange(
-                        task_id=task.task_id,
-                        file=relative_path,
-                        status="error",
-                        error="gemini is open; fallback groq is also open",
-                    )
-                if not raw:
-                    raise ValueError("Empty model response from fallback Groq")
-                modified_content = raw
-                break
-            elif task.risk_level == "medium":
-                try:
-                    raw, input_tokens, output_tokens = _call_gemini(prompt, run_id)
-                except CircuitBreakerOpenError:
-                    return FileChange(
-                        task_id=task.task_id,
-                        file=relative_path,
-                        status="error",
-                        error="groq is open; fallback gemini is also open",
-                    )
-                if not raw:
-                    raise ValueError("Empty model response from fallback Gemini")
-                modified_content = raw
-                break
-            elif task.risk_level == "high":
-                raise
-            else:
-                raise
-
-        except ValueError as exc:
-            # HALF_OPEN failures propagate the original exception here, not
-            # CircuitBreakerOpenError — fallback activates on the *subsequent*
-            # retry after CB transitions to OPEN.
-            log = _get_logger()
-            log.warning(
-                "[%s] Attempt %d/%d failed for task %s: %s",
-                run_id,
-                attempt + 1,
-                MAX_RETRIES + 1,
-                task.task_id,
-                exc,
-            )
-            if attempt == MAX_RETRIES:
-                return FileChange(
-                    task_id=task.task_id,
-                    file=relative_path,
-                    status="error",
-                    error=str(exc),
-                    tokens_used=input_tokens + output_tokens,
-                    cost_usd=cost_this_call,
-                )
+        _get_logger().warning(
+            "[%s] Attempt %d/%d: all providers failed for %s-risk task",
+            run_id,
+            attempt + 1,
+            MAX_RETRIES + 1,
+            task.risk_level,
+        )
+    else:
+        return FileChange(
+            task_id=task.task_id,
+            file=relative_path,
+            status="error",
+            error=f"All providers failed for {task.risk_level}-risk task",
+        )
 
     assert modified_content is not None
 

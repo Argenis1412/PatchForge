@@ -81,15 +81,14 @@ def test_accumulated_changes_same_file(tmp_path, monkeypatch):
     config = TargetConfig(target_path=tmp_path, workspace_path=workspace)
     staging_dir = tmp_path / "staging"
 
-    # Mock _call_gemini to return sequential content
+    # Mock _cb_gemini.call to return sequential content
     returns = [
         ("x = 2\n", 10, 5),
         ("x = 3\n", 10, 5),
     ]
-    monkeypatch.setattr(
-        "orchestrator.agents.executor._call_gemini",
-        lambda *a, **kw: returns.pop(0),
-    )
+    cb_gemini_mock = MagicMock()
+    cb_gemini_mock.call.side_effect = lambda fn: returns.pop(0)
+    monkeypatch.setattr("orchestrator.agents.executor._cb_gemini", cb_gemini_mock)
 
     output, meta = run(arch_out, config=config, staging_dir=staging_dir)
 
