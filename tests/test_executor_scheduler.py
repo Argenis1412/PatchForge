@@ -1,5 +1,3 @@
-from unittest.mock import MagicMock
-
 import pytest
 
 from orchestrator.agents.executor import _build_dag, _topological_order, run
@@ -7,7 +5,6 @@ from orchestrator.exceptions import CycleDetectedError, SchedulerInvariantError
 from orchestrator.schemas.architect_output import ArchitectOutput, Task
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.executor_output import FileChange, TaskStatus
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -308,4 +305,5 @@ def test_long_cascade(tmp_path, monkeypatch):
 
 
 def _cfg(tmp_path):
-    return TargetConfig(target_path=tmp_path, workspace_path=tmp_path.parent / f"{tmp_path.name}-workspace")
+    ws = tmp_path.parent / f"{tmp_path.name}-workspace"
+    return TargetConfig(target_path=tmp_path, workspace_path=ws)
