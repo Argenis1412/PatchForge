@@ -33,7 +33,7 @@
   as part of Experiment 002. `schemas/experiment.py` now contains only the
   pure `Verdict(BaseModel)` schema.
 
-### [2026-06-14] Experiment 002 — Executor skips dependent tasks when dependency reports "already applied"
+### ✅ [2026-06-14] Experiment 002 — Executor skips dependent tasks when dependency reports "already applied" (RESOLVED)
 
 - **File:** `src/orchestrator/agents/executor.py`
 - **Debt:** When a task dependency (e.g. T1 — audit) produces "no changes — already applied",
@@ -41,8 +41,10 @@
   T2 is not a no-op. The task dependency DAG is flattened into a linear sequence
   and adjacent skip logic poisons the chain.
 - **Discovered by:** Experiment 002 dogfooding
-- **Why deferred:** Scope-contained to Experiment 002; fix requires understanding the
-  full executor task scheduling logic.
+- **Resolution:** Issue #98 replaced the flat sequential loop with a DAG scheduler
+  (Kahn's topological order) that respects `Task.dependencies`, detects cycles,
+  and propagates `SKIPPED` status correctly. The placeholder "no changes — already applied"
+  string was replaced by `TaskStatus.NOOP` with `diff=None`.
 
 ### [2026-06-14] Experiment 002 — Groq API 403 (key expired/rate-limited)
 

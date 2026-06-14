@@ -30,10 +30,11 @@ from orchestrator.circuit_breaker import CircuitBreakerOpenError, circuit_breake
 from orchestrator.clients.anthropic_client import get_anthropic_client
 from orchestrator.clients.gemini_client import get_gemini_client
 from orchestrator.clients.groq_client import get_groq_client
+from orchestrator.exceptions import CycleDetectedError, SchedulerInvariantError
 from orchestrator.observability.logging import get_file_logger
 from orchestrator.schemas.architect_output import ArchitectOutput, Task
 from orchestrator.schemas.config import TargetConfig
-from orchestrator.schemas.executor_output import ExecutorOutput, FileChange
+from orchestrator.schemas.executor_output import ExecutorOutput, FileChange, TaskStatus
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -364,8 +365,8 @@ def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) 
         return FileChange(
             task_id=task.task_id,
             file=relative_path,
-            status="applied",
-            diff="(no changes — already applied)",
+            status=TaskStatus.NOOP,
+            diff=None,
             original_content=original_content,
             modified_content=original_content,
             tokens_used=input_tokens + output_tokens,
@@ -440,6 +441,61 @@ def rollback_to_commit(repo_root: Path, target_sha: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# DAG Scheduler: build + topological order
+# ---------------------------------------------------------------------------
+
+
+def _build_dag(tasks: list[Task]) -> dict[str, set[str]]:
+    """Map task_id -> set(dependency ids). Validate all deps exist."""
+    known_ids: set[str] = set()
+    duplicate_ids: set[str] = set()
+    for task in tasks:
+        if task.task_id in known_ids:
+            duplicate_ids.add(task.task_id)
+        known_ids.add(task.task_id)
+    if duplicate_ids:
+        dup_list = ", ".join(sorted(duplicate_ids))
+        raise SchedulerInvariantError(f"Duplicate task_id(s) in plan: {dup_list}")
+    dag: dict[str, set[str]] = {}
+    for task in tasks:
+        for dep in task.dependencies:
+            if dep not in known_ids:
+                raise SchedulerInvariantError(
+                    f"Task {task.task_id} depends on {dep}, but {dep} does not exist in the plan"
+                )
+        dag[task.task_id] = set(task.dependencies)
+    return dag
+
+
+def _topological_order(tasks: list[Task], dag: dict[str, set[str]]) -> list[Task]:
+    """Kahn's algorithm - O(V^2) scan for determinism.
+
+    Scans tasks in declaration order at each round, picks the first whose
+    dependencies are all resolved. Raises CycleDetectedError if no candidate
+    can be found (cycle).
+    """
+    task_map = {t.task_id: t for t in tasks}
+    remaining = set(dag.keys())
+    resolved: set[str] = set()
+    order: list[Task] = []
+
+    while remaining:
+        candidates = [
+            tid
+            for tid in (t.task_id for t in tasks)
+            if tid in remaining and not (dag[tid] - resolved)
+        ]
+        if not candidates:
+            raise CycleDetectedError(list(remaining))
+        chosen = candidates[0]
+        order.append(task_map[chosen])
+        resolved.add(chosen)
+        remaining.remove(chosen)
+
+    return order
+
+
+# ---------------------------------------------------------------------------
 # Public Entrypoint
 # ---------------------------------------------------------------------------
 
@@ -470,11 +526,54 @@ def run(
     total_tokens_input = 0
     total_tokens_output = 0
 
-    for task in architect_output.implementation_plan:
+    tasks = architect_output.implementation_plan
+    dag = _build_dag(tasks)
+    ordered_tasks = _topological_order(tasks, dag)
+    task_status_results: dict[str, TaskStatus] = {}
+
+    for task in ordered_tasks:
         _get_logger().info(
             "[%s] Task %s | risk=%s | title=%s", run_id, task.task_id, task.risk_level, task.title
         )
 
+        # --- dependency check ---
+        skip = False
+        for dep_id in task.dependencies:
+            if dep_id not in task_status_results:
+                raise SchedulerInvariantError(
+                    f"Task {task.task_id} depends on {dep_id}, but {dep_id} was never scheduled"
+                )
+            dep_status = task_status_results[dep_id]
+            if dep_status in {TaskStatus.ERROR, TaskStatus.SKIPPED, TaskStatus.PENDING_REVIEW}:
+                _get_logger().info(
+                    "[%s] Task %s — SKIPPED (dependency %s has status %s)",
+                    run_id,
+                    task.task_id,
+                    dep_id,
+                    dep_status,
+                )
+                result.errors.append(
+                    FileChange(
+                        task_id=task.task_id,
+                        file=task.files_to_modify[0] if task.files_to_modify else "",
+                        status=TaskStatus.SKIPPED,
+                        diff=None,
+                        original_content=None,
+                        modified_content=None,
+                        error=f"dependency {dep_id} has status {dep_status}",
+                        tokens_used=0,
+                        cost_usd=0.0,
+                    )
+                )
+                task_status_results[task.task_id] = TaskStatus.SKIPPED
+                skip = True
+                break
+
+        if skip:
+            continue
+
+        # --- execute task (all dependencies satisfied) ---
+        task_statuses: list[TaskStatus] = []
         for file_relative in task.files_to_modify:
             single_file_task = task.model_copy(update={"files_to_modify": [file_relative]})
             change = _apply_task(single_file_task, run_id, project_root, staging_dir)
@@ -487,12 +586,25 @@ def run(
             total_tokens_input += change.tokens_used // 2
             total_tokens_output += change.tokens_used // 2
 
-            if change.status == "applied":
+            # Route per-file change by status
+            if change.status in {TaskStatus.APPLIED, TaskStatus.NOOP}:
                 result.applied.append(change)
-            elif change.status == "pending_human_review":
+            elif change.status == TaskStatus.PENDING_REVIEW:
                 result.pending_review.append(change)
             else:
                 result.errors.append(change)
+
+            task_statuses.append(change.status)
+
+        # Aggregate: worst status wins for dependency tracking
+        if TaskStatus.ERROR in task_statuses:
+            task_status_results[task.task_id] = TaskStatus.ERROR
+        elif TaskStatus.PENDING_REVIEW in task_statuses:
+            task_status_results[task.task_id] = TaskStatus.PENDING_REVIEW
+        elif TaskStatus.APPLIED in task_statuses:
+            task_status_results[task.task_id] = TaskStatus.APPLIED
+        else:
+            task_status_results[task.task_id] = TaskStatus.NOOP
 
     _get_logger().info(
         "[%s] Finished | applied=%d | pending_review=%d | errors=%d | cost=$%.6f",

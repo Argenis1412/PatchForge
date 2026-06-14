@@ -83,6 +83,26 @@ class PathSafetyError(PatchForgeError):
         super().__init__(f"Path safety violation: {path!r} escapes base {base}")
 
 
+class CycleDetectedError(PatchForgeError):
+    """Raised when a dependency cycle is detected in the task DAG.
+
+    Attributes:
+        cycle_tasks: The tasks involved in the cycle (in resolution order).
+    """
+
+    def __init__(self, cycle_tasks: list[str]) -> None:
+        self.cycle_tasks = cycle_tasks
+        super().__init__(f"Dependency cycle detected: {' \u2192 '.join(cycle_tasks)}")
+
+
+class SchedulerInvariantError(PatchForgeError):
+    """Raised when the scheduler encounters an invariant violation.
+
+    Examples: a task depends on a non-existent task_id, or a task that was
+    expected in results is missing.
+    """
+
+
 class CircuitBreakerOpenError(PatchForgeError):
     """Raised when a call is rejected by an OPEN circuit breaker.
 

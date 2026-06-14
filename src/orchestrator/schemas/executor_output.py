@@ -5,15 +5,23 @@ Output contract for the Executor agent. Defines what happened with each task.
 
 from __future__ import annotations
 
-from typing import Literal
+from enum import Enum
 
 from pydantic import BaseModel, Field
+
+
+class TaskStatus(str, Enum):
+    APPLIED = "applied"
+    NOOP = "noop"
+    SKIPPED = "skipped"
+    ERROR = "error"
+    PENDING_REVIEW = "pending_human_review"
 
 
 class FileChange(BaseModel):
     task_id: str
     file: str
-    status: Literal["applied", "pending_human_review", "error"]
+    status: TaskStatus
     diff: str | None = None  # unified diff before/after
     original_content: str | None = None
     modified_content: str | None = None

@@ -563,8 +563,12 @@ def test_scan_medium_risk_budget(valid_repo: Path, workspace_dir: Path):
         result = runner.invoke(
             app,
             [
-                "scan", str(valid_repo), "--workspace", str(workspace_dir),
-                "--risk-budget", "medium",
+                "scan",
+                str(valid_repo),
+                "--workspace",
+                str(workspace_dir),
+                "--risk-budget",
+                "medium",
             ],
         )
 
@@ -595,8 +599,12 @@ def test_scan_invalid_risk_budget(valid_repo: Path, workspace_dir: Path):
         result = runner.invoke(
             app,
             [
-                "scan", str(valid_repo), "--workspace", str(workspace_dir),
-                "--risk-budget", "invalid",
+                "scan",
+                str(valid_repo),
+                "--workspace",
+                str(workspace_dir),
+                "--risk-budget",
+                "invalid",
             ],
         )
 

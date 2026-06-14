@@ -74,6 +74,10 @@ to the clone following the plan's specification.
    produces no-op output ("already applied"), downstream tasks that depend
    on it (T2) may be skipped. The executor should respect the dependency
    DAG, not skip tasks based on adjacent task outcomes.
+
+   *(Resolved by Issue #98 — replaced flat loop with DAG scheduler using
+   Kahn's topological order. The placeholder string `"(no changes — already
+   applied)"` was replaced by `TaskStatus.NOOP` with `diff=None`.)*
 3. **Risk budget defaults are too low for refactors.** A pure I/O move across
    3 files with no logic change should not require manual risk budget editing.
    Consider a `--risk-budget` flag or auto-escalation for no-logic-change
