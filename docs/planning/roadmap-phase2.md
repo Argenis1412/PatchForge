@@ -55,9 +55,12 @@ These must be resolved before any self-improvement experiments begin.
 
 - **Experiment Artifacts**
   - Implementation of a structured record for every run (`issue.md`, `plan.json`, `patch.diff`, `qa_logs`, `verdict.md`).
-- **Experiment 001 (POC)**
-  - First controlled run: Rename `_extract_json` to `_parse_llm_json` using the clone method.
-  - Purpose: Generate empirical evidence before investing in Defense in Depth.
+- ✅ **Experiment 001 — First successful self-modification workflow completed**
+  - PatchForge planned, validated, and applied a real code change to an isolated clone of itself.
+  - Scope: Replace hardcoded `schema_version` default with `CURRENT_SCHEMA_VERSION`.
+  - 288 tests passed, 0 ruff errors, 3 bugs discovered and fixed during execution.
+  - Case study: `docs/case-studies/001-use-constant-for-schema-default.md`
+  - Purpose: ✅ Empirical evidence generated — dogfooding pipeline works end-to-end.
 
 ### P3 — Async Workers & CI/CD Integration (Friction Reduction)
 - **Goal:** Decouple the developer from the critical path. Transform the pipeline from synchronous CLI into an async CI/CD workflow.
