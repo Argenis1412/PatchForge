@@ -317,7 +317,7 @@ ADR-0004 must answer exactly five questions:
 | # | Bug | Impact | Fix |
 |---|-----|--------|-----|
 | 1 | Executor skipped T2 when T1 was "already applied" | Incomplete patch, validation failed | Task dependency chain confused executor |
-| 2 | Groq API 403 — key expired/rate-limited | Medium-risk tasks can't execute; pipeline stalls | Add fallback chain (Groq → Gemini → Claude) or valid key |
+| 2 | Groq API 403 — key expired/rate-limited | Medium-risk tasks can't execute; pipeline stalls | ✅ Specified in #100 (provider fallback chain) |
 | 3 | Risk budget defaults too restrictive (`max_files=2`, `risk_budget=low`) | Multi-file refactors blocked; manual `run.json` edit required | Add `--risk-budget` flag or auto-escalation for no-logic-change refactors |
 
 #### Non-goals
