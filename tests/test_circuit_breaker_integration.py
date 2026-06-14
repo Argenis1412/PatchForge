@@ -133,7 +133,7 @@ def test_low_recoverable_sdk_exception(monkeypatch, tmp_path):
 
     # Mock _call_gemini to raise a google APIError (403 equivalent)
     cb_gemini = MagicMock()
-    cb_gemini.call.side_effect = gemini_errors.APIError("403 API not enabled", response_json={})
+    cb_gemini.call.side_effect = gemini_errors.APIError(403, response_json={})
     monkeypatch.setattr("orchestrator.agents.executor._cb_gemini", cb_gemini)
 
     # Mock _call_groq to raise httpx HTTPStatusError (403)
