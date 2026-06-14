@@ -46,15 +46,16 @@
   and propagates `SKIPPED` status correctly. The placeholder "no changes — already applied"
   string was replaced by `TaskStatus.NOOP` with `diff=None`.
 
-### [2026-06-14] Experiment 002 — Groq API 403 (key expired/rate-limited)
+### ✅ [2026-06-14] Experiment 002 — Groq API 403 (key expired/rate-limited) (RESOLVED)
 
-- **File:** `.env`
+- **File:** `src/orchestrator/agents/executor.py`
 - **Debt:** Groq API key returns 403 Forbidden. All medium-risk tasks route to Groq;
   when Groq is unavailable, the pipeline stalls. No fallback chain exists
   (Groq → Gemini → Claude).
 - **Discovered by:** Experiment 002 dogfooding
-- **Why deferred:** API key management is outside the codebase scope; fix requires
-  provider-agnostic task routing (fallback chain) or a valid key.
+- **Resolution:** Issue #100 implemented a unified provider fallback chain that
+  handles all recoverable provider errors (CB open, 403, rate limits, etc.)
+  across all risk levels.
 
 ### [2026-06-14] Experiment 002 — Risk budget defaults too restrictive for multi-file refactors
 
@@ -98,3 +99,15 @@
 - **Debt:** Bare `raise` in `call_gemini()` except block propagates the original exception type instead of `ProviderError`, making downstream `except PatchForgeError` handlers unable to catch it. The `raise ProviderError("gemini", ...)` on line 147 is dead code — it never executes because the bare `raise` always exits before reaching it.
 - **Discovered by:** AI review bot during T-07 Part A implementation
 - **Why deferred:** Fix would be a behavioral change; explicitly out of scope for T-07 Part A (structural only). Deferred to T-07 Part C (#90) which explicitly preserved the bare-raise behavior as part of scout's error-surface contract. This design decision creates the debt documented above. Remains unresolved pending future issue.
+
+
+### [2026-06-14] Issue #100 � Agent fallback inconsistency
+
+- **File:** src/orchestrator/agents/validator.py`n- **Debt:** The executor now uses a resilient, unified fallback chain via _call_chain().
+  However, the validator agent still uses a primitive, manual fallback (returning
+  raw stderr) when Gemini is unavailable. This creates an architectural
+  inconsistency and leaves the validation stage less resilient than the execution stage.
+- **Discovered by:** Implementation of Issue #100
+- **Why deferred:** Out of scope for Issue #100, which specifically targets the
+  executor pipeline. Correcting this requires extracting the chain logic into a
+  shared utility.
