@@ -319,6 +319,7 @@ ADR-0004 must answer exactly five questions:
 - [x] 3 bugs found and fixed during the experiment
 
 #### Bugs discovered
+
 | # | Bug | Fix |
 |---|-----|-----|
 | 1 | `lineterm=""` corrupts diff headers | executor.py:414 |
