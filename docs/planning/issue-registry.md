@@ -399,6 +399,59 @@ ADR-0004 must answer exactly five questions:
 - Changes to scheduler or provider fallback (deferred to separate issues)
 - No auto-escalation logic based on experiment history
 
+### ✅ Issue #98: Executor DAG Scheduler — task dependency resolution
+- **Priority:** P2 | **Status:** ✅ **Completed**
+- **Branch:** `feat/issue-98-executor-dag-scheduler`
+- **Goal:** Replace the flat sequential loop in `executor.run()` with a DAG-aware
+  scheduler that resolves `Task.dependencies`, detects cycles, executes tasks in
+  topological order (Kahn's algorithm, O(V²) deterministic), and propagates
+  `SKIPPED` status when a dependency fails.
+- **Source:** Bug #1 discovered in Experiment 002
+- **Precondition:** Experiment 003 complete
+
+#### Scope
+- `TaskStatus(str, Enum)` with 5 members: `APPLIED`, `NOOP`, `SKIPPED`, `ERROR`, `PENDING_REVIEW`
+- `_build_dag()` — validate all dependencies exist, build adjacency map
+- `_topological_order()` — Kahn's algorithm, deterministic O(V²), raises `CycleDetectedError`
+- DAG scheduler loop with per-file routing + worst-status aggregation for multi-file tasks
+- `PENDING_REVIEW` blocks downstream (Option A — conservador, fail-safe)
+- NOOP returns `diff=None` instead of placeholder string
+- `CycleDetectedError` and `SchedulerInvariantError` in `exceptions.py`
+- 11 scenario tests + 5 building-block tests (16 total)
+
+#### Acceptance criteria
+- [x] `ruff check .` — 0 errors
+- [x] `ruff format --check .` — clean
+- [x] `pytest` — 308 passed, 2 skipped (292 old + 16 new)
+- [x] Linear DAG: all tasks APPLIED, order A→B→C
+- [x] Diamond DAG: D executes after both B and C
+- [x] Partial failure: B=ERROR → D=SKIPPED
+- [x] Cycle: `CycleDetectedError` raised, no tasks execute
+- [x] Missing dependency: `SchedulerInvariantError` in `_build_dag()`
+- [x] NOOP: `status=NOOP`, `diff=None`, filtered by `preview.py` (`if change.diff`)
+- [x] PENDING_REVIEW blocks downstream → downstream SKIPPED
+- [x] Multi-file task partial error: aggregated ERROR → downstream SKIPPED
+- [x] Long cascade (A→B→C→D): all downstream SKIPPED
+- [x] `executor_output.applied` contains only APPLIED and NOOP
+- [x] `executor_output.errors` contains ERROR and SKIPPED
+- [x] `preview.py`, `plan.py`, `apply.py`, `pipeline.py` — zero changes
+- [x] `discoveries.md` — Experiment 002 debt entry marked RESOLVED
+
+#### Files changed
+| File | Action |
+|------|--------|
+| `src/orchestrator/exceptions.py` | EDIT — add `CycleDetectedError`, `SchedulerInvariantError` |
+| `src/orchestrator/schemas/executor_output.py` | EDIT — add `TaskStatus` enum, replace `FileChange.status` |
+| `src/orchestrator/agents/executor.py` | EDIT — add DAG functions, scheduler loop, NOOP routing |
+| `tests/test_executor_scheduler.py` | ADD — 16 tests |
+| `docs/context/discoveries.md` | EDIT — mark debt resolved |
+
+#### Non-goals
+- Changes to `preview.py`, `plan.py`, `apply.py`, or `pipeline.py`
+- Parallel execution (V1 invariant: single-threaded)
+- Changes to `ArchitectOutput` or `Task` schema (dependencies field already existed)
+- Provider fallback chain (Bug #2 from Experiment 002, deferred)
+
 ### Formalize Experiment Schema (debt P2→P3)
 - **Priority:** P2 | **Status:** 📐 Scoped
 - **Goal:** Formalize "Experiment" as a schema concept carrying execution context (commit SHA, repository identity, workspace path, run ID).
