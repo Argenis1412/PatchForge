@@ -58,6 +58,19 @@ def test_build_dag_linear():
 
 
 @pytest.mark.unit
+def test_build_dag_duplicate_task_id():
+    """Two tasks sharing the same task_id -> SchedulerInvariantError."""
+    tasks = [
+        _make_task("A"),
+        _make_task("A"),  # duplicate
+    ]
+    with pytest.raises(SchedulerInvariantError) as exc:
+        _build_dag(tasks)
+    assert "Duplicate" in str(exc.value)
+    assert "A" in str(exc.value)
+
+
+@pytest.mark.unit
 def test_build_dag_missing_dependency():
     tasks = [_make_task("A", ["BOGUS"])]
     with pytest.raises(SchedulerInvariantError):

@@ -447,7 +447,15 @@ def rollback_to_commit(repo_root: Path, target_sha: str) -> None:
 
 def _build_dag(tasks: list[Task]) -> dict[str, set[str]]:
     """Map task_id -> set(dependency ids). Validate all deps exist."""
-    known_ids = {t.task_id for t in tasks}
+    known_ids: set[str] = set()
+    duplicate_ids: set[str] = set()
+    for task in tasks:
+        if task.task_id in known_ids:
+            duplicate_ids.add(task.task_id)
+        known_ids.add(task.task_id)
+    if duplicate_ids:
+        dup_list = ", ".join(sorted(duplicate_ids))
+        raise SchedulerInvariantError(f"Duplicate task_id(s) in plan: {dup_list}")
     dag: dict[str, set[str]] = {}
     for task in tasks:
         for dep in task.dependencies:
