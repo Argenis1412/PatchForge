@@ -64,6 +64,24 @@ def execute(
         console.print(f"[bold red]Error reading implementation plan: {exc}[/bold red]")
         raise typer.Exit(code=1)
 
+    # 2.5 Verify experiment context if experiment.json is present
+    from orchestrator.git import current_head, repository_identity
+
+    try:
+        experiment = workspace_mgr.read_experiment(run_id)
+        experiment.verify(
+            actual_commit_sha=current_head(target_path),
+            actual_repo_identity=repository_identity(target_path),
+        )
+    except FileNotFoundError:
+        console.print(
+            "[yellow]Warning: experiment.json not found. "
+            "Skipping strict commit/repository verification.[/yellow]"
+        )
+    except ValueError as exc:
+        console.print(f"[bold red]Validation Error: {exc}[/bold red]")
+        raise typer.Exit(code=1)
+
     # 3. Bootstrap target environment & load config
     bootstrap_environment(env_file=env_file, target_path=target_path)
     try:

@@ -29,6 +29,7 @@ EVENTS_JSONL = "events.jsonl"
 APPLY_JSON = "apply.json"
 POST_APPLY_VALIDATION_JSON = "post_apply_validation.json"
 ISSUE_MD = "issue.md"
+EXPERIMENT_JSON = "experiment.json"
 
 
 CURRENT_SCHEMA_VERSION: int = 1

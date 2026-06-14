@@ -226,6 +226,21 @@ def execute(
     # 6. Write plan artifact (shared)
     workspace_mgr.write_artifact(run_id, "plan.json", output.model_dump_json(indent=2))
 
+    # 6.5 Write experiment artifact (shared)
+    from orchestrator.git import current_head, repository_identity
+    from orchestrator.schemas.experiment import Experiment
+
+    target_sha = current_head(target_path)
+    repo_id = repository_identity(target_path)
+    experiment = Experiment(
+        run_id=run_id,
+        plan=output,
+        target_commit_sha=target_sha,
+        repository_identity=repo_id,
+        workspace_path=workspace_path,
+    )
+    workspace_mgr.write_experiment(run_id, experiment)
+
     # 7. Update run metadata (shared)
     files = set()
     for t in output.implementation_plan:

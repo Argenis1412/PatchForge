@@ -6,7 +6,7 @@ from pathlib import Path
 
 from orchestrator.safety import validate_filename
 from orchestrator.schemas.artifacts import RunMetadata
-from orchestrator.schemas.experiment import Verdict
+from orchestrator.schemas.experiment import Experiment, Verdict
 
 # Only allow alphanumeric characters, underscores, and hyphens in run IDs.
 _RUN_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -142,6 +142,29 @@ class WorkspaceManager:
 
         md_path = run_dir / "verdict.md"
         _write_verdict_markdown(md_path, verdict)
+
+    def write_experiment(self, run_id: str, experiment: Experiment) -> Path:
+        """Write the experiment.json file.
+
+        Raises FileNotFoundError if the run directory does not exist.
+        Raises ValueError if experiment.run_id does not match run_id.
+        """
+        if experiment.run_id != run_id:
+            raise ValueError(
+                f"Experiment run_id {experiment.run_id!r} does not match target run {run_id!r}"
+            )
+        run_dir = self.run_dir(run_id)
+        if not run_dir.exists():
+            raise FileNotFoundError(f"Run directory not found: {run_dir}")
+
+        return self._write_artifact_unchecked(
+            run_id, "experiment.json", experiment.model_dump_json(indent=2)
+        )
+
+    def read_experiment(self, run_id: str) -> Experiment:
+        """Read and validate the experiment.json file."""
+        content = self.read_artifact(run_id, "experiment.json")
+        return Experiment.model_validate_json(content)
 
     def ensure_run_exists(self, run_id: str) -> None:
         """Ensure the run directory and run.json metadata exist."""

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -226,3 +227,75 @@ def revert_apply(repo_root: Path) -> GitCommandResult:
         )
     except FileNotFoundError as e:
         return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {e}")
+
+
+def normalize_git_url(url: str) -> str:
+    """Normalize a git remote URL or directory path to a standardized representation.
+
+    Standardizes SCP-like syntax (git@github.com:org/repo.git) and HTTPS URLs
+    by converting protocols, stripping usernames, standardizing slashes, and
+    removing trailing '.git'.
+    """
+    url = url.strip()
+    if not url:
+        return ""
+
+    # Check for SCP-like format git@host:path
+    scp_match = re.match(r"^git@([^:]+):(.+)$", url)
+    if scp_match:
+        host, path = scp_match.groups()
+        url = f"https://{host}/{path}"
+    else:
+        # Check if it has ssh:// protocol or similar
+        url = re.sub(r"^(ssh://)?git@", "https://", url)
+        url = re.sub(r"^ssh://", "https://", url)
+
+    # Standardize remaining string (casing and slashes)
+    url = url.replace("\\", "/")
+    # Remove duplicate slashes except after http/https protocol
+    proto_match = re.match(r"^(https?://)", url, re.IGNORECASE)
+    if proto_match:
+        proto = proto_match.group(1)
+        rest = url[len(proto) :]
+        rest = re.sub(r"/+", "/", rest)
+        url = proto + rest
+    else:
+        url = re.sub(r"/+", "/", url)
+
+    # Strip trailing slashes
+    if url.endswith("/"):
+        url = url[:-1]
+
+    # Strip trailing .git (case-insensitive)
+    if url.lower().endswith(".git"):
+        url = url[:-4]
+
+    # If it is a local path or doesn't start with http/https, try resolving as absolute path
+    if not url.lower().startswith("http://") and not url.lower().startswith("https://"):
+        try:
+            p = Path(url)
+            # Resolve to absolute posix path
+            return str(p.resolve().as_posix()).lower()
+        except Exception:
+            pass
+
+    return url.lower()
+
+
+def repository_identity(repo_root: Path) -> str:
+    """Return the repository's identity.
+
+    Tries to retrieve the remote origin URL. If that's not available or fails,
+    returns the absolute local path resolved as a posix path string.
+    """
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root), "config", "--get", "remote.origin.url"],
+            capture_output=True,
+            text=True,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip()
+    except Exception:
+        pass
+    return str(Path(repo_root).resolve().as_posix())

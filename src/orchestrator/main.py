@@ -237,6 +237,25 @@ def apply(
         raise typer.Exit(code=1)
 
     target_path = Path(run_metadata.target_path)
+
+    # 2.5 Verify experiment context if experiment.json is present
+    from orchestrator.git import repository_identity
+
+    try:
+        experiment = workspace_mgr.read_experiment(run_id)
+        experiment.verify(
+            actual_commit_sha=current_head(target_path),
+            actual_repo_identity=repository_identity(target_path),
+        )
+    except FileNotFoundError:
+        console.print(
+            "[yellow]Warning: experiment.json not found. "
+            "Skipping strict commit/repository verification.[/yellow]"
+        )
+    except ValueError as exc:
+        console.print(f"[bold red]Validation Error: {exc}[/bold red]")
+        raise typer.Exit(code=1)
+
     logs_dir = workspace_path / "logs"
     run_dir = workspace_mgr.run_dir(run_id)
     patch_path = run_dir / "patch.diff"
