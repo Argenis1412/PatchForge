@@ -519,3 +519,89 @@ def test_plan_errors_on_v1_findings(valid_repo: Path, workspace_dir: Path):
     # run.json status should be updated to "failed"
     run_data = json.loads((workspace_dir / "runs" / run_id / "run.json").read_text())
     assert run_data["status"] == "failed"
+
+
+# ---------------------------------------------------------------------------
+# 15. test_scan_default_risk_budget
+# ---------------------------------------------------------------------------
+
+
+def test_scan_default_risk_budget(valid_repo: Path, workspace_dir: Path):
+    """Default scan writes risk_budget='low' and max_files=2."""
+    with (
+        patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
+        patch("orchestrator.scanners.python.subprocess.run", side_effect=_mock_tool_run),
+    ):
+        result = runner.invoke(
+            app,
+            ["scan", str(valid_repo), "--workspace", str(workspace_dir)],
+        )
+
+    assert result.exit_code == 0, result.output
+
+    runs_dir = workspace_dir / "runs"
+    run_id = list(runs_dir.iterdir())[0].name
+    run_json_path = runs_dir / run_id / "run.json"
+    assert run_json_path.exists()
+
+    run_data = json.loads(run_json_path.read_text())
+    assert run_data["risk_budget"] == "low"
+    assert run_data["max_files"] == 2
+
+
+# ---------------------------------------------------------------------------
+# 16. test_scan_medium_risk_budget
+# ---------------------------------------------------------------------------
+
+
+def test_scan_medium_risk_budget(valid_repo: Path, workspace_dir: Path):
+    """Scan with --risk-budget medium writes risk_budget='medium'."""
+    with (
+        patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
+        patch("orchestrator.scanners.python.subprocess.run", side_effect=_mock_tool_run),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "scan", str(valid_repo), "--workspace", str(workspace_dir),
+                "--risk-budget", "medium",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+
+    runs_dir = workspace_dir / "runs"
+    run_id = list(runs_dir.iterdir())[0].name
+    run_json_path = runs_dir / run_id / "run.json"
+    assert run_json_path.exists()
+
+    run_data = json.loads(run_json_path.read_text())
+    assert run_data["risk_budget"] == "medium"
+    assert run_data["max_files"] == 5
+    assert run_data["max_diff_lines"] == 250
+
+
+# ---------------------------------------------------------------------------
+# 17. test_scan_invalid_risk_budget
+# ---------------------------------------------------------------------------
+
+
+def test_scan_invalid_risk_budget(valid_repo: Path, workspace_dir: Path):
+    """Invalid --risk-budget value exits with error listing valid options."""
+    with (
+        patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
+        patch("orchestrator.scanners.python.subprocess.run", side_effect=_mock_tool_run),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "scan", str(valid_repo), "--workspace", str(workspace_dir),
+                "--risk-budget", "invalid",
+            ],
+        )
+
+    assert result.exit_code == 1
+    assert "Invalid value for --risk-budget" in result.output
+    assert "low" in result.output
+    assert "medium" in result.output
+    assert "high" in result.output

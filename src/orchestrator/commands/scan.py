@@ -24,7 +24,7 @@ from orchestrator.workspace import WorkspaceManager
 console = Console()
 
 
-def execute(config: TargetConfig) -> None:
+def execute(config: TargetConfig, risk_budget: str | None = None) -> None:
     """Run the deterministic V1 scanner for *config* and persist findings.
 
     Writes ``findings.json`` and ``run.json`` unconditionally before any
@@ -34,6 +34,8 @@ def execute(config: TargetConfig) -> None:
     Args:
         config: Fully resolved target configuration (workspace path already
             validated as external to the target repo).
+        risk_budget: Optional risk budget ('low', 'medium', 'high').
+            Defaults to 'low'.
     """
     console.print(
         Panel(
@@ -124,6 +126,19 @@ def execute(config: TargetConfig) -> None:
 
     # 6. Build run metadata from scanner results
     now = datetime.now(timezone.utc)
+
+    if risk_budget is None:
+        risk_budget = "low"
+    if risk_budget == "low":
+        _max_files = 2
+        _max_diff_lines = 100
+    elif risk_budget == "medium":
+        _max_files = 5
+        _max_diff_lines = 250
+    else:
+        _max_files = 10
+        _max_diff_lines = 500
+
     run_metadata = RunMetadata(
         run_id=run_id,
         target_path=str(config.target_path),
@@ -135,9 +150,9 @@ def execute(config: TargetConfig) -> None:
         updated_at=now,
         v1_supported=findings.v1_supported,
         support_reasons=findings.support_reasons,
-        risk_budget="low",
-        max_files=2,
-        max_diff_lines=100,
+        risk_budget=risk_budget,
+        max_files=_max_files,
+        max_diff_lines=_max_diff_lines,
     )
 
     # 7. Persist findings BEFORE any potential exit(1) — AC8
