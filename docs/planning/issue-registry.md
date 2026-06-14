@@ -387,6 +387,7 @@ ADR-0004 must answer exactly five questions:
 - [x] 3 new tests cover: default, explicit flag, invalid flag
 
 #### Bugs discovered during experiment
+
 | # | Bug | Impact | Fix |
 |---|-----|--------|-----|
 | 1 | LLM-generated code had E501 line length violations | ruff validation failed | Manually fixed line breaks in `main.py` and test docstrings |
