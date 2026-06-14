@@ -43,6 +43,7 @@ env/
 # Project-specific
 logs/
 workspace/
+exp-workspace/
 *.log
 .mypy_cache/
 .pytest_cache/

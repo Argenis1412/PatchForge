@@ -353,6 +353,10 @@ def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) 
 
     assert modified_content is not None
 
+    # Ensure trailing newline matches the original to avoid no-op hunks
+    if original_content and not modified_content.endswith(original_content[-1]):
+        modified_content += original_content[-1]
+
     diff = _make_diff(original_content, modified_content, relative_path)
 
     if not diff:
@@ -411,7 +415,6 @@ def _make_diff(original: str, modified: str, filename: str) -> str:
             modified_lines,
             fromfile=f"a/{filename}",
             tofile=f"b/{filename}",
-            lineterm="",
         )
     )
     return "".join(diff_lines)

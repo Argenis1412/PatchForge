@@ -2,7 +2,7 @@
 
 > **Date:** 2026-06-13
 > **Source:** Roadmap decomposition (`roadmap-phase2.md`) + adversarial audit (`adversarial-audit.md`)
-> **Total:** 18 issues (10 completed, 0 specified, 8 scoped but needing detailed ACs)
+> **Total:** 18 issues (11 completed, 0 specified, 7 scoped but needing detailed ACs)
 
 ---
 
@@ -293,11 +293,43 @@ ADR-0004 must answer exactly five questions:
 - `IssueMd` Pydantic schema
 - `schema_version` on `Verdict`
 
-### Experiment 001 (POC) — Clone Workflow
-- **Priority:** P2 | **Status:** 📐 Scoped
-- **Goal:** First controlled run: rename `_extract_json` to `_parse_llm_json` using the clone method.
+### ✅ Experiment 001 — First successful self-modification workflow
+- **Priority:** P2 | **Status:** ✅ **Completed**
+- **Commit:** `887ad5a`
+- **Branch:** `feat/experiment-001-dogfooding`
+- **Milestone:** First successful self-modification workflow completed. PatchForge planned, validated, and applied a real code change to an isolated clone of itself — proving the dogfooding pipeline end-to-end.
 - **Source:** `dogfooding-vision.md`
-- **Precondition:** Experiment Artifacts schema complete
+- **Precondition:** Experiment Artifacts schema complete, Issue B complete
+
+#### Scope
+- Write issue file with frontmatter (title, severity, labels, ACs)
+- Clone target repo + configure .venv
+- Execute full pipeline: scan → plan --issue-file → preview → apply
+- Fix 3 bugs discovered during execution
+- Document results as case study (CS-001)
+
+#### Acceptance criteria
+- [x] `patchforge scan` analyzes clone correctly
+- [x] `patchforge plan --issue-file` generates a valid plan from human issue
+- [x] `patchforge preview` generates patch.diff and validates (ruff + pytest)
+- [x] Validation passed: 288 tests, 0 ruff errors
+- [x] `patchforge apply` applies patch to clone successfully
+- [x] Post-apply validation passes
+- [x] Case study documented in docs/case-studies/001-...
+- [x] 3 bugs found and fixed during the experiment
+
+#### Bugs discovered
+
+| # | Bug | Fix |
+|---|-----|-----|
+| 1 | `lineterm=""` corrupts diff headers | executor.py:414 |
+| 2 | Trailing newline mismatch → no-op hunk | executor.py:354-356 |
+| 3 | PATH resolution for target .venv | orchestrator.json |
+
+#### Non-goals
+- Formal experiment schema (deferred)
+- Automated promotion to original repo
+- CI/CD integration
 
 ### Formalize Experiment Schema (debt P2→P3)
 - **Priority:** P2 | **Status:** 📐 Scoped
