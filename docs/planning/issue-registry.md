@@ -2,7 +2,7 @@
 
 > **Date:** 2026-06-13
 > **Source:** Roadmap decomposition (`roadmap-phase2.md`) + adversarial audit (`adversarial-audit.md`)
-> **Total:** 18 issues (11 completed, 0 specified, 7 scoped but needing detailed ACs)
+> **Total:** 20 issues (12 completed, 0 specified, 8 scoped but needing detailed ACs)
 
 ---
 
@@ -293,6 +293,37 @@ ADR-0004 must answer exactly five questions:
 - `IssueMd` Pydantic schema
 - `schema_version` on `Verdict`
 
+### ✅ Experiment 002 — Move write_verdict() to workspace.py
+- **Priority:** P2 | **Status:** ✅ **Completed**
+- **Branch:** `refactor/experiment-002-move-write-verdict`
+- **Milestone:** Second successful dogfooding workflow. `write_verdict()` moved from `schemas/experiment.py` to `WorkspaceManager` in `workspace.py`, resolving debt entry #79.
+- **Source:** `discoveries.md` (debt #79)
+- **Precondition:** Experiment 001 complete, Issue B complete
+
+#### Scope
+- Add `WorkspaceManager.write_verdict(run_id, verdict)` method
+- Remove standalone `write_verdict()` and `_write_verdict_markdown()` from `schemas/experiment.py`
+- Update tests to use new method
+- Mark debt #79 as resolved in `discoveries.md`
+
+#### Acceptance criteria
+- [x] `WorkspaceManager.write_verdict(run_id, verdict)` writes `verdict.json` and `verdict.md`
+- [x] `schemas/experiment.py` contains only `Verdict(BaseModel)` — no I/O functions
+- [x] `ruff check .` — 0 errors
+- [x] `pytest` — 288 passed, 2 skipped
+- [x] Debt entry #79 updated to resolved state
+
+#### Bugs discovered
+| # | Bug | Impact | Fix |
+|---|-----|--------|-----|
+| 1 | Executor skipped T2 when T1 was "already applied" | Incomplete patch, validation failed | Task dependency chain confused executor |
+| 2 | Groq API 403 — key expired/rate-limited | Medium-risk tasks can't execute; pipeline stalls | Add fallback chain (Groq → Gemini → Claude) or valid key |
+| 3 | Risk budget defaults too restrictive (`max_files=2`, `risk_budget=low`) | Multi-file refactors blocked; manual `run.json` edit required | Add `--risk-budget` flag or auto-escalation for no-logic-change refactors |
+
+#### Non-goals
+- Wiring `write_verdict()` into `pipeline.py`
+- `schema_version` on `Verdict`
+
 ### ✅ Experiment 001 — First successful self-modification workflow
 - **Priority:** P2 | **Status:** ✅ **Completed**
 - **Commit:** `887ad5a`
@@ -330,6 +361,28 @@ ADR-0004 must answer exactly five questions:
 - Formal experiment schema (deferred)
 - Automated promotion to original repo
 - CI/CD integration
+
+### Experiment 003 — Fix executor dependency-skip bug + risk budget defaults
+- **Priority:** P2 | **Status:** 📐 Scoped
+- **Goal:** Fix the 3 bugs discovered during Experiment 002 to make the pipeline
+  robust for multi-file refactors.
+- **Source:** `discoveries.md` (3 entries: executor skip, Groq 403, risk budget)
+- **Precondition:** Experiment 002 complete
+
+#### Scope
+- Fix executor task dependency DAG: when a dependency reports "already applied",
+  do not skip downstream tasks that have actual work
+- Add provider fallback chain for medium-risk tasks (Groq → Gemini → Claude)
+- Add `--risk-budget` CLI flag to `scan` command, or auto-escalate risk budget
+  for refactors that change arrangement only (no logic change)
+
+#### Bugs discovered
+*(none yet — this issue fixes bugs from Experiment 002)*
+
+#### Non-goals
+- New features beyond the 3 bug fixes
+- Changing the risk classification algorithm
+- `schema_version` on `Verdict`
 
 ### Formalize Experiment Schema (debt P2→P3)
 - **Priority:** P2 | **Status:** 📐 Scoped

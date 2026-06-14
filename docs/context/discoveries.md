@@ -21,7 +21,7 @@
 
 *(No entries yet)*
 
-### [2026-06-11] Issue #79 — `write_verdict()` I/O in schemas/
+### ✅ [2026-06-14] Issue #79 — `write_verdict()` I/O in schemas/ (RESOLVED)
 
 - **File:** `src/orchestrator/schemas/experiment.py`
 - **Debt:** `write_verdict()` co-locates file I/O with schema definition.
@@ -29,9 +29,40 @@
   issue's scope (minimal, no pipeline touch) but inconsistent with the
   established pattern.
 - **Discovered by:** Implementation
-- **Why deferred:** Scope-contained to avoid touching `pipeline.py` before
-  Experiment 001. Move `write_verdict()` to `workspace.py` in Experiment 001
-  or a dedicated refactor before pipeline integration.
+- **Resolution:** Moved to `WorkspaceManager.write_verdict()` in `workspace.py`
+  as part of Experiment 002. `schemas/experiment.py` now contains only the
+  pure `Verdict(BaseModel)` schema.
+
+### [2026-06-14] Experiment 002 — Executor skips dependent tasks when dependency reports "already applied"
+
+- **File:** `src/orchestrator/agents/executor.py`
+- **Debt:** When a task dependency (e.g. T1 — audit) produces "no changes — already applied",
+  the executor skips downstream tasks (e.g. T2 — add to workspace.py) even though
+  T2 is not a no-op. The task dependency DAG is flattened into a linear sequence
+  and adjacent skip logic poisons the chain.
+- **Discovered by:** Experiment 002 dogfooding
+- **Why deferred:** Scope-contained to Experiment 002; fix requires understanding the
+  full executor task scheduling logic.
+
+### [2026-06-14] Experiment 002 — Groq API 403 (key expired/rate-limited)
+
+- **File:** `.env`
+- **Debt:** Groq API key returns 403 Forbidden. All medium-risk tasks route to Groq;
+  when Groq is unavailable, the pipeline stalls. No fallback chain exists
+  (Groq → Gemini → Claude).
+- **Discovered by:** Experiment 002 dogfooding
+- **Why deferred:** API key management is outside the codebase scope; fix requires
+  provider-agnostic task routing (fallback chain) or a valid key.
+
+### [2026-06-14] Experiment 002 — Risk budget defaults too restrictive for multi-file refactors
+
+- **File:** `src/orchestrator/commands/scan.py:138-140`
+- **Debt:** `risk_budget="low"` and `max_files=2` block refactors of 3+ files.
+  A pure refactor (code movement only, no logic change) should not require
+  manual `run.json` editing.
+- **Discovered by:** Experiment 002 dogfooding
+- **Why deferred:** Out of scope of Experiment 002; requires a `--risk-budget` flag
+  or auto-escalation for no-logic-change refactors.
 
 ### [2026-06-11] Issue #77 — Pre-existing ruff formatting violations
 
