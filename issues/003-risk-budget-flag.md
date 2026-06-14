@@ -68,6 +68,15 @@ site (lines 127-141):
 - **`test_scan_invalid_risk_budget`** — `--risk-budget invalid` →
   exit code 1, error message showing valid options
 
+## Code Style Constraints
+
+The target repo uses `ruff line-length = 100`. All generated code:
+
+- Must not exceed **100 characters per line** (E501)
+- Must pass `ruff check .` with 0 errors
+- Error messages in test assertions and implementation must be **verbatim identical**
+- Use `assert "<partial message>" in result.output` for error assertions (not exact string match)
+
 ## Scope
 
 - `src/orchestrator/main.py` — CLI option + validation + pass-through
