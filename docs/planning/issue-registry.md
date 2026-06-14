@@ -317,6 +317,8 @@ ADR-0004 must answer exactly five questions:
 | # | Bug | Impact | Fix |
 |---|-----|--------|-----|
 | 1 | Executor skipped T2 when T1 was "already applied" | Incomplete patch, validation failed | Task dependency chain confused executor |
+| 2 | Groq API 403 — key expired/rate-limited | Medium-risk tasks can't execute; pipeline stalls | Add fallback chain (Groq → Gemini → Claude) or valid key |
+| 3 | Risk budget defaults too restrictive (`max_files=2`, `risk_budget=low`) | Multi-file refactors blocked; manual `run.json` edit required | Add `--risk-budget` flag or auto-escalation for no-logic-change refactors |
 
 #### Non-goals
 - Wiring `write_verdict()` into `pipeline.py`
@@ -359,6 +361,28 @@ ADR-0004 must answer exactly five questions:
 - Formal experiment schema (deferred)
 - Automated promotion to original repo
 - CI/CD integration
+
+### Experiment 003 — Fix executor dependency-skip bug + risk budget defaults
+- **Priority:** P2 | **Status:** 📐 Scoped
+- **Goal:** Fix the 3 bugs discovered during Experiment 002 to make the pipeline
+  robust for multi-file refactors.
+- **Source:** `discoveries.md` (3 entries: executor skip, Groq 403, risk budget)
+- **Precondition:** Experiment 002 complete
+
+#### Scope
+- Fix executor task dependency DAG: when a dependency reports "already applied",
+  do not skip downstream tasks that have actual work
+- Add provider fallback chain for medium-risk tasks (Groq → Gemini → Claude)
+- Add `--risk-budget` CLI flag to `scan` command, or auto-escalate risk budget
+  for refactors that change arrangement only (no logic change)
+
+#### Bugs discovered
+*(none yet — this issue fixes bugs from Experiment 002)*
+
+#### Non-goals
+- New features beyond the 3 bug fixes
+- Changing the risk classification algorithm
+- `schema_version` on `Verdict`
 
 ### Formalize Experiment Schema (debt P2→P3)
 - **Priority:** P2 | **Status:** 📐 Scoped

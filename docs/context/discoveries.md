@@ -33,6 +33,37 @@
   as part of Experiment 002. `schemas/experiment.py` now contains only the
   pure `Verdict(BaseModel)` schema.
 
+### [2026-06-14] Experiment 002 — Executor skips dependent tasks when dependency reports "already applied"
+
+- **File:** `src/orchestrator/agents/executor.py`
+- **Debt:** When a task dependency (e.g. T1 — audit) produces "no changes — already applied",
+  the executor skips downstream tasks (e.g. T2 — add to workspace.py) even though
+  T2 is not a no-op. The task dependency DAG is flattened into a linear sequence
+  and adjacent skip logic poisons the chain.
+- **Discovered by:** Experiment 002 dogfooding
+- **Why deferred:** Scope-contained to Experiment 002; fix requires understanding the
+  full executor task scheduling logic.
+
+### [2026-06-14] Experiment 002 — Groq API 403 (key expired/rate-limited)
+
+- **File:** `.env`
+- **Debt:** Groq API key returns 403 Forbidden. All medium-risk tasks route to Groq;
+  when Groq is unavailable, the pipeline stalls. No fallback chain exists
+  (Groq → Gemini → Claude).
+- **Discovered by:** Experiment 002 dogfooding
+- **Why deferred:** API key management is outside the codebase scope; fix requires
+  provider-agnostic task routing (fallback chain) or a valid key.
+
+### [2026-06-14] Experiment 002 — Risk budget defaults too restrictive for multi-file refactors
+
+- **File:** `src/orchestrator/commands/scan.py:138-140`
+- **Debt:** `risk_budget="low"` y `max_files=2` bloquean refactors de 3+ archivos.
+  Un refactor puro (solo movimiento de código, sin cambio de lógica) no debería
+  requerir editar `run.json` manualmente.
+- **Discovered by:** Experiment 002 dogfooding
+- **Why deferred:** Fuera del scope de Experiment 002; requiere un flag `--risk-budget`
+  o auto-escalation para refactors sin cambio de lógica.
+
 ### [2026-06-11] Issue #77 — Pre-existing ruff formatting violations
 
 - **File:** `scripts/bootstrap_check.py`, `tests/test_run_metadata.py`
