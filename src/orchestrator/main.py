@@ -114,12 +114,24 @@ def scan(
     workspace: Optional[Path] = typer.Option(
         None, "--workspace", help="Path to the workspace directory"
     ),
+    risk_budget: Optional[str] = typer.Option(
+        None,
+        "--risk-budget",
+        help="Risk budget: 'low', 'medium', or 'high'",
+    ),
 ):
     """Scan a target project using deterministic analysis (no AI)."""
     from orchestrator.commands.scan import execute as execute_scan
 
+    if risk_budget is not None and risk_budget not in ("low", "medium", "high"):
+        console.print(
+            "[bold red]Error: Invalid value for --risk-budget. "
+            "Valid options are 'low', 'medium', or 'high'.[/bold red]"
+        )
+        raise typer.Exit(1)
+
     config = _load_target_config(path=path, workspace=workspace, env_file=env_file)
-    execute_scan(config=config)
+    execute_scan(config=config, risk_budget=risk_budget)
 
 
 @app.command()
