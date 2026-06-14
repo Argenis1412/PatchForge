@@ -2,7 +2,7 @@
 
 > **Date:** 2026-06-13
 > **Source:** Roadmap decomposition (`roadmap-phase2.md`) + adversarial audit (`adversarial-audit.md`)
-> **Total:** 18 issues (11 completed, 0 specified, 7 scoped but needing detailed ACs)
+> **Total:** 20 issues (12 completed, 0 specified, 8 scoped but needing detailed ACs)
 
 ---
 

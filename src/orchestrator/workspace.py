@@ -127,7 +127,12 @@ class WorkspaceManager:
         """Write verdict.json and verdict.md to the run directory.
 
         Raises FileNotFoundError if the run directory does not exist.
+        Raises ValueError if verdict.run_id does not match run_id.
         """
+        if verdict.run_id != run_id:
+            raise ValueError(
+                f"Verdict run_id {verdict.run_id!r} does not match target run {run_id!r}"
+            )
         run_dir = self.run_dir(run_id)
         if not run_dir.exists():
             raise FileNotFoundError(f"Run directory not found: {run_dir}")

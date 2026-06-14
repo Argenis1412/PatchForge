@@ -68,3 +68,10 @@ def test_write_verdict_file_not_found_error(tmp_path):
     wm = WorkspaceManager(tmp_path)
     with pytest.raises(FileNotFoundError, match="Run directory not found"):
         wm.write_verdict("run_001", v)
+
+
+def test_write_verdict_rejects_mismatched_run_id(tmp_path):
+    v = _verdict(run_id="run_001")
+    wm = WorkspaceManager(tmp_path)
+    with pytest.raises(ValueError, match="does not match"):
+        wm.write_verdict("run_999", v)

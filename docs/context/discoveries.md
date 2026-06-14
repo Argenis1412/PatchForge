@@ -57,12 +57,12 @@
 ### [2026-06-14] Experiment 002 — Risk budget defaults too restrictive for multi-file refactors
 
 - **File:** `src/orchestrator/commands/scan.py:138-140`
-- **Debt:** `risk_budget="low"` y `max_files=2` bloquean refactors de 3+ archivos.
-  Un refactor puro (solo movimiento de código, sin cambio de lógica) no debería
-  requerir editar `run.json` manualmente.
+- **Debt:** `risk_budget="low"` and `max_files=2` block refactors of 3+ files.
+  A pure refactor (code movement only, no logic change) should not require
+  manual `run.json` editing.
 - **Discovered by:** Experiment 002 dogfooding
-- **Why deferred:** Fuera del scope de Experiment 002; requiere un flag `--risk-budget`
-  o auto-escalation para refactors sin cambio de lógica.
+- **Why deferred:** Out of scope of Experiment 002; requires a `--risk-budget` flag
+  or auto-escalation for no-logic-change refactors.
 
 ### [2026-06-11] Issue #77 — Pre-existing ruff formatting violations
 
