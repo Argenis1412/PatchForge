@@ -21,7 +21,7 @@
 
 *(No entries yet)*
 
-### [2026-06-11] Issue #79 — `write_verdict()` I/O in schemas/
+### ✅ [2026-06-14] Issue #79 — `write_verdict()` I/O in schemas/ (RESOLVED)
 
 - **File:** `src/orchestrator/schemas/experiment.py`
 - **Debt:** `write_verdict()` co-locates file I/O with schema definition.
@@ -29,9 +29,9 @@
   issue's scope (minimal, no pipeline touch) but inconsistent with the
   established pattern.
 - **Discovered by:** Implementation
-- **Why deferred:** Scope-contained to avoid touching `pipeline.py` before
-  Experiment 001. Move `write_verdict()` to `workspace.py` in Experiment 001
-  or a dedicated refactor before pipeline integration.
+- **Resolution:** Moved to `WorkspaceManager.write_verdict()` in `workspace.py`
+  as part of Experiment 002. `schemas/experiment.py` now contains only the
+  pure `Verdict(BaseModel)` schema.
 
 ### [2026-06-11] Issue #77 — Pre-existing ruff formatting violations
 

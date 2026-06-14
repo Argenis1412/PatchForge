@@ -1,11 +1,11 @@
 """Tests for Verdict schema and write_verdict utility."""
 
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
 
-from orchestrator.schemas.experiment import Verdict, write_verdict
+from orchestrator.schemas.experiment import Verdict
+from orchestrator.workspace import WorkspaceManager
 
 
 def _verdict(**overrides) -> Verdict:
@@ -45,14 +45,16 @@ def test_round_trip():
 
 def test_write_verdict_writes_files(tmp_path):
     v = _verdict()
-    write_verdict(tmp_path, v)
+    wm = WorkspaceManager(tmp_path)
+    wm.create_run_directory("run_001")
+    wm.write_verdict("run_001", v)
 
-    json_path = tmp_path / "verdict.json"
+    json_path = tmp_path / "runs" / "run_001" / "verdict.json"
     assert json_path.exists()
     loaded = Verdict.model_validate_json(json_path.read_text(encoding="utf-8"))
     assert loaded.model_dump() == v.model_dump()
 
-    md_path = tmp_path / "verdict.md"
+    md_path = tmp_path / "runs" / "run_001" / "verdict.md"
     assert md_path.exists()
     content = md_path.read_text(encoding="utf-8")
     assert v.run_id in content
@@ -61,8 +63,8 @@ def test_write_verdict_writes_files(tmp_path):
     assert str(v.apply_succeeded) in content
 
 
-def test_write_verdict_file_not_found_error():
+def test_write_verdict_file_not_found_error(tmp_path):
     v = _verdict()
-    missing = Path("/nonexistent/run_dir")
+    wm = WorkspaceManager(tmp_path)
     with pytest.raises(FileNotFoundError, match="Run directory not found"):
-        write_verdict(missing, v)
+        wm.write_verdict("run_001", v)
