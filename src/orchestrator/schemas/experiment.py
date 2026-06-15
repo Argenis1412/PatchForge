@@ -72,3 +72,5 @@ def verify_experiment_or_warn(workspace_mgr, run_id: str, target_path: Path) -> 
             "[yellow]Warning: experiment.json not found. "
             "Skipping strict commit/repository verification.[/yellow]"
         )
+    except RuntimeError as exc:
+        raise ValueError(f"Unable to verify experiment context: {exc}") from exc
