@@ -42,26 +42,34 @@
 
 ---
 
-## Phase 2 — `agents/architect.py` → `agents/architect/`
+## Phase 2 — `agents/architect.py` → `agents/architect/` ✅ (done)
+
+**Branch:** `feat/phase-2-architect`
+**Commit:** `63540df`
 
 **Risk:** Low — internal module.
 
 | File | Content |
 |------|---------|
-| `agents/architect/__init__.py` | Re-export `run()`, `run_from_issue()` |
-| `agents/architect/prompts.py` | Prompt templates (currently inline) |
-| `agents/architect/provider.py` | `call_claude()` |
+| `agents/architect/__init__.py` | `run()`, `run_from_issue()`, `__main__` |
+| `agents/architect/prompts.py` | `ARCHITECT_PROMPT`, `ISSUE_ARCHITECT_PROMPT` |
+| `agents/architect/provider.py` | `call_claude()`, `MODEL`, cost constants |
 
 ---
 
-## Phase 3 — `agents/validator.py` → `agents/validator/`
+## Phase 3 — `agents/validator.py` → `agents/validator/` ✅ (done)
 
-**Risk:** Low — internal module.
+**Branch:** `feat/phase-3-validator`
+**Commit:** `eafd107`
+
+**Risk:** Low-Medium — logger singleton, circuit breaker, multiple monkeypatch paths.
 
 | File | Content |
 |------|---------|
-| `agents/validator/__init__.py` | Re-export `run()` |
-| `agents/validator/runners.py` | `run_ruff()`, `run_pytest()`, `run_tsc()`, `_run()` |
+| `agents/validator/__init__.py` | `run()`, `_cb_validator`, re-exports, `__main__` |
+| `agents/validator/logging.py` | `_logger`, `_get_logger()` singleton |
+| `agents/validator/runners.py` | `_run()`, `run_ruff()`, `run_pytest()`, `run_tsc()`, helpers |
+| `agents/validator/summarizer.py` | `_summarize_errors()`, `MODEL_GEMINI`, `COST_PER_SUMMARY` |
 
 ---
 
@@ -119,6 +127,14 @@ Only after all refactoring phases are stable.
 - Follows `scanners/python.py` pattern (deterministic, `ast`, `os.walk`)
 - Output: Pydantic `QualityReport` consumable by AI agents
 - 12 checks across 4 dimensions: readability, complexity, safety, hygiene
+
+---
+
+## Known issues (pre-existing, not introduced by refactoring)
+
+- `runners.run_ruff()` mutates `cmd_override` via `cmd.extend()` when staged
+  files exist. Caller-provided list is polluted. Pre-dates extraction from
+  original `validator.py` line 195.
 
 ---
 
