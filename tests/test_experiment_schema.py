@@ -98,7 +98,10 @@ def test_normalize_git_url():
     # Local path
     # If it is a local path, it resolves to absolute posix path.
     # We can test with current directory.
-    expected_local = str(Path(".").resolve().as_posix()).lower()
+    import sys
+
+    resolved = str(Path(".").resolve().as_posix())
+    expected_local = resolved.lower() if sys.platform.startswith("win") else resolved
     assert normalize_git_url(".") == expected_local
 
 
