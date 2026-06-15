@@ -109,6 +109,17 @@
 - **Why deferred:** Fix would be a behavioral change; explicitly out of scope for T-07 Part A (structural only). Deferred to T-07 Part C (#90) which explicitly preserved the bare-raise behavior as part of scout's error-surface contract. This design decision creates the debt documented above. Remains unresolved pending future issue.
 
 
+### [2026-06-15] Phase 4 — Provider clients sin timeout consistente
+
+- **File:** `src/orchestrator/clients/gemini_client.py:11`, `anthropic_client.py:11`, `groq_client.py:16`
+- **Debt:** Los 3 provider clients tienen timeouts inconsistentes o ausentes:
+  - Gemini: `genai.Client()` sin timeout — requests pueden colgarse indefinidamente.
+  - Anthropic: usa default del SDK (10 min) en vez de `TIMEOUT_SECONDS` (60s).
+  - Groq: hardcodea 30s en vez de `TIMEOUT_SECONDS` (60s).
+  El constante `TIMEOUT_SECONDS` existe en `providers.py` pero ningún cliente lo consume.
+- **Discovered by:** CodeRabbit AI review durante Phase 4
+- **Why deferred:** Los clientes están en `clients/*.py`, fuera del alcance de la extracción de executor. Arreglarlo requiere decidir si pasar timeout por request (menos invasivo) o refactorizar los `get_*_client()` para aceptar timeout como parámetro.
+
 ### [2026-06-15] Phase 4 — `__init__.py` import binding impide monkeypatch en submódulos
 
 - **File:** `src/orchestrator/agents/executor/__init__.py` (patrón general)
