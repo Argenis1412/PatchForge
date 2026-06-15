@@ -1,10 +1,37 @@
+from pathlib import Path
+
 import pytest
 
-from orchestrator.agents.architect import run, run_from_issue
+from orchestrator.agents.architect import (
+    ARCHITECT_PROMPT,
+    ISSUE_ARCHITECT_PROMPT,
+    run,
+    run_from_issue,
+)
 from orchestrator.llm.parser import LLMParseError
 from orchestrator.schemas.architect_output import ArchitectOutput
 from orchestrator.schemas.issue import IssueInput
 from orchestrator.schemas.scout_output import ScoutOutput
+
+_SNAPSHOT_DIR = Path(__file__).resolve().parent / "snapshots"
+
+
+def _read_snapshot(name: str) -> str:
+    return (_SNAPSHOT_DIR / name).read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Snapshot tests — ensure prompts are not altered by the extraction
+# ---------------------------------------------------------------------------
+
+
+def test_architect_prompt_snapshot():
+    assert ARCHITECT_PROMPT == _read_snapshot("ARCHITECT_PROMPT.txt")
+
+
+def test_issue_architect_prompt_snapshot():
+    assert ISSUE_ARCHITECT_PROMPT == _read_snapshot("ISSUE_ARCHITECT_PROMPT.txt")
+
 
 _CLEAN_JSON = (
     '{"validated_findings": [], "false_positives": [],'
