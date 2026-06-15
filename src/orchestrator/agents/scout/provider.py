@@ -102,6 +102,6 @@ def call_gemini(
                 duration_ms=latency_ms,
                 logs_dir=logs_dir,
             )
-            raise
+            break
 
     raise ProviderError("gemini", f"[{orchestratorel}] Failed after retry.")
