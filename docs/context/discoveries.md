@@ -19,7 +19,15 @@
 
 ## Log
 
-*(No entries yet)*
+### ✅ [2026-06-15] Phase 3 — `run_ruff()` mutates caller `cmd_override` (RESOLVED)
+
+- **File:** `src/orchestrator/agents/validator/runners.py:130`
+- **Debt:** `run_ruff()`, `run_pytest()`, and `run_tsc()` assign `cmd = cmd_override`
+  without copying, then `run_ruff()` mutates via `cmd.extend()`. The caller's
+  original list object is polluted for any subsequent usage.
+- **Discovered by:** CodeRabbit during Phase 3 extraction review
+- **Resolution:** All 6 `cmd_override` assignments now use `list(cmd_override)`
+  to create a defensive copy. Fix branch `fix/cmd-override-mutation`.
 
 ### ✅ [2026-06-14] Issue #79 — `write_verdict()` I/O in schemas/ (RESOLVED)
 
@@ -101,9 +109,10 @@
 - **Why deferred:** Fix would be a behavioral change; explicitly out of scope for T-07 Part A (structural only). Deferred to T-07 Part C (#90) which explicitly preserved the bare-raise behavior as part of scout's error-surface contract. This design decision creates the debt documented above. Remains unresolved pending future issue.
 
 
-### [2026-06-14] Issue #100 � Agent fallback inconsistency
+### [2026-06-14] Issue #100 — Agent fallback inconsistency
 
-- **File:** src/orchestrator/agents/validator.py`n- **Debt:** The executor now uses a resilient, unified fallback chain via _call_chain().
+- **File:** `src/orchestrator/agents/validator.py`
+- **Debt:** The executor now uses a resilient, unified fallback chain via _call_chain().
   However, the validator agent still uses a primitive, manual fallback (returning
   raw stderr) when Gemini is unavailable. This creates an architectural
   inconsistency and leaves the validation stage less resilient than the execution stage.
