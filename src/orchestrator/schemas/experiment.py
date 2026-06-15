@@ -17,7 +17,7 @@ class Verdict(BaseModel):
     validation_passed: bool
     apply_succeeded: bool
     error_message: str | None = None
-    generated_at: datetime
+    generated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class Experiment(BaseModel):
@@ -48,3 +48,27 @@ class Experiment(BaseModel):
                 f"Repository identity mismatch: experiment expected repo "
                 f"'{self.repository_identity}', but target repository is '{actual_repo_identity}'."
             )
+
+
+def verify_experiment_or_warn(workspace_mgr, run_id: str, target_path: Path) -> None:
+    """Load experiment.json if present, and verify its context against target_path.
+
+    Warns if experiment.json is missing.
+    Raises ValueError if verification fails.
+    """
+    from rich.console import Console
+
+    from orchestrator.git import current_head, repository_identity
+
+    console = Console()
+    try:
+        experiment = workspace_mgr.read_experiment(run_id)
+        experiment.verify(
+            actual_commit_sha=current_head(target_path),
+            actual_repo_identity=repository_identity(target_path),
+        )
+    except FileNotFoundError:
+        console.print(
+            "[yellow]Warning: experiment.json not found. "
+            "Skipping strict commit/repository verification.[/yellow]"
+        )

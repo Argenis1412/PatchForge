@@ -42,6 +42,23 @@ def apply_patch_to_copy(temp_root: Path, patch_path: Path) -> GitCommandResult:
 
     if not (temp_root / ".git").exists():
         subprocess.run(["git", "init"], cwd=str(temp_root), capture_output=True, text=True)
+        subprocess.run(
+            ["git", "config", "user.name", "Validator"],
+            cwd=str(temp_root),
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "val@patchforge.local"],
+            cwd=str(temp_root),
+            capture_output=True,
+        )
+        subprocess.run(["git", "add", "."], cwd=str(temp_root), capture_output=True, text=True)
+        subprocess.run(
+            ["git", "commit", "-m", "initial", "--allow-empty", "--no-verify"],
+            cwd=str(temp_root),
+            capture_output=True,
+            text=True,
+        )
     return apply_patch(temp_root, patch_path)
 
 

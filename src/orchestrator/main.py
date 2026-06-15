@@ -239,19 +239,10 @@ def apply(
     target_path = Path(run_metadata.target_path)
 
     # 2.5 Verify experiment context if experiment.json is present
-    from orchestrator.git import repository_identity
+    from orchestrator.schemas.experiment import verify_experiment_or_warn
 
     try:
-        experiment = workspace_mgr.read_experiment(run_id)
-        experiment.verify(
-            actual_commit_sha=current_head(target_path),
-            actual_repo_identity=repository_identity(target_path),
-        )
-    except FileNotFoundError:
-        console.print(
-            "[yellow]Warning: experiment.json not found. "
-            "Skipping strict commit/repository verification.[/yellow]"
-        )
+        verify_experiment_or_warn(workspace_mgr, run_id, target_path)
     except ValueError as exc:
         console.print(f"[bold red]Validation Error: {exc}[/bold red]")
         raise typer.Exit(code=1)

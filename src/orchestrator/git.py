@@ -18,6 +18,7 @@ def is_git_repo(path: Path) -> bool:
             ["git", "-C", str(path), "rev-parse", "--git-dir"],
             capture_output=True,
             text=True,
+            timeout=30,
         )
         return res.returncode == 0
     except FileNotFoundError as e:
@@ -32,6 +33,7 @@ def resolve_git_root(path: Path) -> Path:
             capture_output=True,
             text=True,
             check=True,
+            timeout=30,
         )
         return Path(res.stdout.strip()).resolve()
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -39,29 +41,45 @@ def resolve_git_root(path: Path) -> Path:
 
 
 def current_branch(repo_root: Path) -> str:
+    """Return the name of the currently checked-out branch.
+
+    Raises RuntimeError if git fails or the repo is in a detached HEAD state.
+    """
     try:
         res = subprocess.run(
             ["git", "-C", str(repo_root), "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True,
             text=True,
             check=True,
+            timeout=30,
         )
         return res.stdout.strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return ""
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(
+            f"Failed to determine current branch in '{repo_root}': {e.stderr.strip()}"
+        ) from e
+    except FileNotFoundError as e:
+        raise RuntimeError("Git executable not found in PATH") from e
 
 
 def current_head(repo_root: Path) -> str:
+    """Return the full SHA of the current HEAD commit.
+
+    Raises RuntimeError if git fails (e.g. empty repo, not a git dir, no git binary).
+    """
     try:
         res = subprocess.run(
             ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
             capture_output=True,
             text=True,
             check=True,
+            timeout=30,
         )
         return res.stdout.strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return ""
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"Failed to resolve HEAD in '{repo_root}': {e.stderr.strip()}") from e
+    except FileNotFoundError as e:
+        raise RuntimeError("Git executable not found in PATH") from e
 
 
 def is_working_tree_clean(repo_root: Path) -> bool:
@@ -71,6 +89,7 @@ def is_working_tree_clean(repo_root: Path) -> bool:
             capture_output=True,
             text=True,
             check=True,
+            timeout=30,
         )
         return res.stdout.strip() == ""
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -84,6 +103,7 @@ def working_tree_status(repo_root: Path) -> WorkingTreeStatus:
             capture_output=True,
             text=True,
             check=True,
+            timeout=30,
         )
         porcelain = res.stdout
         return WorkingTreeStatus(is_clean=porcelain.strip() == "", porcelain=porcelain)
@@ -115,6 +135,7 @@ def check_patch(repo_root: Path, patch_path: Path) -> GitCommandResult:
             ["git", "-C", str(repo_root), "apply", "--check", str(patch_path)],
             capture_output=True,
             text=True,
+            timeout=30,
         )
         return GitCommandResult(return_code=res.returncode, stdout=res.stdout, stderr=res.stderr)
     except FileNotFoundError as e:
@@ -162,6 +183,7 @@ def create_controlled_branch(repo_root: Path, branch_name: str) -> GitCommandRes
             ["git", "-C", str(repo_root), "checkout", "-b", branch_name],
             capture_output=True,
             text=True,
+            timeout=30,
         )
         return GitCommandResult(return_code=res.returncode, stdout=res.stdout, stderr=res.stderr)
     except FileNotFoundError as e:
@@ -174,6 +196,7 @@ def apply_patch(repo_root: Path, patch_path: Path) -> GitCommandResult:
             ["git", "-C", str(repo_root), "apply", str(patch_path)],
             capture_output=True,
             text=True,
+            timeout=30,
         )
         return GitCommandResult(return_code=res.returncode, stdout=res.stdout, stderr=res.stderr)
     except FileNotFoundError as e:
@@ -186,6 +209,7 @@ def force_reset_apply(repo_root: Path, target_sha: str) -> GitCommandResult:
             ["git", "-C", str(repo_root), "reset", "--hard", target_sha],
             capture_output=True,
             text=True,
+            timeout=30,
         )
         if res1.returncode != 0:
             return GitCommandResult(
@@ -197,6 +221,7 @@ def force_reset_apply(repo_root: Path, target_sha: str) -> GitCommandResult:
             ["git", "-C", str(repo_root), "clean", "-fd"],
             capture_output=True,
             text=True,
+            timeout=30,
         )
         return GitCommandResult(
             return_code=res2.returncode,
@@ -213,11 +238,13 @@ def revert_apply(repo_root: Path) -> GitCommandResult:
             ["git", "-C", str(repo_root), "checkout", "."],
             capture_output=True,
             text=True,
+            timeout=30,
         )
         res2 = subprocess.run(
             ["git", "-C", str(repo_root), "clean", "-fd"],
             capture_output=True,
             text=True,
+            timeout=30,
         )
         rc = res1.returncode if res1.returncode != 0 else res2.returncode
         return GitCommandResult(
@@ -240,15 +267,22 @@ def normalize_git_url(url: str) -> str:
     if not url:
         return ""
 
-    # Check for SCP-like format git@host:path
-    scp_match = re.match(r"^git@([^:]+):(.+)$", url)
-    if scp_match:
+    # Parse ssh://git@host:port/path or ssh://git@host/path
+    ssh_scheme_match = re.match(r"^ssh://(?:git@)?([^:/]+)(?::\d+)?/(.+)$", url, re.IGNORECASE)
+    # Parse scp-like: git@host:path (e.g. git@github.com:org/repo)
+    scp_match = re.match(r"^git@([^:]+):(.+)$", url, re.IGNORECASE)
+    # Parse http(s)://[user@]host[:port]/path — capture scheme separately to preserve it
+    http_match = re.match(r"^(https?://)(?:[^@]+@)?([^:/]+)(?::\d+)?/(.+)$", url, re.IGNORECASE)
+
+    if ssh_scheme_match:
+        host, path = ssh_scheme_match.groups()
+        url = f"https://{host}/{path}"
+    elif scp_match:
         host, path = scp_match.groups()
         url = f"https://{host}/{path}"
-    else:
-        # Check if it has ssh:// protocol or similar
-        url = re.sub(r"^(ssh://)?git@", "https://", url)
-        url = re.sub(r"^ssh://", "https://", url)
+    elif http_match:
+        scheme, host, path = http_match.groups()
+        url = f"{scheme}{host}/{path}"
 
     # Standardize remaining string (casing and slashes)
     url = url.replace("\\", "/")
@@ -275,7 +309,12 @@ def normalize_git_url(url: str) -> str:
         try:
             p = Path(url)
             # Resolve to absolute posix path
-            return str(p.resolve().as_posix()).lower()
+            resolved = str(p.resolve().as_posix())
+            import sys
+
+            if sys.platform.startswith("win"):
+                return resolved.lower()
+            return resolved
         except Exception:
             pass
 
