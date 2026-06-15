@@ -165,7 +165,7 @@ def run_from_issue(
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python agents/architect.py <path_to_scout_output.json>")
+        print("Usage: python -m orchestrator.agents.architect <path_to_scout_output.json>")
         sys.exit(1)
 
     scout_path = sys.argv[1]
