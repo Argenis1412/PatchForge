@@ -145,8 +145,7 @@ def check_patch(repo_root: Path, patch_path: Path) -> GitCommandResult:
 def get_current_head(repo_path: Path) -> str:
     """Return the full SHA of the current HEAD commit in *repo_path*.
 
-    Returns an empty string when the SHA cannot be resolved (detached HEAD,
-    git not found, not a repository, etc.).
+    Raises RuntimeError if git fails (e.g. empty repo, not a git dir, no git binary).
     """
     return current_head(repo_path)
 
@@ -332,6 +331,7 @@ def repository_identity(repo_root: Path) -> str:
             ["git", "-C", str(repo_root), "config", "--get", "remote.origin.url"],
             capture_output=True,
             text=True,
+            timeout=30,
         )
         if res.returncode == 0 and res.stdout.strip():
             return res.stdout.strip()

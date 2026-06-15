@@ -63,6 +63,14 @@ Periodic audit after merging Issue #59 (lint cleanup).
 **Files scanned:** 62 | **Hotspots:** 37
 **Result:** All metrics unchanged from previous audit. No regressions detected.
 
+### Jun 14, 2026 — Code Audit Fixes
+
+All 10 findings from the adversarial code audit resolved (5 critical, 2 high, 3 medium).
+
+**Files affected:** `git.py`, `safety.py`, `validation_workspace.py`, `experiment.py`, `main.py`, `preview.py`, `python.py`
+
+**Result:** `ruff check .` → 0 errors. `pytest` → 320 passed, 2 skipped, 0 failed.
+
 ### Jun 8, 2026 (Post-#53)
 
 Pipeline audit after `run` command deprecation. V1 deterministic scanner in use.
