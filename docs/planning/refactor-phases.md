@@ -28,14 +28,17 @@
 
 ---
 
-## Phase 1 — `agents/scout.py` → `agents/scout/`
+## Phase 1 — `agents/scout.py` → `agents/scout/` ✅ (done)
+
+**Branch:** `feat/phase-1-scout`
+**Commit:** `fdaf70d`
 
 **Risk:** Low — internal module, few consumers.
 
 | File | Content |
 |------|---------|
-| `agents/scout/__init__.py` | Re-export `run()` |
-| `agents/scout/provider.py` | `call_gemini()` |
+| `agents/scout/__init__.py` | `run()`, `read_file_tree()`, `read_selected_files()`, prompts, `__main__` |
+| `agents/scout/provider.py` | `call_gemini()`, `MODEL`, cost constants |
 
 ---
 
