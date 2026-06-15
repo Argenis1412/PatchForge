@@ -69,11 +69,11 @@ def test_low_fallback_to_groq(monkeypatch, tmp_path):
         state=CircuitBreakerState.OPEN,
         retry_after=999_999.0,
     )
-    monkeypatch.setattr("orchestrator.agents.executor._cb_gemini", cb_gemini)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini)
 
     cb_groq = MagicMock()
     cb_groq.call.return_value = ("x = 2\n", 10, 20)
-    monkeypatch.setattr("orchestrator.agents.executor._cb_groq", cb_groq)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_groq", cb_groq)
 
     output, _ = _run(tmp_path, arch_out)
 
@@ -101,11 +101,11 @@ def test_low_fallback_groq_then_claude(monkeypatch, tmp_path):
             state=CircuitBreakerState.OPEN,
             retry_after=999_999.0,
         )
-        monkeypatch.setattr(f"orchestrator.agents.executor._cb_{provider}", cb)
+        monkeypatch.setattr(f"orchestrator.agents.executor.providers._cb_{provider}", cb)
 
     cb_claude = MagicMock()
     cb_claude.call.return_value = ("x = 2\n", 10, 20)
-    monkeypatch.setattr("orchestrator.agents.executor._cb_claude", cb_claude)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_claude", cb_claude)
 
     output, _ = _run(tmp_path, arch_out)
 
@@ -134,7 +134,7 @@ def test_low_recoverable_sdk_exception(monkeypatch, tmp_path):
     # Mock _call_gemini to raise a google APIError (403 equivalent)
     cb_gemini = MagicMock()
     cb_gemini.call.side_effect = gemini_errors.APIError(403, response_json={})
-    monkeypatch.setattr("orchestrator.agents.executor._cb_gemini", cb_gemini)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini)
 
     # Mock _call_groq to raise httpx HTTPStatusError (403)
     cb_groq = MagicMock()
@@ -143,12 +143,12 @@ def test_low_recoverable_sdk_exception(monkeypatch, tmp_path):
         request=MagicMock(),
         response=MagicMock(status_code=403),
     )
-    monkeypatch.setattr("orchestrator.agents.executor._cb_groq", cb_groq)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_groq", cb_groq)
 
     # Mock _call_claude succeeds
     cb_claude = MagicMock()
     cb_claude.call.return_value = ("x = 2\n", 10, 20)
-    monkeypatch.setattr("orchestrator.agents.executor._cb_claude", cb_claude)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_claude", cb_claude)
 
     output, _ = _run(tmp_path, arch_out)
 
@@ -173,11 +173,11 @@ def test_medium_fallback_to_gemini(monkeypatch, tmp_path):
         state=CircuitBreakerState.OPEN,
         retry_after=999_999.0,
     )
-    monkeypatch.setattr("orchestrator.agents.executor._cb_groq", cb_groq)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_groq", cb_groq)
 
     cb_gemini = MagicMock()
     cb_gemini.call.return_value = ("x = 2\n", 10, 20)
-    monkeypatch.setattr("orchestrator.agents.executor._cb_gemini", cb_gemini)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini)
 
     output, _ = _run(tmp_path, arch_out)
 
@@ -199,11 +199,11 @@ def test_medium_empty_then_gemini(monkeypatch, tmp_path):
 
     cb_groq = MagicMock()
     cb_groq.call.return_value = ("", 0, 0)
-    monkeypatch.setattr("orchestrator.agents.executor._cb_groq", cb_groq)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_groq", cb_groq)
 
     cb_gemini = MagicMock()
     cb_gemini.call.return_value = ("x = 2\n", 10, 20)
-    monkeypatch.setattr("orchestrator.agents.executor._cb_gemini", cb_gemini)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini)
 
     output, _ = _run(tmp_path, arch_out)
 
@@ -228,7 +228,7 @@ def test_high_fails_no_fallback(monkeypatch, tmp_path):
         state=CircuitBreakerState.OPEN,
         retry_after=999_999.0,
     )
-    monkeypatch.setattr("orchestrator.agents.executor._cb_claude", cb_claude)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_claude", cb_claude)
 
     output, _ = _run(tmp_path, arch_out)
 
@@ -254,7 +254,7 @@ def test_all_providers_exhausted(monkeypatch, tmp_path):
             state=CircuitBreakerState.OPEN,
             retry_after=999_999.0,
         )
-        monkeypatch.setattr(f"orchestrator.agents.executor._cb_{provider}", cb)
+        monkeypatch.setattr(f"orchestrator.agents.executor.providers._cb_{provider}", cb)
 
     output, _ = _run(tmp_path, arch_out)
 
