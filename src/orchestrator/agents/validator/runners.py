@@ -127,10 +127,10 @@ def run_ruff(
     if staging_dir is not None and staging_dir.is_dir():
         staged_files = _collect_staged_files(staging_dir)
         if staged_files:
-            cmd = cmd_override if cmd_override is not None else ["ruff", "check"]
+            cmd = list(cmd_override) if cmd_override is not None else ["ruff", "check"]
             cmd.extend(str(sf) for sf in staged_files)
             return _run(cmd, project_root, "ruff", run_id)
-    cmd = cmd_override if cmd_override is not None else ["ruff", "check", "."]
+    cmd = list(cmd_override) if cmd_override is not None else ["ruff", "check", "."]
     return _run(cmd, project_root, "ruff", run_id)
 
 
@@ -147,9 +147,13 @@ def run_pytest(
     ):
         with tempfile.TemporaryDirectory(prefix="val_overlay_") as tmpdir:
             overlay_root = _create_overlay(project_root, staging_dir, IGNORE_DIRS, Path(tmpdir))
-            cmd = cmd_override if cmd_override is not None else ["pytest", ".", "--tb=short", "-q"]
+            cmd = (
+                list(cmd_override)
+                if cmd_override is not None
+                else ["pytest", ".", "--tb=short", "-q"]
+            )
             return _run(cmd, overlay_root, "pytest", run_id)
-    cmd = cmd_override if cmd_override is not None else ["pytest", ".", "--tb=short", "-q"]
+    cmd = list(cmd_override) if cmd_override is not None else ["pytest", ".", "--tb=short", "-q"]
     return _run(
         cmd,
         project_root,
@@ -180,7 +184,7 @@ def run_tsc(
                     return_code=0,
                     stdout="Skipped — frontend/ not found",
                 )
-            cmd = cmd_override if cmd_override is not None else ["npx", "tsc", "--noEmit"]
+            cmd = list(cmd_override) if cmd_override is not None else ["npx", "tsc", "--noEmit"]
             return _run(cmd, frontend, "tsc", run_id)
     frontend = _find_frontend_dir(project_root)
     if frontend is None:
@@ -191,5 +195,5 @@ def run_tsc(
             return_code=0,
             stdout="Skipped — frontend/ not found",
         )
-    cmd = cmd_override if cmd_override is not None else ["npx", "tsc", "--noEmit"]
+    cmd = list(cmd_override) if cmd_override is not None else ["npx", "tsc", "--noEmit"]
     return _run(cmd, frontend, "tsc", run_id)
