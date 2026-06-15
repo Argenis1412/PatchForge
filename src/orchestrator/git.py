@@ -60,6 +60,10 @@ def current_branch(repo_root: Path) -> str:
         ) from e
     except FileNotFoundError as e:
         raise RuntimeError("Git executable not found in PATH") from e
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(
+            f"Command timed out while determining current branch in '{repo_root}'"
+        ) from e
 
 
 def current_head(repo_root: Path) -> str:
@@ -80,6 +84,8 @@ def current_head(repo_root: Path) -> str:
         raise RuntimeError(f"Failed to resolve HEAD in '{repo_root}': {e.stderr.strip()}") from e
     except FileNotFoundError as e:
         raise RuntimeError("Git executable not found in PATH") from e
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(f"Command timed out while resolving HEAD in '{repo_root}'") from e
 
 
 def is_working_tree_clean(repo_root: Path) -> bool:
