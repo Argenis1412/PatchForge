@@ -237,6 +237,16 @@ def apply(
         raise typer.Exit(code=1)
 
     target_path = Path(run_metadata.target_path)
+
+    # 2.5 Verify experiment context if experiment.json is present
+    from orchestrator.schemas.experiment import verify_experiment_or_warn
+
+    try:
+        verify_experiment_or_warn(workspace_mgr, run_id, target_path)
+    except ValueError as exc:
+        console.print(f"[bold red]Validation Error: {exc}[/bold red]")
+        raise typer.Exit(code=1)
+
     logs_dir = workspace_path / "logs"
     run_dir = workspace_mgr.run_dir(run_id)
     patch_path = run_dir / "patch.diff"

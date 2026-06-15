@@ -171,8 +171,14 @@ def scan(
 
     # --- Git metadata ---------------------------------------------------
     git_root = resolve_git_root(target_path)
-    base_commit = current_head(git_root)  # "" for empty repos
-    branch = current_branch(git_root)  # "" for empty repos
+    try:
+        base_commit = current_head(git_root)
+    except RuntimeError:
+        base_commit = ""  # empty repo with no commits
+    try:
+        branch = current_branch(git_root)
+    except RuntimeError:
+        branch = ""  # empty repo with no commits
 
     # --- Static analysis of pyproject.toml ------------------------------
     pyproject, _pyproject_data = _check_pyproject(target_path)

@@ -8,7 +8,8 @@ def _is_absolute_any(p: str) -> bool:
 
 
 def _has_parent_segment(p: str) -> bool:
-    return ".." in PurePosixPath(p).parts or ".." in PureWindowsPath(p).parts
+    norm = p.replace("\\", "/")
+    return ".." in PurePosixPath(norm).parts
 
 
 def validate_filename(name: str) -> str:

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- 🔴 **Validation workspace**: `git add .` + `git commit` now run after `git init` so patches apply correctly to the isolated copy
+- 🔴 **Path traversal (Windows)**: `_has_parent_segment` normalizes `\\` → `/` before checking for parent segments
+- 🔴 **`normalize_git_url`**: lowercasing only on Windows (preserves case-sensitive Linux paths)
+- 🔴 **SSH URL parsing**: 3 explicit regex matchers (ssh-scheme, SCP, HTTP) instead of fragile paired sub — fixes port-number URLs
+- 🟠 **Subprocess timeouts**: `timeout=30` added to all 12 `subprocess.run` git calls
+- 🟠 **Experiment verification**: shared `verify_experiment_or_warn()` extracted to `experiment.py` — replaces duplicate try/except blocks in `preview.py` and `main.py`
+- 🟡 **`Verdict.generated_at`**: `datetime.utcnow` → `datetime.now(timezone.utc)` (Python 3.12 compat)
+- 🟡 **`current_head`/`current_branch`**: raise `RuntimeError` instead of returning `""` silently; scanner handles with `try/except`
+- 🟡 **`get_current_head` docstring**: corrected to match actual behavior (raises `RuntimeError`)
+- 🟡 **`repository_identity`**: added missing `timeout=30`
+
 ## [1.0.0] - 2026-06-08
 
 ### Highlights

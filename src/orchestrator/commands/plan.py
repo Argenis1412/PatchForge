@@ -226,6 +226,37 @@ def execute(
     # 6. Write plan artifact (shared)
     workspace_mgr.write_artifact(run_id, "plan.json", output.model_dump_json(indent=2))
 
+    # 6.5 Write experiment artifact (shared)
+    from orchestrator.git import current_head, repository_identity
+    from orchestrator.schemas.experiment import Experiment
+
+    try:
+        target_sha = current_head(target_path)
+        repo_id = repository_identity(target_path)
+        experiment = Experiment(
+            run_id=run_id,
+            plan=output,
+            target_commit_sha=target_sha,
+            repository_identity=repo_id,
+            workspace_path=workspace_path,
+        )
+        workspace_mgr.write_experiment(run_id, experiment)
+    except RuntimeError as exc:
+        log_failure(
+            trace_id=run_id,
+            run_id=run_id,
+            stage="architect",
+            error_type="experiment_capture_failed",
+            message=str(exc),
+            logs_dir=logs_dir,
+            run_dir=run_dir,
+        )
+        run_metadata.status = "failed"
+        run_metadata.updated_at = datetime.now(timezone.utc)
+        workspace_mgr.write_run_json(run_id, run_metadata)
+        console.print(f"[bold red]Error capturing experiment context: {exc}[/bold red]")
+        raise typer.Exit(code=1)
+
     # 7. Update run metadata (shared)
     files = set()
     for t in output.implementation_plan:

@@ -452,8 +452,8 @@ ADR-0004 must answer exactly five questions:
 - Changes to `ArchitectOutput` or `Task` schema (dependencies field already existed)
 - Provider fallback chain (Bug #2 from Experiment 002, deferred)
 
-### Formalize Experiment Schema (debt P2→P3)
-- **Priority:** P2 | **Status:** 📐 Scoped
+### ✅ Formalize Experiment Schema (debt P2→P3)
+- **Priority:** P2 | **Status:** ✅ **Completed**
 - **Goal:** Formalize "Experiment" as a schema concept carrying execution context (commit SHA, repository identity, workspace path, run ID).
 - **Source:** `dogfooding-vision.md` (Deferred section)
 - **Precondition:** Experiment Artifacts schema complete

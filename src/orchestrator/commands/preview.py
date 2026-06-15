@@ -64,6 +64,15 @@ def execute(
         console.print(f"[bold red]Error reading implementation plan: {exc}[/bold red]")
         raise typer.Exit(code=1)
 
+    # 2.5 Verify experiment context if experiment.json is present
+    from orchestrator.schemas.experiment import verify_experiment_or_warn
+
+    try:
+        verify_experiment_or_warn(workspace_mgr, run_id, target_path)
+    except ValueError as exc:
+        console.print(f"[bold red]Validation Error: {exc}[/bold red]")
+        raise typer.Exit(code=1)
+
     # 3. Bootstrap target environment & load config
     bootstrap_environment(env_file=env_file, target_path=target_path)
     try:
