@@ -1,6 +1,7 @@
 import pytest
 
-from orchestrator.agents.executor import _build_dag, _topological_order, run
+from orchestrator.agents.executor import run
+from orchestrator.agents.executor.scheduler import _build_dag, _topological_order
 from orchestrator.exceptions import CycleDetectedError, SchedulerInvariantError
 from orchestrator.schemas.architect_output import ArchitectOutput, Task
 from orchestrator.schemas.config import TargetConfig
@@ -124,7 +125,7 @@ def test_topological_cycle():
 def test_linear_dag(tmp_path, monkeypatch):
     """Test 1: Linear DAG A -> B -> C, all APPLIED."""
     monkeypatch.setattr(
-        "orchestrator.agents.executor._apply_task",
+        "orchestrator.agents.executor.applier._apply_task",
         lambda task, *a, **kw: _change(task.task_id, TaskStatus.APPLIED),
     )
     tasks = [_make_task("A"), _make_task("B", ["A"]), _make_task("C", ["B"])]
@@ -138,7 +139,7 @@ def test_linear_dag(tmp_path, monkeypatch):
 def test_diamond_dag(tmp_path, monkeypatch):
     """Test 2: Diamond A -> B, A -> C, B -> D, C -> D."""
     monkeypatch.setattr(
-        "orchestrator.agents.executor._apply_task",
+        "orchestrator.agents.executor.applier._apply_task",
         lambda task, *a, **kw: _change(task.task_id, TaskStatus.APPLIED),
     )
     tasks = [
@@ -160,7 +161,7 @@ def test_diamond_partial_failure(tmp_path, monkeypatch):
     def mock_apply(task, *a, **kw):
         return _change(task.task_id, results[task.task_id])
 
-    monkeypatch.setattr("orchestrator.agents.executor._apply_task", mock_apply)
+    monkeypatch.setattr("orchestrator.agents.executor.applier._apply_task", mock_apply)
     tasks = [
         _make_task("A"),
         _make_task("B", ["A"]),
@@ -179,7 +180,7 @@ def test_diamond_partial_failure(tmp_path, monkeypatch):
 def test_cycle_detected(tmp_path, monkeypatch):
     """Test 4: Cycle A -> B -> C -> A -> CycleDetectedError."""
     monkeypatch.setattr(
-        "orchestrator.agents.executor._apply_task",
+        "orchestrator.agents.executor.applier._apply_task",
         lambda task, *a, **kw: _change(task.task_id, TaskStatus.APPLIED),
     )
     tasks = [_make_task("A", ["C"]), _make_task("B", ["A"]), _make_task("C", ["B"])]
@@ -191,7 +192,7 @@ def test_cycle_detected(tmp_path, monkeypatch):
 def test_missing_dependency(tmp_path, monkeypatch):
     """Test 5: Missing dependency -> SchedulerInvariantError."""
     monkeypatch.setattr(
-        "orchestrator.agents.executor._apply_task",
+        "orchestrator.agents.executor.applier._apply_task",
         lambda task, *a, **kw: _change(task.task_id, TaskStatus.APPLIED),
     )
     tasks = [_make_task("A", ["BOGUS"])]
@@ -203,7 +204,7 @@ def test_missing_dependency(tmp_path, monkeypatch):
 def test_noop_task(tmp_path, monkeypatch):
     """Test 6: No-op task produces NOOP status and diff=None."""
     monkeypatch.setattr(
-        "orchestrator.agents.executor._apply_task",
+        "orchestrator.agents.executor.applier._apply_task",
         lambda task, *a, **kw: _change(task.task_id, TaskStatus.NOOP),
     )
     tasks = [_make_task("A")]
@@ -216,7 +217,7 @@ def test_noop_task(tmp_path, monkeypatch):
 def test_no_dependencies(tmp_path, monkeypatch):
     """Test 7: Single task with empty deps -> APPLIED normally."""
     monkeypatch.setattr(
-        "orchestrator.agents.executor._apply_task",
+        "orchestrator.agents.executor.applier._apply_task",
         lambda task, *a, **kw: _change(task.task_id, TaskStatus.APPLIED),
     )
     tasks = [_make_task("A")]
@@ -233,7 +234,7 @@ def test_mixed_states(tmp_path, monkeypatch):
     def mock_apply(task, *a, **kw):
         return _change(task.task_id, results[task.task_id])
 
-    monkeypatch.setattr("orchestrator.agents.executor._apply_task", mock_apply)
+    monkeypatch.setattr("orchestrator.agents.executor.applier._apply_task", mock_apply)
     tasks = [_make_task("A"), _make_task("B", ["A"]), _make_task("C", ["A"])]
     output, _ = run(_arch_out(tasks), config=_cfg(tmp_path))
     assert len(output.applied) == 2  # A, B
@@ -249,7 +250,7 @@ def test_pending_review_blocks_downstream(tmp_path, monkeypatch):
     def mock_apply(task, *a, **kw):
         return _change(task.task_id, results[task.task_id])
 
-    monkeypatch.setattr("orchestrator.agents.executor._apply_task", mock_apply)
+    monkeypatch.setattr("orchestrator.agents.executor.applier._apply_task", mock_apply)
     tasks = [_make_task("A"), _make_task("B", ["A"])]
     output, _ = run(_arch_out(tasks), config=_cfg(tmp_path))
     # A in pending_review, B in errors (SKIPPED)
@@ -269,7 +270,7 @@ def test_multi_file_task_partial_error(tmp_path, monkeypatch):
         f = task.files_to_modify[0]
         return _change(task.task_id, file_results[f])
 
-    monkeypatch.setattr("orchestrator.agents.executor._apply_task", mock_apply)
+    monkeypatch.setattr("orchestrator.agents.executor.applier._apply_task", mock_apply)
     a = Task(
         task_id="A",
         title="multi-file",
@@ -297,7 +298,7 @@ def test_long_cascade(tmp_path, monkeypatch):
     def mock_apply(task, *a, **kw):
         return _change(task.task_id, results.get(task.task_id, TaskStatus.APPLIED))
 
-    monkeypatch.setattr("orchestrator.agents.executor._apply_task", mock_apply)
+    monkeypatch.setattr("orchestrator.agents.executor.applier._apply_task", mock_apply)
     tasks = [
         _make_task("A"),
         _make_task("B", ["A"]),

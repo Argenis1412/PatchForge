@@ -73,18 +73,23 @@
 
 ---
 
-## Phase 4 — `agents/executor.py` → `agents/executor/` ⚠️ 70% risk
+## Phase 4 — `agents/executor.py` → `agents/executor/` ✅ (done)
 
-**Risk:** High — provider failover, circuit breaker, DAG scheduling, task application.
+**Branch:** `feat/phase-4-executor`
+**Commit:** `f8f32fc`
+
+**Risk:** Medium — provider failover, circuit breaker, DAG scheduling, task application.
+Mitigated by full dependency audit before extraction.
 
 | File | Content |
 |------|---------|
-| `agents/executor/__init__.py` | Re-export `run()` |
-| `agents/executor/providers.py` | Provider orchestration, circuit breaker |
+| `agents/executor/__init__.py` | `run()`, `PROJECT_ROOT`, `__main__`, re-exports `rollback_to_commit` |
+| `agents/executor/logging.py` | `_logger`, `_get_logger()` singleton |
+| `agents/executor/providers.py` | Provider orchestration, circuit breaker, `_call_chain` |
 | `agents/executor/scheduler.py` | `_build_dag()`, `_topological_order()` |
-| `agents/executor/applier.py` | Task application logic |
+| `agents/executor/applier.py` | `_build_prompt()`, `_apply_task()` |
 | `agents/executor/rollback.py` | `rollback_to_commit()`, revert |
-| `agents/executor/diffing.py` | Consolidated diff generation |
+| `agents/executor/diffing.py` | `_make_diff()` — consolidated diff generation |
 
 ---
 
@@ -143,7 +148,7 @@ Only after all refactoring phases are stable.
 ```bash
 ruff check .             # 0 errors
 ruff format --check .    # clean
-pytest -v                # 330 passed, 2 skipped
+pytest -v                # 332 passed, 2 skipped
 ```
 
 Commit format: `<type>(<scope>): <message>` (English only)

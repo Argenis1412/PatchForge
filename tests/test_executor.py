@@ -26,17 +26,17 @@ def test_executor_run_returns_tuple(mock_gemini, tmp_path):
 
 @pytest.mark.unit
 def test_executor_get_logger_uses_shared_helper(tmp_path, monkeypatch):
-    import orchestrator.agents.executor as exec_mod
+    import orchestrator.agents.executor.logging as exec_logging
 
-    exec_mod._logger = None
+    exec_logging._logger = None
     for h in list(logging.getLogger("executor").handlers):
         logging.getLogger("executor").removeHandler(h)
         h.close()
 
-    mock = MagicMock(wraps=exec_mod.get_file_logger)
-    monkeypatch.setattr("orchestrator.agents.executor.get_file_logger", mock)
+    mock = MagicMock(wraps=exec_logging.get_file_logger)
+    monkeypatch.setattr("orchestrator.agents.executor.logging.get_file_logger", mock)
 
-    exec_mod._get_logger(tmp_path)
+    exec_logging._get_logger(tmp_path)
     mock.assert_called_once_with("executor", tmp_path, "executor.log")
 
 
@@ -88,7 +88,7 @@ def test_accumulated_changes_same_file(tmp_path, monkeypatch):
     ]
     cb_gemini_mock = MagicMock()
     cb_gemini_mock.call.side_effect = lambda fn: returns.pop(0)
-    monkeypatch.setattr("orchestrator.agents.executor._cb_gemini", cb_gemini_mock)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini_mock)
 
     output, meta = run(arch_out, config=config, staging_dir=staging_dir)
 
@@ -138,7 +138,7 @@ def test_rollback_to_commit_failure(monkeypatch):
 
 @pytest.mark.unit
 def test_apply_task_rejects_path_traversal(tmp_path):
-    from orchestrator.agents.executor import _apply_task
+    from orchestrator.agents.executor.applier import _apply_task
     from orchestrator.exceptions import PathSafetyError
     from orchestrator.schemas.architect_output import Task
 

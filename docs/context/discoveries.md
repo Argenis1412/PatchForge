@@ -109,6 +109,38 @@
 - **Why deferred:** Fix would be a behavioral change; explicitly out of scope for T-07 Part A (structural only). Deferred to T-07 Part C (#90) which explicitly preserved the bare-raise behavior as part of scout's error-surface contract. This design decision creates the debt documented above. Remains unresolved pending future issue.
 
 
+### [2026-06-15] Phase 4 — Provider clients lack consistent timeout
+
+- **File:** `src/orchestrator/clients/gemini_client.py:11`, `anthropic_client.py:11`, `groq_client.py:16`
+- **Debt:** All three provider clients have inconsistent or missing timeouts:
+  - Gemini: `genai.Client()` has no timeout — requests can hang indefinitely.
+  - Anthropic: uses SDK default (10 min) instead of `TIMEOUT_SECONDS` (60s).
+  - Groq: hardcodes 30s instead of `TIMEOUT_SECONDS` (60s).
+  The `TIMEOUT_SECONDS` constant exists in `providers.py` but no client consumes it.
+- **Discovered by:** CodeRabbit AI review during Phase 4
+- **Why deferred:** Clients live in `clients/*.py`, outside the executor extraction scope. Fixing requires deciding between per-request timeout (less invasive) or refactoring `get_*_client()` to accept a timeout parameter.
+
+### [2026-06-15] Phase 4 — `__init__.py` import binding prevents submodule monkeypatch
+
+- **File:** `src/orchestrator/agents/executor/__init__.py` (general pattern)
+- **Debt:** When `__init__.py` does `from .applier import _apply_task`, the binding is captured at import time. Monkeypatching `applier._apply_task` does not affect `run()`. The fix was to import the module (`from . import applier as _applier`) and access via `_applier._apply_task()`. This pattern is not documented as a convention, making it easy to reintroduce the bug in future extractions (Phase 5-7).
+- **Discovered by:** Phase 4 execution (8 tests failed due to ineffective monkeypatch)
+- **Why deferred:** Pattern already applied in executor; fixing retroactively in scout/architect/validator is out of scope. Document as a guideline for phases 5-7.
+
+### [2026-06-15] Phase 4 — Dead `mock_groq` fixture in conftest.py
+
+- **File:** `tests/conftest.py:30-37`
+- **Debt:** The `mock_groq` fixture patches `orchestrator.agents.executor._call_groq` but no test in the suite uses it. Dead code. Furthermore, even if a test did use it, it would not work — `_PROVIDER_CHAIN` stores references to `_call_groq` at import time, so the monkeypatch would have no effect.
+- **Discovered by:** Phase 4 dependency audit
+- **Why deferred:** Outside refactor scope. Clean up in a housekeeping issue.
+
+### [2026-06-15] Phase 4 — `PROJECT_ROOT` depends on `__file__` — brittle on relocation
+
+- **File:** `src/orchestrator/agents/executor/__init__.py:25-27`
+- **Debt:** `PROJECT_ROOT` resolves via `Path(__file__).resolve().parent.parent.parent.parent`. This required an extra `.parent` when moving from `executor.py` to `executor/__init__.py`. Every time a module moves within the `agents/` tree, any `__file__`-based path constant silently breaks. Should use `PROJECT_ROOT` from a shared module or always via environment variable.
+- **Discovered by:** Phase 4 execution
+- **Why deferred:** Pre-existing behavior in scout, architect, validator. Do not change without a unified strategy for all 4 agents.
+
 ### [2026-06-14] Issue #100 — Agent fallback inconsistency
 
 - **File:** `src/orchestrator/agents/validator.py`
