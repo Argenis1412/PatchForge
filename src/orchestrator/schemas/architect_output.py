@@ -1,3 +1,10 @@
+"""Output contract for the Architect agent."""
+
+__all__ = [
+    "ArchitectOutput",
+    "Task",
+]
+
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field

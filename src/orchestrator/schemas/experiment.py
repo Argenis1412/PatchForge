@@ -1,4 +1,13 @@
+"""Experiment context: captures plan + target state for reproducibility verification."""
+
 from __future__ import annotations
+
+__all__ = [
+    "CURRENT_EXPERIMENT_SCHEMA_VERSION",
+    "Experiment",
+    "Verdict",
+    "verify_experiment_or_warn",
+]
 
 from datetime import datetime, timezone
 from pathlib import Path

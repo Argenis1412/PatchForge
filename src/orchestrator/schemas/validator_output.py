@@ -1,9 +1,11 @@
-"""
-schemas/validator_output.py
-Output contract of the Validator. Defines the result of each tool and the global summary.
-"""
+"""Output contract of the Validator. Defines the result of each tool and the global summary."""
 
 from __future__ import annotations
+
+__all__ = [
+    "ToolResult",
+    "ValidatorOutput",
+]
 
 from typing import Literal
 

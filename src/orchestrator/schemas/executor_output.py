@@ -1,9 +1,12 @@
-"""
-schemas/executor_output.py
-Output contract for the Executor agent. Defines what happened with each task.
-"""
+"""Output contract for the Executor agent. Defines what happened with each task."""
 
 from __future__ import annotations
+
+__all__ = [
+    "ExecutorOutput",
+    "FileChange",
+    "TaskStatus",
+]
 
 from enum import Enum
 

@@ -1,3 +1,11 @@
+"""Legacy pipeline run schema. Tracks per-agent metadata and task results."""
+
+__all__ = [
+    "AgentMeta",
+    "PipelineRun",
+    "TaskResult",
+]
+
 import uuid
 from datetime import datetime
 from typing import List, Optional
