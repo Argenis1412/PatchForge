@@ -204,16 +204,6 @@ def _is_name_eq_main(if_node: ast.If) -> bool:
             and comparators[0].value == "__main__"
         ):
             return True
-    if isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.ops[0], ast.Eq):
-        left = test.left
-        comparators = test.comparators
-        if (
-            isinstance(left, ast.Attribute)
-            and isinstance(left.value, ast.Name)
-            and left.value.id == "__name__"
-            and left.attr == "__main__"
-        ):
-            return True
     return False
 
 
@@ -292,7 +282,7 @@ def _check_readability(files: list[tuple[Path, str]]) -> list[QualityCheck]:
             if _has_docstring(tree.body):
                 clean_docs += 1
 
-        for node in ast.walk(tree):
+        for node in tree.body:
             if isinstance(node, ast.ClassDef):
                 if _is_public(node.name) and not _is_test_file(rel):
                     total_docs += 1
@@ -308,18 +298,19 @@ def _check_readability(files: list[tuple[Path, str]]) -> list[QualityCheck]:
                             total_docs += 1
                             if _has_docstring(item.body):
                                 clean_docs += 1
-                            total_annotations += 1
-                            if _has_full_annotations(item):
-                                clean_annotations += 1
+                            if not _is_overload_decorator(item):
+                                total_annotations += 1
+                                if _has_full_annotations(item):
+                                    clean_annotations += 1
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if (
-                    _is_public(node.name)
-                    and not _is_test_file(rel)
-                    and not _is_overload_decorator(node)
-                ):
-                    total_annotations += 1
-                    if _has_full_annotations(node):
-                        clean_annotations += 1
+                if _is_public(node.name) and not _is_test_file(rel):
+                    total_docs += 1
+                    if _has_docstring(node.body):
+                        clean_docs += 1
+                    if not _is_overload_decorator(node):
+                        total_annotations += 1
+                        if _has_full_annotations(node):
+                            clean_annotations += 1
 
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -507,13 +498,11 @@ def _check_hygiene(files: list[tuple[Path, str]]) -> list[QualityCheck]:
             if not has_stray_print:
                 clean_prints += 1
 
-    score_todos = (
-        int(max(0.0, 100.0 - violations_todos * 10.0))
-        if total_kloc <= 0
-        else _score_from_ratio(
-            int(max(0, total_kloc - violations_todos)), int(total_kloc) + 1, multiplier=10.0
-        )
-    )
+    if total_kloc <= 0:
+        score_todos = int(max(0.0, 100.0 - violations_todos * 10.0))
+    else:
+        ratio = violations_todos / total_kloc
+        score_todos = int(max(0.0, 100.0 - ratio * 100.0 * 10.0))
 
     checks = [
         QualityCheck(
