@@ -1,3 +1,5 @@
+"""LLM-based error summarizer for validation failures using Gemini."""
+
 import os
 import time
 

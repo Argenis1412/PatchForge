@@ -6,6 +6,11 @@ Frontmatter uses a naive YAML-subset parser — no external dependencies.
 
 from __future__ import annotations
 
+__all__ = [
+    "IssueInput",
+    "parse_issue_markdown",
+]
+
 from typing import Literal
 
 from pydantic import BaseModel, Field

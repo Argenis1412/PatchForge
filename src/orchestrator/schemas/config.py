@@ -1,3 +1,14 @@
+"""Target configuration: loading, detection, and validation of workspace paths."""
+
+__all__ = [
+    "SCHEMA_VERSION",
+    "TargetCapabilities",
+    "TargetConfig",
+    "default_workspace_path",
+    "detect_capabilities",
+    "validate_workspace_path",
+]
+
 import hashlib
 import json
 import os

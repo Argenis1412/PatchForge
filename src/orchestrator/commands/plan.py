@@ -1,3 +1,9 @@
+"""Plan command: runs the Architect agent to produce an implementation plan."""
+
+__all__ = [
+    "execute",
+]
+
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional

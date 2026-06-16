@@ -1,3 +1,5 @@
+"""Subprocess runners for ruff, pytest, and tsc with overlay workspace support."""
+
 import shutil
 import subprocess
 import tempfile

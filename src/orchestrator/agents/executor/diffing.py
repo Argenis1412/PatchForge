@@ -1,3 +1,5 @@
+"""Unified diff generation utility for executor changes."""
+
 from __future__ import annotations
 
 import difflib

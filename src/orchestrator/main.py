@@ -1,3 +1,9 @@
+"""PatchForge CLI entrypoint."""
+
+__all__ = [
+    "app",
+]
+
 import sys
 from pathlib import Path
 from typing import Optional
@@ -35,7 +41,7 @@ def _load_target_config(
 def doctor(
     path: Path = typer.Argument(..., help="Target project path"),
     json_output: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
-):
+) -> None:
     """Validate V1 repository readiness without modifying the target."""
     from orchestrator.doctor import check as doctor_check
     from orchestrator.schemas.doctor import CheckStatus
@@ -90,7 +96,7 @@ def run(
         default=None,
         help="Ignored. Deprecated command.",
     ),
-):
+) -> None:
     """Deprecated. Use doctor, scan, plan, preview, and apply instead."""
     console.print(
         "[yellow]Warning: `patchforge run` is deprecated and hidden in V1.\n\n"
@@ -115,7 +121,7 @@ def scan(
         "--risk-budget",
         help="Risk budget: 'low', 'medium', or 'high'",
     ),
-):
+) -> None:
     """Scan a target project using deterministic analysis (no AI)."""
     from orchestrator.commands.scan import execute as execute_scan
 
@@ -140,7 +146,7 @@ def plan(
     workspace: Optional[Path] = typer.Option(
         None, "--workspace", help="Path to the workspace directory"
     ),
-):
+) -> None:
     """Run the Architect agent to generate an implementation plan for a run."""
     from orchestrator.commands.plan import execute as execute_plan
 
@@ -154,7 +160,7 @@ def preview(
     workspace: Optional[Path] = typer.Option(
         None, "--workspace", help="Path to the workspace directory"
     ),
-):
+) -> None:
     """Generate and validate a unified patch without modifying the target repository."""
     from orchestrator.commands.preview import execute as execute_preview
 
@@ -173,7 +179,7 @@ def apply(
     workspace: Optional[Path] = typer.Option(
         None, "--workspace", help="Path to the workspace directory"
     ),
-):
+) -> None:
     """Apply the validated patch to the target repository."""
     from orchestrator.commands.apply import execute as execute_apply
 

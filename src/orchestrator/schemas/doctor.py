@@ -1,4 +1,12 @@
+"""Doctor check schemas: CheckStatus, CheckResult, DoctorResult models."""
+
 from __future__ import annotations
+
+__all__ = [
+    "CheckResult",
+    "CheckStatus",
+    "DoctorResult",
+]
 
 from enum import Enum
 from typing import Optional

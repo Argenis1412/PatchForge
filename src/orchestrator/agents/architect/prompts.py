@@ -1,3 +1,5 @@
+"""Prompt templates for the Architect agent."""
+
 ARCHITECT_PROMPT = """
 You are the Architect Agent. Your job is to analyze the reconnaissance data
 provided by the Scout Agent.

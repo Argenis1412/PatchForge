@@ -1,3 +1,5 @@
+"""Claude (Anthropic) provider wrapper with retry, cost tracking, and observability."""
+
 import time
 from pathlib import Path
 from typing import Optional

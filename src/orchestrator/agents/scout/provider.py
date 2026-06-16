@@ -1,3 +1,5 @@
+"""Gemini (Google) provider wrapper with retry, cost tracking, and markdown stripping."""
+
 import time
 from pathlib import Path
 

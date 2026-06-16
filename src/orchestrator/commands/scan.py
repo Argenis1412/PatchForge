@@ -7,6 +7,10 @@ produce ``findings.json``.  No AI client is imported or invoked.
 
 from __future__ import annotations
 
+__all__ = [
+    "execute",
+]
+
 from datetime import datetime, timezone
 
 import typer

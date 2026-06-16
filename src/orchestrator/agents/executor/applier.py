@@ -1,3 +1,5 @@
+"""Task applier: builds prompts, calls provider chains, generates diffs, writes staging files."""
+
 from __future__ import annotations
 
 from pathlib import Path

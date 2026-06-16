@@ -1,3 +1,13 @@
+"""Scout agent: two-pass AI reconnaissance using Gemini to analyze codebases."""
+
+__all__ = [
+    "PASS1_PROMPT",
+    "PASS2_PROMPT",
+    "read_file_tree",
+    "read_selected_files",
+    "run",
+]
+
 import json
 import os
 import sys
