@@ -110,9 +110,10 @@ Mitigated by Phase 4.5 (import binding convention doc + dead code removal).
 
 ---
 
-## Phase 6 — Docstrings + Types + `__all__`
+## Phase 6 — Docstrings + Types + `__all__` ✅ (done)
 
 **Risk:** Low — no behavior change.
+**Branch:** `docs/phase-6-docstrings-types-all`
 
 | Priority | What | Where |
 |----------|------|-------|
@@ -120,14 +121,35 @@ Mitigated by Phase 4.5 (import binding convention doc + dead code removal).
 | Medium | Return type annotations | `main.py`, `clients/*.py` |
 | Selective | `__all__` | Only `agents/`, `commands/`, `schemas/` |
 
+| Commit | Scope |
+|--------|-------|
+| `0f2388c` | `docs(schemas): add module docstrings and explicit exports` |
+| `7cc0cb3` | `docs(clients): add docstrings and return type annotations` |
+| `1f5d115` | `docs(commands): document command modules and exports` |
+| `d9c5d81` | `docs(agents): document agent packages and public APIs` |
+| `9e38e71` | `docs(cli): document main entrypoint and command signatures` |
+
+### Files changed
+
+| Module | Files | Docstrings | `__all__` | Return types |
+|--------|:----:|:----------:|:---------:|:------------:|
+| `schemas/` | 14 | +10 | +14 | — |
+| `clients/` | 5 | +5 | — | +4 |
+| `commands/` | 5 | +3 | +4 | 0 |
+| `agents/` | 17 | +17 | +4 | — |
+| `main.py` | 1 | +1 | +1 | +6 |
+
 ---
 
-## Phase 7 — Final cleanup
+## Phase 7 — Final cleanup ✅ (done)
 
-- Verify no circular imports
-- `ruff check .` → 0 errors
-- `ruff format --check .` → clean
-- `pytest` → same results as baseline
+**Branch:** `chore/phase-7-final-cleanup`
+**Commit:** Working tree clean — no files changed.
+
+- Circular imports: All **61 modules** imported OK
+- `ruff check .` → **0 errors**
+- `ruff format --check .` → **clean**
+- `pytest` → **332 passed, 2 skipped**
 
 ---
 
