@@ -9,6 +9,15 @@ are found where AI-based Scout output is expected.
 
 from __future__ import annotations
 
+__all__ = [
+    "Hotspot",
+    "PyProjectInfo",
+    "PythonPackageInfo",
+    "ScanFindings",
+    "TestSuiteInfo",
+    "ToolInfo",
+]
+
 from typing import Optional
 
 from pydantic import BaseModel

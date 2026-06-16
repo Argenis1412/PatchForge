@@ -1,3 +1,5 @@
+"""Git rollback utility to reset repository to a target commit."""
+
 from __future__ import annotations
 
 from pathlib import Path

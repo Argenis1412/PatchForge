@@ -1,3 +1,9 @@
+"""Risk gate result model."""
+
+__all__ = [
+    "RiskGateResult",
+]
+
 from pydantic import BaseModel
 
 

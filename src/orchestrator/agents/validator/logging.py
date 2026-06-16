@@ -1,3 +1,5 @@
+"""Validator-specific file logger."""
+
 from pathlib import Path
 
 _logger = None

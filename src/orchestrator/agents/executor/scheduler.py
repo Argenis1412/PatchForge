@@ -1,3 +1,5 @@
+"""DAG builder and topological sorter for executor tasks."""
+
 from __future__ import annotations
 
 from orchestrator.exceptions import CycleDetectedError, SchedulerInvariantError

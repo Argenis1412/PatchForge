@@ -1,10 +1,16 @@
+"""Environment bootstrapper: loads .env files from multiple locations."""
+
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Optional
 
 _ENV_LOADED = False
 
 
-def bootstrap_environment(env_file: Optional[Path] = None, target_path: Optional[Path] = None):
+def bootstrap_environment(
+    env_file: Optional[Path] = None, target_path: Optional[Path] = None
+) -> None:
     global _ENV_LOADED
     if _ENV_LOADED and env_file is None:
         return

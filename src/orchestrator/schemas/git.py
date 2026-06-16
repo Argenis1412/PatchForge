@@ -1,4 +1,14 @@
+"""Git-related schema models: command results, repository state, validation workspace."""
+
 from __future__ import annotations
+
+__all__ = [
+    "ApplyCheckStatus",
+    "GitCommandResult",
+    "RepositoryState",
+    "ValidationWorkspace",
+    "WorkingTreeStatus",
+]
 
 from enum import Enum
 from pathlib import Path

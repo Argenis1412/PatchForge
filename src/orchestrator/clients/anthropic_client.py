@@ -1,9 +1,17 @@
+"""Anthropic (Claude) API client singleton."""
+
+from __future__ import annotations
+
 import os
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import anthropic
 
 _client = None
 
 
-def get_anthropic_client():
+def get_anthropic_client() -> anthropic.Anthropic:
     global _client
     if _client is None:
         import anthropic
