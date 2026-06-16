@@ -483,7 +483,7 @@ def _check_hygiene(files: list[tuple[Path, str]]) -> list[QualityCheck]:
         total_wildcard += 1
         has_wildcard = False
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.star:
+            if isinstance(node, ast.ImportFrom) and any(n.name == "*" for n in node.names):
                 has_wildcard = True
                 break
         if not has_wildcard:
