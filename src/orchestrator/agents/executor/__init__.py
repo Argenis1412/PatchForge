@@ -27,8 +27,6 @@ PROJECT_ROOT = Path(
     os.getenv("PROJECT_ROOT", str(Path(__file__).resolve().parent.parent.parent.parent))
 )
 
-LOGS_DIR = Path(__file__).resolve().parent.parent.parent / "logs"
-
 # ---------------------------------------------------------------------------
 # Public Entrypoint
 # ---------------------------------------------------------------------------
