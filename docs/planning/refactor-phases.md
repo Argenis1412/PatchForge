@@ -110,9 +110,12 @@ Mitigated by Phase 4.5 (import binding convention doc + dead code removal).
 
 ---
 
-## Phase 6 — Docstrings + Types + `__all__`
+## Phase 6 — Docstrings + Types + `__all__` ✅ (done)
 
 **Risk:** Low — no behavior change.
+**PR:** #111
+
+Docstrings, return type annotations, and `__all__` across 42 files in `schemas/`, `clients/`, `commands/`, `agents/`, and `main.py`.
 
 | Priority | What | Where |
 |----------|------|-------|
@@ -122,7 +125,7 @@ Mitigated by Phase 4.5 (import binding convention doc + dead code removal).
 
 ---
 
-## Phase 7 — Final cleanup
+## Phase 7 — Final cleanup ✅ (done)
 
 - Verify no circular imports
 - `ruff check .` → 0 errors
@@ -131,21 +134,39 @@ Mitigated by Phase 4.5 (import binding convention doc + dead code removal).
 
 ---
 
-## Post-refactor — `scanners/quality.py`
+## Post-refactor — `scanners/quality.py` ✅ (done)
 
-Only after all refactoring phases are stable.
+Implemented on `feat/quality-scanner`:
 
-- Follows `scanners/python.py` pattern (deterministic, `ast`, `os.walk`)
-- Output: Pydantic `QualityReport` consumable by AI agents
-- 12 checks across 4 dimensions: readability, complexity, safety, hygiene
+| File | Content |
+|------|---------|
+| `schemas/quality.py` | `QualityCheck`, `QualityDimension`, `QualityReport` |
+| `scanners/quality.py` | `scan()` — 11 checks across 4 dimensions |
+| `tests/test_quality_scan.py` | 22 tests, all passing |
+
+### 11 checks
+
+| Dimension | Check | Model | Multiplier |
+|-----------|-------|-------|:----------:|
+| readability | missing-docstrings | public symbol ratio | 1 |
+| readability | missing-annotations | public function ratio | 1 |
+| readability | long-functions | all-function ratio | 1 |
+| complexity | deep-nesting | function-with-blocks ratio | 1 |
+| safety | bare-except | except-handler ratio | 1 |
+| safety | dangerous-apis | file ratio | 3 |
+| safety | assert-in-nontest | non-test file ratio | 1 |
+| hygiene | large-files | file ratio | 1 |
+| hygiene | todos | per-KLOC ratio | 10 |
+| hygiene | stray-prints | non-excluded file ratio | 2 |
+| hygiene | wildcard-imports | file ratio | 1 |
+
+All deterministic — pure AST + filesystem, zero external dependencies.
 
 ---
 
 ## Known issues (pre-existing, not introduced by refactoring)
 
-- `runners.run_ruff()` mutates `cmd_override` via `cmd.extend()` when staged
-  files exist. Caller-provided list is polluted. Pre-dates extraction from
-  original `validator.py` line 195.
+*none*
 
 ---
 
