@@ -11,6 +11,7 @@ from __future__ import annotations
 __all__ = [
     "QualityCheck",
     "QualityDimension",
+    "QualityReport",
 ]
 
 from pydantic import BaseModel
@@ -31,3 +32,10 @@ class QualityDimension(BaseModel):
     name: str
     score: int
     checks: list[QualityCheck]
+
+
+class QualityReport(BaseModel):
+    """Root model for the deterministic quality scanner output."""
+
+    overall_score: int
+    dimensions: dict[str, QualityDimension]
