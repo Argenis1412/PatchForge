@@ -1,3 +1,9 @@
+"""Preview command: generates patch via Executor and validates via Validator."""
+
+__all__ = [
+    "execute",
+]
+
 import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
