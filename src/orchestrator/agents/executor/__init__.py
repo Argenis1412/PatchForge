@@ -1,4 +1,12 @@
+"""Executor agent: executes planned tasks via LLM providers with DAG scheduling."""
+
 from __future__ import annotations
+
+__all__ = [
+    "PROJECT_ROOT",
+    "rollback_to_commit",
+    "run",
+]
 
 import json
 import os

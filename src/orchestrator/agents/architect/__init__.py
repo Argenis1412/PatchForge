@@ -1,3 +1,10 @@
+"""Architect agent: generates implementation plans from Scout output or issue files."""
+
+__all__ = [
+    "run",
+    "run_from_issue",
+]
+
 import json
 import sys
 from pathlib import Path

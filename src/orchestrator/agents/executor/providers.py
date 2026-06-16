@@ -1,3 +1,5 @@
+"""Multi-provider LLM chain (Gemini, Groq, Claude) with circuit breakers and fallback."""
+
 from __future__ import annotations
 
 import os

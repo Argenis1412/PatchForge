@@ -1,4 +1,10 @@
+"""Validator agent: runs linting, tests, and type-checking tools against staged changes."""
+
 from __future__ import annotations
+
+__all__ = [
+    "run",
+]
 
 import uuid
 from datetime import datetime, timezone
