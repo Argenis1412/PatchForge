@@ -120,12 +120,12 @@
 - **Discovered by:** CodeRabbit AI review during Phase 4
 - **Why deferred:** Clients live in `clients/*.py`, outside the executor extraction scope. Fixing requires deciding between per-request timeout (less invasive) or refactoring `get_*_client()` to accept a timeout parameter.
 
-### [2026-06-15] Phase 4 — `__init__.py` import binding prevents submodule monkeypatch
+### ✅ [2026-06-15] Phase 4 — `__init__.py` import binding prevents submodule monkeypatch (RESOLVED)
 
 - **File:** `src/orchestrator/agents/executor/__init__.py` (general pattern)
 - **Debt:** When `__init__.py` does `from .applier import _apply_task`, the binding is captured at import time. Monkeypatching `applier._apply_task` does not affect `run()`. The fix was to import the module (`from . import applier as _applier`) and access via `_applier._apply_task()`. This pattern is not documented as a convention, making it easy to reintroduce the bug in future extractions (Phase 5-7).
 - **Discovered by:** Phase 4 execution (8 tests failed due to ineffective monkeypatch)
-- **Why deferred:** Pattern already applied in executor; fixing retroactively in scout/architect/validator is out of scope. Document as a guideline for phases 5-7.
+- **Resolution:** Phase 4.5 — `docs/import-convention.md` documents the lazy import pattern inside function bodies, with GOOD/BAD examples and a monkeypatch rationale.
 
 ### [2026-06-15] Phase 4 — Dead `mock_groq` fixture in conftest.py
 
