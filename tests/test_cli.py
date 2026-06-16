@@ -137,7 +137,7 @@ def test_apply_rollback_block1(tmp_path, monkeypatch):
         lambda *a, **kw: GitCommandResult(return_code=1, stdout="", stderr="reset failed"),
     )
 
-    with patch("orchestrator.main.bootstrap_environment"):
+    with patch("orchestrator.commands.apply.bootstrap_environment"):
         result = runner.invoke(
             app,
             ["apply", "test-run", "--workspace", str(ws), "--allow-dirty"],
@@ -176,7 +176,7 @@ def test_apply_rollback_block2_fail(tmp_path, monkeypatch):
         lambda *a, **kw: (_MockPostVal(), {}),
     )
 
-    with patch("orchestrator.main.bootstrap_environment"):
+    with patch("orchestrator.commands.apply.bootstrap_environment"):
         result = runner.invoke(
             app,
             ["apply", "test-run", "--workspace", str(ws), "--allow-dirty"],
@@ -215,7 +215,7 @@ def test_apply_rollback_block2_success(tmp_path, monkeypatch):
         lambda *a, **kw: (_MockPostVal(), {}),
     )
 
-    with patch("orchestrator.main.bootstrap_environment"):
+    with patch("orchestrator.commands.apply.bootstrap_environment"):
         result = runner.invoke(
             app,
             ["apply", "test-run", "--workspace", str(ws), "--allow-dirty"],

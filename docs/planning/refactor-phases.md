@@ -93,14 +93,20 @@ Mitigated by full dependency audit before extraction.
 
 ---
 
-## Phase 5 — `main.py` → `commands/apply.py`
+## Phase 5 — `main.py` → `commands/apply.py` ✅ (done)
+
+**Branch:** `refactor/extract-apply-from-main`
+**Commit:** `9fa76de`
 
 **Risk:** Medium — public CLI, but `commands/*.py` pattern already exists.
+Mitigated by Phase 4.5 (import binding convention doc + dead code removal).
 
 | File | Content |
 |------|---------|
-| `commands/apply.py` | `apply()` (406 lines) |
-| `main.py` | ~100 lines (Typer definition + delegation only) |
+| `commands/apply.py` | `execute()` (406 lines, verbatim from `main.py`) |
+| `main.py` | ~155 lines (Typer definitions, `_load_target_config`, delegation only) |
+| `test_cli.py` | 3 `patch()` paths updated to `orchestrator.commands.apply.bootstrap_environment` |
+| `docs/import-convention.md` | Lazy import pattern documented (Phase 4.5) |
 
 ---
 

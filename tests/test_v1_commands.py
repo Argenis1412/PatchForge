@@ -361,6 +361,8 @@ def test_apply_failure_triggers_force_reset(target_repo: Path, workspace_dir: Pa
     assert apply_json_path.exists()
     apply_data = json.loads(apply_json_path.read_text())
     assert apply_data["success"] is False
+    assert apply_data["rolled_back"] is True
+    assert apply_data["rollback_head"] is not None
     assert apply_data["pre_apply_head"] is not None
     assert apply_data["pre_apply_branch"] is not None
     assert "apply failed" in apply_data["error"]
@@ -368,7 +370,7 @@ def test_apply_failure_triggers_force_reset(target_repo: Path, workspace_dir: Pa
     run_json_path = workspace_dir / "runs" / run_id / "run.json"
     run_data = json.loads(run_json_path.read_text())
     assert run_data["status"] == "failed"
-    assert run_data["apply_status"] == "failed"
+    assert run_data["apply_status"] == "rolled_back"
     assert "apply.json" in run_data["failure_artifacts"]
 
     # Verify working tree is clean (rollback succeeded)
