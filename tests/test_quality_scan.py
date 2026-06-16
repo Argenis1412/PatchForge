@@ -151,11 +151,13 @@ class TestScanShape:
         assert isinstance(result.overall_score, int)
         assert 0 <= result.overall_score <= 100
 
-    def test_empty_repo_returns_perfect_scores(self, empty_repo: Path) -> None:
+    def test_empty_repo_returns_zero_scores(self, empty_repo: Path) -> None:
         result = scan(empty_repo)
-        assert result.overall_score == 100
+        assert result.overall_score == 0
         for dim in result.dimensions.values():
-            assert dim.score == 100
+            assert dim.score == 0
+            assert all(not check.passed for check in dim.checks)
+            assert all(check.message for check in dim.checks)
 
 
 # ---------------------------------------------------------------------------

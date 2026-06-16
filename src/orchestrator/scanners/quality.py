@@ -568,6 +568,27 @@ def scan(
 
     files = _collect_python_files(target, _ignore)
 
+    if not files:
+        _empty_dimensions = {
+            name: QualityDimension(
+                name=name,
+                score=0,
+                checks=[
+                    QualityCheck(
+                        id=check_id, passed=False, score=0, message="No Python files found"
+                    )
+                    for check_id in check_ids
+                ],
+            )
+            for name, check_ids in {
+                "readability": ["missing-docstrings", "missing-annotations", "long-functions"],
+                "complexity": ["deep-nesting"],
+                "safety": ["bare-except", "dangerous-apis", "assert-in-nontest"],
+                "hygiene": ["large-files", "todos", "stray-prints", "wildcard-imports"],
+            }.items()
+        }
+        return QualityReport(overall_score=0, dimensions=_empty_dimensions)
+
     readability_checks = _check_readability(files)
     complexity_checks = _check_complexity(files)
     safety_checks = _check_safety(files)
