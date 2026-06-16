@@ -110,9 +110,12 @@ Mitigated by Phase 4.5 (import binding convention doc + dead code removal).
 
 ---
 
-## Phase 6 — Docstrings + Types + `__all__`
+## Phase 6 — Docstrings + Types + `__all__` ✅ (done)
 
 **Risk:** Low — no behavior change.
+**PR:** #111
+
+Docstrings, return type annotations, and `__all__` across 42 files in `schemas/`, `clients/`, `commands/`, `agents/`, and `main.py`.
 
 | Priority | What | Where |
 |----------|------|-------|
