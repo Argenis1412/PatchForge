@@ -251,8 +251,10 @@ def execute(
             run_dir=run_dir,
         )
         # Revert: force reset to pre-apply state
+        rollback_succeeded = False
         try:
             rollback_to_commit(target_path, pre_apply_head)
+            rollback_succeeded = True
         except RollbackError as exc:
             console.print(
                 "[bold red]FATAL: Patch application failed AND the automatic revert also failed. "
@@ -276,13 +278,15 @@ def execute(
             applied_at=datetime.now(timezone.utc),
             branch=branch_name,
             success=False,
+            rolled_back=rollback_succeeded,
             error=apply_res.stderr,
             pre_apply_head=pre_apply_head,
             pre_apply_branch=pre_apply_branch,
+            rollback_head=pre_apply_head if rollback_succeeded else None,
         )
         workspace_mgr.write_artifact(run_id, "apply.json", apply_result.model_dump_json(indent=2))
         run_metadata.status = "failed"
-        run_metadata.apply_status = "failed"
+        run_metadata.apply_status = "rolled_back" if rollback_succeeded else "rollback_failed"
         run_metadata.updated_at = datetime.now(timezone.utc)
         if run_metadata.failure_artifacts is None:
             run_metadata.failure_artifacts = []
