@@ -44,5 +44,4 @@ def bootstrap_environment(
 
     if resolved_path is not None:
         load_dotenv(resolved_path)
-
-    _ENV_LOADED = True
+        _ENV_LOADED = True

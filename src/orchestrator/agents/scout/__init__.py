@@ -122,7 +122,7 @@ def run(
     print(f"[Scout] Pass 1 done | tokens: {tokens1} | cost: ${cost1:.5f}")
 
     try:
-        selected: list[str] = json.loads(raw1)
+        selected_raw = json.loads(raw1)
     except json.JSONDecodeError as e:
         print(f"[Scout] Pass 1 JSON parse error: {e}")
         print(f"[Scout] Raw output:\n{raw1}")
@@ -137,6 +137,32 @@ def run(
             logs_dir=logs_dir,
         )
         raise
+
+    if not isinstance(selected_raw, list):
+        log_failure(
+            trace_id=trace_id or "",
+            run_id=run_id or "",
+            stage="scout",
+            error_type=FailureType.SCHEMA_VALIDATION_ERROR,
+            message="Scout pass1 must return a JSON array of relative file paths",
+            source="agent",
+            data={"span_id": "scout_pass1"},
+            logs_dir=logs_dir,
+        )
+        raise ValueError("Scout pass1 must return a JSON array of relative file paths")
+
+    selected: list[str] = []
+    for rel in selected_raw[:12]:
+        if not isinstance(rel, str):
+            continue
+        try:
+            candidate = (root / rel).resolve()
+            rel_path = candidate.relative_to(root)
+        except (ValueError, OSError, RuntimeError):
+            continue
+        if candidate.is_file():
+            selected.append(str(rel_path))
+
     print(f"[Scout] Selected {len(selected)} files: {selected}")
 
     contents = read_selected_files(root, selected)
