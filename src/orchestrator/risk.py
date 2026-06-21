@@ -29,9 +29,16 @@ def _is_dangerous(path: str) -> bool:
 
     Matches either the basename (e.g. ``Dockerfile``) or a directory prefix
     (e.g. ``.github/workflows/deploy.yml`` matches ``.github/workflows/``).
+    Also matches common variants like ``Dockerfile.prod``, ``Jenkinsfile.ci``,
+    or ``docker-compose.prod.yml``.
     """
     p = Path(path)
-    if p.name in DANGEROUS_PATTERNS:
+    name = p.name
+    if name in DANGEROUS_PATTERNS:
+        return True
+    if name.startswith("Dockerfile.") or name.startswith("Jenkinsfile."):
+        return True
+    if name.startswith("docker-compose.") and (name.endswith(".yml") or name.endswith(".yaml")):
         return True
     for parent in p.parents:
         candidate = str(parent).replace("\\", "/") + "/"

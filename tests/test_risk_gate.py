@@ -10,7 +10,6 @@ Covers:
 """
 
 import json
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -24,7 +23,6 @@ from orchestrator.risk import (
 from orchestrator.schemas.architect_output import ArchitectOutput, Task
 from orchestrator.schemas.artifacts import RunMetadata
 from orchestrator.schemas.risk import RISK_GATE_JSON, RiskGateResult
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -130,6 +128,21 @@ class TestIsDangerous:
         # Dockerfile nested inside a subdirectory — still dangerous by basename
         assert _is_dangerous("infra/docker/Dockerfile") is True
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "Dockerfile.prod",
+            "Dockerfile.dev",
+            "Dockerfile.ci",
+            "Jenkinsfile.production",
+            "docker-compose.prod.yml",
+            "docker-compose.override.yaml",
+            "infra/docker/Dockerfile.prod",
+        ],
+    )
+    def test_infrastructure_variants(self, path: str):
+        assert _is_dangerous(path) is True
+
     def test_all_patterns_covered(self):
         """Every entry in DANGEROUS_PATTERNS triggers _is_dangerous."""
         for pattern in DANGEROUS_PATTERNS:
@@ -155,9 +168,7 @@ class TestPlanGateDangerousFile:
 
     def test_github_workflow_escalated(self):
         meta = _run_meta(risk_budget="medium")
-        arch = _arch_output(
-            [_task(files=[".github/workflows/deploy.yml"], risk_level="low")]
-        )
+        arch = _arch_output([_task(files=[".github/workflows/deploy.yml"], risk_level="low")])
         result = check_plan_gate(meta, arch)
         assert result.passed is False
         assert any(".github/workflows/deploy.yml" in r for r in result.reasons)
