@@ -5,6 +5,25 @@
 
 ---
 
+## Status
+
+> Update this table after every blocker: `git rev-parse --short HEAD` → paste commit, flip status.
+
+| Sprint | Blocker | Status | Branch | Commit | Notes |
+|--------|---------|--------|--------|--------|-------|
+| 0 | B6 — Risk Gate Audit Trail | ✅ Done | `feat/issue-118-risk-gate-audit-trail` | `52453fe` | `_is_dangerous()`, `risk_gate.json` artifact, `failure_artifacts` |
+| 0 | B1 — WAL Atomic Apply | ⏳ Next | — | — | |
+| 0 | B2 — RunMetadata SSoT | ❌ Pending | — | — | |
+| 1 | B4 — CB Externalized (SQLite) | ❌ Pending | — | — | |
+| 1 | B7 — Workspace Isolation | ❌ Pending | — | — | |
+| 2 | B8a — Work Queue Schema | ❌ Pending | — | — | |
+| 2 | B8b — Worker Loop | ❌ Pending | — | — | |
+| 2 | B3 — GitHub Client | ❌ Pending | — | — | |
+| 2 | B5 — Artifact Store | ❌ Pending | — | — | |
+| — | Post-Audit Fixes | ❌ Pending | — | — | |
+
+---
+
 ## Execution Order
 
 Execute files **within each sprint in order**. Sprint boundaries are strict (Sprint 0 → Sprint 1 → Sprint 2).
