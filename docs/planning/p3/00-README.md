@@ -154,6 +154,9 @@ Active invariants (never violate):
 3. CB OPEN = zero calls — guard is inside _call_with_half_open_probe
 4. Branch name is the idempotency key — never PR body or labels
 5. Two SQLite stores: coordination.db and queue.db
+6. _wal_write REQUIRES fsync — tmp.stat() does NOT guarantee durability
+7. isolation_level=None everywhere — explicit transactions always
+8. _sqlite_connect() is the ONLY sqlite3.connect() in the codebase
 This session implements: [PASTE BLOCKER NAME]
 Only modify files listed in "Files to Modify/Create".
 Run after each change: pytest tests/ -v && ruff check src/
