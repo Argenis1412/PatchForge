@@ -11,7 +11,7 @@
 
 | Sprint | Blocker | Status | Branch | Commit | Notes |
 |--------|---------|--------|--------|--------|-------|
-| 0 | B6 — Risk Gate Audit Trail | ✅ Done | `feat/issue-118-risk-gate-audit-trail` | `52453fe` | `_is_dangerous()`, `risk_gate.json` artifact, `failure_artifacts` |
+| 0 | B6 — Risk Gate Audit Trail | ✅ Done | `feat/issue-118-risk-gate-audit-trail` | `7792db9` | `_is_dangerous()`, `risk_gate.json` artifact, `failure_artifacts` |
 | 0 | B1 — WAL Atomic Apply | ⏳ Next | — | — | |
 | 0 | B2 — RunMetadata SSoT | ❌ Pending | — | — | |
 | 1 | B4 — CB Externalized (SQLite) | ❌ Pending | — | — | |
