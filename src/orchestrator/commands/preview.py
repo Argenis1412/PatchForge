@@ -136,7 +136,7 @@ def execute(
     patch_diff = "\n".join(diffs)
 
     # 6. Check patch gate on the consolidated diff
-    risk_result = check_patch_gate(run_metadata, patch_diff)
+    risk_result = check_patch_gate(run_metadata, patch_diff, workspace_mgr=workspace_mgr)
     if not risk_result.passed:
         console.print("[bold red]Patch blocked by size gate:[/bold red]")
         for reason in risk_result.reasons:
