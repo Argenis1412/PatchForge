@@ -85,21 +85,21 @@
 ### [2026-06-11] Issue #77 — RunMetadata.schema_version default duplicado
 
 - **File:** `src/orchestrator/schemas/artifacts.py:47`
-- **Debt:** `schema_version: int = 1` hardcodea el valor en lugar de usar `schema_version: int = CURRENT_SCHEMA_VERSION`. Si alguien incrementa la constante pero omite el default del campo, `RunMetadata` produciría artifacts con versión incorrecta.
+- **Debt:** `schema_version: int = 1` hardcodes the value instead of using `schema_version: int = CURRENT_SCHEMA_VERSION`. If someone increments the constant but omits the field default, `RunMetadata` would produce artifacts with the wrong version.
 - **Discovered by:** AI review bot (CodeRabbit)
-- **Why deferred:** Modificar field defaults de `RunMetadata` está fuera del scope de ADR-01/3. Corregible en cualquier issue futuro que toque `artifacts.py`.
+- **Why deferred:** Modifying `RunMetadata` field defaults is outside the scope of ADR-01/3. Fixable in any future issue that touches `artifacts.py`.
 
 ### [2026-06-13] Issue #87 — Circuit Breaker (T-07 Part B)
 
 - **File:** `src/orchestrator/circuit_breaker.py`
-- **Debt:** `CircuitBreaker._consecutive_failures` y `_half_open_in_flight` no tienen protección thread-safe. Consistente con el patrón existente de `clients/*.py` (sin locks, GIL-dependent), pero si P3 introduce threading o async workers, será un race condition.
-- **Discovered by:** Adversarial audit durante diseño de la issue
-- **Why deferred:** No-threading es invariante del proyecto en V1. Revisar con P3 (async workers).
+- **Debt:** `CircuitBreaker._consecutive_failures` and `_half_open_in_flight` lack thread-safe protection. Consistent with the existing pattern in `clients/*.py` (no locks, GIL-dependent), but if P3 introduces threading or async workers, it will be a race condition.
+- **Discovered by:** Adversarial audit during issue design
+- **Why deferred:** No-threading is a project invariant in V1. Revisit with P3 (async workers).
 
 - **File:** `src/orchestrator/exceptions.py:101`
-- **Debt:** `CircuitBreakerOpenError.state` tiene type hint `object` en vez de `CircuitBreakerState` para evitar import circular entre `circuit_breaker.py` y `exceptions.py`. No afecta runtime.
+- **Debt:** `CircuitBreakerOpenError.state` has type hint `object` instead of `CircuitBreakerState` to avoid a circular import between `circuit_breaker.py` and `exceptions.py`. Does not affect runtime.
 - **Discovered by:** Implementation
-- **Why deferred:** Romper el import circular requiere mover `CircuitBreakerState` a un tercer módulo o hacer `exceptions.py` importar de `circuit_breaker`. Fuera de scope de T-07B.
+- **Why deferred:** Breaking the circular import requires moving `CircuitBreakerState` to a third module or having `exceptions.py` import from `circuit_breaker`. Outside the scope of T-07B.
 
 ### [2026-06-11] Issue #71 — Exception hierarchy (T-07 Part A)
 
