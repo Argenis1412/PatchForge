@@ -210,7 +210,7 @@ def execute(
         goal = scout_output.summary
 
     # 5. Check plan gate (shared)
-    risk_result = check_plan_gate(run_metadata, output)
+    risk_result = check_plan_gate(run_metadata, output, workspace_mgr=workspace_mgr)
     if not risk_result.passed:
         console.print("[bold red]Plan blocked by risk gate:[/bold red]")
         for reason in risk_result.reasons:
