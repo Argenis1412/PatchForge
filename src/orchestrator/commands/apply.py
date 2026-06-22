@@ -7,6 +7,7 @@ __all__ = [
 ]
 
 import json
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -17,6 +18,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from orchestrator.clients.bootstrap import bootstrap_environment
 from orchestrator.schemas.config import TargetConfig
+from orchestrator.storage import _wal_write
 from orchestrator.workspace import WorkspaceManager
 
 console = Console()
@@ -217,6 +219,19 @@ def execute(
 
     # 7. Check out explicit, system-controlled Git branch
     branch_name = f"patchforge/{run_id}"
+
+    # Checkpoint 1: status="applying" before any git operation
+    apply_result = ApplyResult(
+        run_id=run_id,
+        applied_at=datetime.now(timezone.utc),
+        branch=branch_name,
+        success=False,
+        pre_apply_head=pre_apply_head,
+        pre_apply_branch=pre_apply_branch,
+        status="applying",
+    )
+    _wal_write(apply_result, run_dir / "apply.json")
+
     branch_res = create_controlled_branch(target_path, branch_name)
     if branch_res.return_code != 0:
         console.print(
@@ -242,6 +257,11 @@ def execute(
         raise typer.Exit(code=1)
 
     # 8. Apply patch
+    backup_path = run_dir / "patch.apply-backup.diff"
+    shutil.copy2(patch_path, backup_path)
+    apply_result.pre_apply_diff_backup = str(backup_path)
+    _wal_write(apply_result, run_dir / "apply.json")
+
     apply_res = apply_patch(target_path, patch_path)
     if apply_res.return_code != 0:
         console.print(f"[bold red]Error applying patch: {apply_res.stderr}[/bold red]")
@@ -257,7 +277,7 @@ def execute(
         # Revert: force reset to pre-apply state
         rollback_succeeded = False
         try:
-            rollback_to_commit(target_path, pre_apply_head)
+            rollback_to_commit(target_path, pre_apply_head, backup_diff=backup_path)
             rollback_succeeded = True
         except RollbackError as exc:
             console.print(
@@ -325,7 +345,7 @@ def execute(
         console.print("[bold yellow]Post-apply validation failed. Rolling back...[/bold yellow]")
         rollback_succeeded = False
         try:
-            rollback_to_commit(target_path, pre_apply_head)
+            rollback_to_commit(target_path, pre_apply_head, backup_diff=backup_path)
             rollback_succeeded = True
         except RollbackError as exc:
             console.print(
@@ -384,16 +404,12 @@ def execute(
         workspace_mgr.write_run_json(run_id, run_metadata)
         raise typer.Exit(code=1)
 
-    # 11. Write apply.json success using ApplyResult model
-    apply_result = ApplyResult(
-        run_id=run_id,
-        applied_at=datetime.now(timezone.utc),
-        branch=branch_name,
-        success=True,
-        pre_apply_head=pre_apply_head,
-        pre_apply_branch=pre_apply_branch,
-    )
-    workspace_mgr.write_artifact(run_id, "apply.json", apply_result.model_dump_json(indent=2))
+    # 11. Checkpoint 5: status="committed_local", success=True
+    # TODO-B3: push branch (phase 3)
+    # TODO-B3: open PR (phase 4)
+    apply_result.success = True
+    apply_result.status = "committed_local"
+    _wal_write(apply_result, run_dir / "apply.json")
 
     # 12. Update metadata
     run_metadata.status = "applied"

@@ -98,3 +98,6 @@ class ApplyResult(BaseModel):
     pre_apply_head: Optional[str] = None
     pre_apply_branch: Optional[str] = None
     rollback_head: Optional[str] = None
+    status: str = "pending"
+    pre_apply_diff_backup: Optional[str] = None
+    pr_number: Optional[int] = None
