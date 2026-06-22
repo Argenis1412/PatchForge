@@ -11,7 +11,7 @@
 
 | Sprint | Blocker | Status | Branch | Commit | Notes |
 |--------|---------|--------|--------|--------|-------|
-| 0 | B6 — Risk Gate Audit Trail | ✅ Done | `feat/issue-118-risk-gate-audit-trail` | `7792db9` | `_is_dangerous()`, `risk_gate.json` artifact, `failure_artifacts` |
+| 0 | B6 — Risk Gate Audit Trail | ✅ Done | `feat/issue-118-risk-gate-audit-trail` | `b2b769d` | `_is_dangerous()`, `risk_gate.json` artifact, `failure_artifacts` |
 | 0 | B1 — WAL Atomic Apply | ⏳ Next | — | — | |
 | 0 | B2 — RunMetadata SSoT | ❌ Pending | — | — | |
 | 1 | B4 — CB Externalized (SQLite) | ❌ Pending | — | — | |
@@ -179,6 +179,21 @@ Active invariants (never violate):
 This session implements: [PASTE BLOCKER NAME]
 Only modify files listed in "Files to Modify/Create".
 Run after each change: pytest tests/ -v && ruff check src/
+```
+
+---
+
+## Session close format
+
+After implementing a blocker, paste this into `HANDOFF.md` to update the status table:
+
+```
+Final output:
+| Blocker | Status | Branch | Commit | Summary |
+|---------|--------|--------|--------|---------|
+| B1 — WAL Atomic Apply | ✅ Done | `feat/issue-XXX` | `COMMIT` | [1-line summary] |
+Tests: X passed, 0 failed
+TODOs: [none / list]
 ```
 
 ---
