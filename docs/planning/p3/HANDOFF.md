@@ -74,14 +74,13 @@ def _wal_write(result: BaseModel, path: Path) -> None:
             os.close(dir_fd)
 ```
 
-### _sqlite_connect(db_path: Path) → sqlite3.Connection
+### _sqlite_connect(db_path: Path, *, timeout: float = 30.0) → sqlite3.Connection
 ```python
-def _sqlite_connect(db_path: Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(db_path), timeout=30.0)
-    conn.isolation_level = None          # autocommit — use explicit BEGIN IMMEDIATE
-    conn.row_factory = sqlite3.Row       # enables row["column"]
+def _sqlite_connect(db_path: Path, *, timeout: float = 30.0) -> sqlite3.Connection:
+    """Canonical SQLite connection with WAL mode and IMMEDIATE locking."""
+    conn = sqlite3.connect(str(db_path), timeout=timeout, isolation_level=None)
+    conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=30000")
     return conn
 ```
@@ -107,7 +106,7 @@ GitHubClient method for retry with jitter on rate limit. See 02-b3-github.md.
 
 ## Implementation Order
 
-**Start with B6** (simplest, helps tune the workflow with Claude Code).
+**Start with B1** (simplest remaining after B6 landed).
 Then: B1 → B2 → B4 → B7 → B8a → B8b → B3 → B5.
 **B8a must be complete before opening B8b.**
 **After B8b is complete:** apply `04-post-audit-fixes.md`.
@@ -153,10 +152,7 @@ Then: B1 → B2 → B4 → B7 → B8a → B8b → B3 → B5.
 
 ## Bugs in the Fix File (04-post-audit-fixes.md) — Pending Correction
 
-These 4 bugs are INSIDE the post-audit file. Fix before applying it:
-
-### BUG-A (🔴): H-3 uses force_reset_apply which doesn't exist
-`force_reset_apply` is not in git.py. Replace with `revert_apply(repo_path, pre_apply_head)`.
+These 3 bugs are INSIDE the post-audit file. Fix before applying it:
 
 ### BUG-B (🔴): H-5 calls release_repo_lock with wrong signature
 `acquire_repo_lock` returns `bool`, not a connection. Correct signature:

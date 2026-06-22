@@ -127,13 +127,12 @@ from orchestrator.storage import _sqlite_connect
 import sqlite3
 from pathlib import Path
 
-def _sqlite_connect(db_path: Path) -> sqlite3.Connection:
-    """Single connection factory. Always enables row_factory + WAL mode + autocommit."""
-    conn = sqlite3.connect(str(db_path), timeout=30.0)
-    conn.isolation_level = None  # Autocommit mode for explicit BEGIN IMMEDIATE
-    conn.row_factory = sqlite3.Row      # enables row["column"] access
+def _sqlite_connect(db_path: Path, *, timeout: float = 30.0) -> sqlite3.Connection:
+    """Canonical SQLite connection with WAL mode and IMMEDIATE locking."""
+    conn = sqlite3.connect(str(db_path), timeout=timeout, isolation_level=None)
+    conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=30000")
     return conn
 ```
 *Never call `sqlite3.connect()` directly — always use `_sqlite_connect()`.*
