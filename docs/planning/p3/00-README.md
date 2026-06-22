@@ -11,7 +11,7 @@
 
 | Sprint | Blocker | Status | Branch | Commit | Notes |
 |--------|---------|--------|--------|--------|-------|
-| 0 | B6 — Risk Gate Audit Trail | ✅ Done | `feat/issue-118-risk-gate-audit-trail` | `7792db9` | `_is_dangerous()`, `risk_gate.json` artifact, `failure_artifacts` |
+| 0 | B6 — Risk Gate Audit Trail | ✅ Done | `feat/issue-118-risk-gate-audit-trail` | `b2b769d` | `_is_dangerous()`, `risk_gate.json` artifact, `failure_artifacts` |
 | 0 | B1 — WAL Atomic Apply | ⏳ Next | — | — | |
 | 0 | B2 — RunMetadata SSoT | ❌ Pending | — | — | |
 | 1 | B4 — CB Externalized (SQLite) | ❌ Pending | — | — | |
@@ -127,13 +127,12 @@ from orchestrator.storage import _sqlite_connect
 import sqlite3
 from pathlib import Path
 
-def _sqlite_connect(db_path: Path) -> sqlite3.Connection:
-    """Single connection factory. Always enables row_factory + WAL mode + autocommit."""
-    conn = sqlite3.connect(str(db_path), timeout=30.0)
-    conn.isolation_level = None  # Autocommit mode for explicit BEGIN IMMEDIATE
-    conn.row_factory = sqlite3.Row      # enables row["column"] access
+def _sqlite_connect(db_path: Path, *, timeout: float = 30.0) -> sqlite3.Connection:
+    """Canonical SQLite connection with WAL mode and IMMEDIATE locking."""
+    conn = sqlite3.connect(str(db_path), timeout=timeout, isolation_level=None)
+    conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=30000")
     return conn
 ```
 *Never call `sqlite3.connect()` directly — always use `_sqlite_connect()`.*
@@ -179,6 +178,21 @@ Active invariants (never violate):
 This session implements: [PASTE BLOCKER NAME]
 Only modify files listed in "Files to Modify/Create".
 Run after each change: pytest tests/ -v && ruff check src/
+```
+
+---
+
+## Session close format
+
+After implementing a blocker, paste this into `HANDOFF.md` to update the status table:
+
+```
+Final output:
+| Blocker | Status | Branch | Commit | Summary |
+|---------|--------|--------|--------|---------|
+| B1 — WAL Atomic Apply | ✅ Done | `feat/issue-XXX` | `COMMIT` | [1-line summary] |
+Tests: X passed, 0 failed
+TODOs: [none / list]
 ```
 
 ---
