@@ -13,7 +13,7 @@
 |--------|---------|--------|--------|--------|-------|
 | 0 | B6 — Risk Gate Audit Trail | ✅ Done | `feat/issue-118-risk-gate-audit-trail` | `b2b769d` | `_is_dangerous()`, `risk_gate.json` artifact, `failure_artifacts` |
 | 0 | B1 — WAL Atomic Apply | ✅ Done | `feat/issue-121-b1-wal-atomic-apply` | `ccba78e` | WAL atomic apply with crash-safe 5-phase checkpointing via `_wal_write` |
-| 0 | B2 — RunMetadata SSoT | ❌ Pending | — | — | |
+| 0 | B2 — RunMetadata SSoT | ✅ Done | `feat/issue-123-runmetadata-ssot` | `c59274b` | 9 execution-context fields; WorkspaceManager env-var fallback |
 | 1 | B4 — CB Externalized (SQLite) | ❌ Pending | — | — | |
 | 1 | B7 — Workspace Isolation | ❌ Pending | — | — | |
 | 2 | B8a — Work Queue Schema | ❌ Pending | — | — | |
