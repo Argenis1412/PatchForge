@@ -253,5 +253,6 @@ TODOs: [none / list]
 | Blocker | Status | Branch | Commit | Summary |
 |---------|--------|--------|--------|---------|
 | B1 — WAL Atomic Apply | ✅ Done | `feat/issue-121-b1-wal-atomic-apply` | `ccba78e` | WAL atomic apply with crash-safe 5-phase checkpointing via `_wal_write` |
-Tests: 4 passed, 0 failed
+| B2 — RunMetadata SSoT | ✅ Done | `feat/issue-123-runmetadata-ssot` | `c59274b` | 9 execution-context fields added to RunMetadata; WorkspaceManager env-var fallback |
+Tests: 410 passed, 0 failed
 TODOs: none

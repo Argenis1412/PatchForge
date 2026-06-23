@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -22,8 +23,18 @@ def _validate_run_id(run_id: str) -> None:
 
 
 class WorkspaceManager:
-    def __init__(self, workspace_path: Path):
-        self.root = Path(workspace_path).resolve()
+    def __init__(self, workspace_path: Path | None = None):
+        if workspace_path is not None:
+            resolved = Path(workspace_path).resolve()
+        else:
+            env_val = os.environ.get("PATCHFORGE_WORKSPACE")
+            if not env_val:
+                raise ValueError(
+                    "WorkspaceManager requires either a workspace_path argument "
+                    "or the PATCHFORGE_WORKSPACE environment variable to be set."
+                )
+            resolved = Path(env_val).resolve()
+        self.root = resolved
         self.runs = self.root / "runs"
         self.logs = self.root / "logs"
         self.prompts = self.root / "prompts"

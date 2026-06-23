@@ -87,6 +87,17 @@ class RunMetadata(BaseModel):
     apply_status: Optional[str] = None
     failure_artifacts: Optional[List[str]] = None
 
+    # Sprint 0 — B2: execution context for worker cold-start from run.json
+    issue_number: Optional[int] = None
+    logs_dir: Optional[str] = None
+    staging_dir: Optional[str] = None
+    trace_id: Optional[str] = None
+    env_file: Optional[str] = None
+    worker_id: Optional[str] = None
+    secrets_ref: Optional[str] = None
+    provider_config: Optional[dict] = None
+    current_stage: Optional[str] = None
+
 
 class ApplyResult(BaseModel):
     run_id: str
