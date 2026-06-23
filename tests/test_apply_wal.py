@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from orchestrator.schemas.artifacts import ApplyResult
 from orchestrator.storage import _wal_write
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -42,7 +38,6 @@ def test_wal_written_before_git_apply(tmp_path: Path) -> None:
     """apply.json with status='applying' must exist on disk before git apply runs."""
     apply_json = tmp_path / "apply.json"
 
-    git_apply_called_before_wal: list[bool] = []
     wal_existed_before_git_apply: list[bool] = []
 
     apply_result = _make_apply_result()

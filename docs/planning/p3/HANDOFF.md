@@ -106,8 +106,7 @@ GitHubClient method for retry with jitter on rate limit. See 02-b3-github.md.
 
 ## Implementation Order
 
-**Start with B1** (simplest remaining after B6 landed).
-Then: B1 → B2 → B4 → B7 → B8a → B8b → B3 → B5.
+**B1 completed.** Next: B2 → B4 → B7 → B8a → B8b → B3 → B5.
 **B8a must be complete before opening B8b.**
 **After B8b is complete:** apply `04-post-audit-fixes.md`.
 
@@ -246,3 +245,13 @@ Final output:
 Tests: X passed, 0 failed
 TODOs: [none / list]
 ```
+
+---
+
+## Last Completed Blocker
+
+| Blocker | Status | Branch | Commit | Summary |
+|---------|--------|--------|--------|---------|
+| B1 — WAL Atomic Apply | ✅ Done | `feat/issue-121-b1-wal-atomic-apply` | `ccba78e` | WAL atomic apply with crash-safe 5-phase checkpointing via `_wal_write` |
+Tests: 4 passed, 0 failed
+TODOs: none

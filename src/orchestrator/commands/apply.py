@@ -407,6 +407,7 @@ def execute(
     # 11. Checkpoint 5: status="committed_local", success=True
     # TODO-B3: push branch (phase 3)
     # TODO-B3: open PR (phase 4)
+    apply_result.applied_at = datetime.now(timezone.utc)
     apply_result.success = True
     apply_result.status = "committed_local"
     _wal_write(apply_result, run_dir / "apply.json")

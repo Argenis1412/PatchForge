@@ -16,13 +16,11 @@ def rollback_to_commit(
 
     if backup_diff is not None and backup_diff.is_file():
         try:
-            res = subprocess.run(
+            subprocess.run(
                 ["git", "-C", str(repo_root), "apply", "--reverse", str(backup_diff)],
                 capture_output=True,
                 text=True,
             )
-            if res.returncode == 0:
-                return
         except Exception:
             pass  # fall through to force_reset_apply
 
