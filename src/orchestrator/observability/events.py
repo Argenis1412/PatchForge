@@ -1,8 +1,24 @@
 import json
+import os
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
+
+
+def _append_and_fsync(path: Path, entry: dict[str, Any]) -> None:
+    is_new = not path.exists()
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, default=str) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    if is_new and os.name == "posix":
+        dir_fd = os.open(str(path.parent), os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+
 
 
 class FailureType(StrEnum):
@@ -45,15 +61,13 @@ def log_event(
     }
 
     path = logs_dir / "pipeline.jsonl"
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, default=str) + "\n")
+    _append_and_fsync(path, entry)
 
     if run_dir is not None:
         run_dir = Path(run_dir)
         if run_dir.exists():
             run_events_path = run_dir / "events.jsonl"
-            with open(run_events_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, default=str) + "\n")
+            _append_and_fsync(run_events_path, entry)
         else:
             import sys
 

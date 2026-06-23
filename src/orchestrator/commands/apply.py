@@ -107,6 +107,45 @@ def execute(
         console.print(f"[bold red]Error: patch.diff does not exist in {run_dir}[/bold red]")
         raise typer.Exit(code=1)
 
+    try:
+        current_head_sha = current_head(target_path)
+    except RuntimeError as exc:
+        console.print(f"[bold red]Git Error: {exc}[/bold red]")
+        failure_path = run_dir / "failure.json"
+        failure_path.write_text(
+            json.dumps(
+                {
+                    "error": "Failed to resolve HEAD",
+                    "message": str(exc),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        raise typer.Exit(code=1)
+
+    if current_head_sha != run_metadata.base_commit:
+        expected = run_metadata.base_commit
+        console.print(
+            f"[bold red]Error: Repository HEAD has changed since preview. "
+            f"Expected {expected}, found {current_head_sha}. "
+            "Please re-run scan/preview or rebase/inspect.[/bold red]"
+        )
+        failure_path = run_dir / "failure.json"
+        failure_path.write_text(
+            json.dumps(
+                {
+                    "error": "HEAD has changed",
+                    "expected": run_metadata.base_commit,
+                    "current": current_head_sha,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        raise typer.Exit(code=1)
+
+
     # 3. Bootstrap target environment & load config
     bootstrap_environment(env_file=env_file, target_path=target_path)
     try:
