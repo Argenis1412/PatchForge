@@ -8,6 +8,7 @@ from pathlib import Path
 from orchestrator.safety import validate_filename
 from orchestrator.schemas.artifacts import RunMetadata
 from orchestrator.schemas.experiment import Experiment, Verdict
+from orchestrator.storage import _wal_write
 
 # Only allow alphanumeric characters, underscores, and hyphens in run IDs.
 _RUN_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -125,9 +126,24 @@ class WorkspaceManager:
         Uses the unchecked writer so it can be called both during initial
         creation (scan) and during subsequent status updates.
         """
-        return self._write_artifact_unchecked(
-            run_id, "run.json", metadata.model_dump_json(indent=2)
-        )
+        import traceback
+
+        run_dir = self.run_dir(run_id)
+        path = run_dir / "run.json"
+
+        try:
+            _wal_write(metadata, path)
+            return path
+        except Exception:
+            failure_path = run_dir / "failure.json"
+            failure_data = json.dumps(
+                {"error": "Failed to write run.json", "traceback": traceback.format_exc()},
+            )
+            try:
+                failure_path.write_text(failure_data, encoding="utf-8")
+            except OSError:
+                pass  # best-effort write; don't mask the original error
+            raise
 
     def read_run_json(self, run_id: str) -> RunMetadata:
         """Read and validate the run.json metadata file."""
