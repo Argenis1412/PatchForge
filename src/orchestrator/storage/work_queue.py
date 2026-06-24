@@ -1,6 +1,16 @@
 """SQLite-backed work queue for at-least-once issue processing.
 
 B8a: Work Queue Schema & Admission.
+
+Architecture notes:
+- queue.db is a separate SQLite store from coordination.db for blast-radius isolation.
+- enqueue_issue() uses a 24h TTL lock (issue_lock table) via ON CONFLICT ... WHERE
+  locked_until < datetime('now') to prevent duplicate webhook spam while still
+  allowing re-enqueue after the lock expires.
+- dequeue_issue() is a single atomic UPDATE ... RETURNING query that picks the oldest
+  pending job OR an expired lease (up to 3 retries). This eliminates race conditions
+  between concurrent workers without needing external locks.
+- poison pill protection: jobs with retries >= 3 are skipped by the dequeue subquery.
 """
 
 from __future__ import annotations
