@@ -47,7 +47,8 @@ _PROVIDER_CHAIN: dict[str, list] = {
 # in HALF_OPEN — acceptable since a successful probe closes the CB for everyone.
 # ---------------------------------------------------------------------------
 
-_coord_db_dir = Path(os.getenv("PATCHFORGE_DATA_DIR", "."))
+_db_dir_env = os.getenv("PATCHFORGE_DATA_DIR")
+_coord_db_dir = Path(_db_dir_env) if _db_dir_env is not None else Path.home() / ".patchforge"
 _coord_store = SqliteCircuitBreakerStore(_coord_db_dir)
 
 _cb_gemini = circuit_breaker_for("gemini", store=_coord_store)
