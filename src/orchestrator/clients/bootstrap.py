@@ -45,3 +45,12 @@ def bootstrap_environment(
     if resolved_path is not None:
         load_dotenv(resolved_path)
         _ENV_LOADED = True
+
+
+def bootstrap_databases(base_dir: Path) -> None:
+    base_dir.mkdir(parents=True, exist_ok=True)
+    (base_dir / "coordination.db").touch()
+    from orchestrator.storage.work_queue import init_queue_db
+
+    conn = init_queue_db(base_dir / "queue.db")
+    conn.close()
