@@ -50,7 +50,7 @@ class CircuitBreakerState(Enum):
 # See exceptions.py for the class definition and rationale.
 
 # Exponential backoff schedule for recovery_timeout (seconds).
-# Index = consecutive_failures // failure_threshold (capped at last element).
+# Index = (consecutive_failures - 1) // failure_threshold (capped at last element).
 RECOVERY_BACKOFF: list[float] = [60.0, 120.0, 240.0, 480.0, 900.0]
 
 
