@@ -449,7 +449,7 @@ def execute(
     apply_result.applied_at = datetime.now(timezone.utc)
     apply_result.success = True
     apply_result.status = "committed_local"
-    _wal_write(apply_result, run_dir / "apply.json")
+    workspace_mgr.write_artifact(run_id, "apply.json", apply_result.model_dump_json(indent=2))
 
     # 12. Update metadata
     run_metadata.status = "applied"

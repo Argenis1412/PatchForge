@@ -2,11 +2,16 @@
 
 B1: _wal_write — atomic crash-safe write for apply.json and other artifacts.
 B4: _sqlite_connect — canonical SQLite connection factory.
+B5: ArtifactStore — pluggable artifact backend with LocalArtifactStore.
 """
 
 __all__ = [
     "_wal_write",
     "_sqlite_connect",
+    "ArtifactStore",
+    "DurabilityLevel",
+    "WriteResult",
+    "LocalArtifactStore",
 ]
 
 import os
@@ -14,6 +19,9 @@ import sqlite3
 from pathlib import Path
 
 from pydantic import BaseModel
+
+from .artifact_store import ArtifactStore, DurabilityLevel, WriteResult
+from .local_store import LocalArtifactStore
 
 
 def _sqlite_connect(db_path: Path, *, timeout: float = 30.0) -> sqlite3.Connection:

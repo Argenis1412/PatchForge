@@ -114,7 +114,7 @@ def write_run_json(self, run_id: str, run_metadata: RunMetadata) -> Path:
     ...
     local_path = workspace_mgr.root.joinpath("runs", run_id, "run.json")
     local_path.write_text(serialized, encoding="utf-8")
-    # TODO-B5: Uncomment when ArtifactStore exists (sprint-2/03-b5-artifact-store.md).
+    # TODO-B5: Uncomment when ArtifactStore exists (sprint-2/02-b5-artifact-store.md).
     # store.write(f"{run_id}/run.json", serialized)
     return local_path
 ```

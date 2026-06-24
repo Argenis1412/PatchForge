@@ -201,7 +201,7 @@ subprocess.run(["git", "-C", str(target_path), "commit", "-a", "-m", commit_msg]
 apply_result.status = "committed_local"
 _wal_write(apply_result, run_dir / "apply.json")
 
-# TODO-B3: Uncomment phases 3-4 when GitHubClient exists (Sprint 2, docs/planning/p3/sprint-2/02-b3-github.md).
+# TODO-B3: Uncomment phases 3-4 when GitHubClient exists (Sprint 2, docs/planning/p3/sprint-2/03-b3-github.md).
 # Phase 3: pushed, about to create PR
 # apply_result.status = "pushed_remote"
 # _wal_write(apply_result, run_dir / "apply.json")
