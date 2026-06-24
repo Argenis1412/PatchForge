@@ -16,7 +16,7 @@
 | 0 | B2 — RunMetadata SSoT | ✅ Done | `feat/issue-123-runmetadata-ssot` | `c59274b` | 9 execution-context fields; WorkspaceManager env-var fallback |
 | 1 | B4 — CB Externalized (SQLite) | ✅ Done | `feat/issue-126-cb-externalized` | `ac978c7` | SQLite-backed CB via `SqliteCircuitBreakerStore`; `_reload_state()` for cross-worker sharing; `time.time()` for restart-safe persistence; exponential backoff 1min→15min |
 | 1 | B7 — Workspace Isolation | ✅ Done | `feat/b7-workspace-isolation` | `2ff95a3` | WorkspaceManager worker_id scoping; repo_lock table in coordination.db; cleanup_stale_workspaces() |
-| 2 | B8a — Work Queue Schema | ❌ Pending | — | — | |
+| 2 | B8a — Work Queue Schema | ✅ Done | `feat/issue-132-work-queue-schema` | `27fa268` | SQLite queue.db, enqueue_issue con TTL 24h, dequeue_issue con lease + max 3 retries |
 | 2 | B8b — Worker Loop | ❌ Pending | — | — | |
 | 2 | B3 — GitHub Client | ❌ Pending | — | — | |
 | 2 | B5 — Artifact Store | ❌ Pending | — | — | |
@@ -54,6 +54,7 @@ Sprint 2 (CI/CD Surface)
 | `src/orchestrator/commands/` | CLI entry points (`apply.py`, `plan.py`, `preview.py`) |
 | `src/orchestrator/agents/executor/` | Execution agents, providers, rollback |
 | `src/orchestrator/schemas/` | Pydantic models (`artifacts.py`, `risk.py`, `pipeline_run.py`) |
+| `src/orchestrator/storage/` | SQLite helpers (`__init__.py`), CB store (`lock.py`), work queue (`work_queue.py`) |
 | `src/orchestrator/clients/` | LLM clients (Gemini, Groq, Anthropic) + `bootstrap.py` |
 | `src/orchestrator/` | Core: `workspace.py`, `pipeline.py`, `circuit_breaker.py`, `risk.py`, `git.py` |
 

@@ -106,7 +106,7 @@ GitHubClient method for retry with jitter on rate limit. See 02-b3-github.md.
 
 ## Implementation Order
 
-**B1, B2, B4, B7 completed.** Next: B8a → B8b → B3 → B5.
+**B1, B2, B4, B7, B8a completed.** Next: B8b → B3 → B5.
 **B8a must be complete before opening B8b.**
 **After B8b is complete:** apply `04-post-audit-fixes.md`.
 
@@ -256,5 +256,6 @@ Final output:
 | B2 — RunMetadata SSoT | ✅ Done | `feat/issue-123-runmetadata-ssot` | `c59274b` | 9 execution-context fields added to RunMetadata; WorkspaceManager env-var fallback |
 | B4 — CB Externalized (SQLite) | ✅ Done | `feat/issue-126-cb-externalized` | `ac978c7` | SQLite-backed CB with `_reload_state()`, `time.time()`, `SqliteCircuitBreakerStore`; `_call_with_half_open_probe` removed; cross-worker state sharing + exponential backoff |
 | B7 — Workspace Isolation & Repo Lock | ✅ Done | `feat/b7-workspace-isolation` | `2ff95a3` | `worker_id` scoping in WorkspaceManager; `acquire_repo_lock()` / `release_repo_lock()` in coordination.db; `cleanup_stale_workspaces()`; 4 new tests |
-| Tests | 400 passed, 2 skipped, 0 failed | — | — | — |
+| B8a — Work Queue Schema | ✅ Done | `feat/issue-132-work-queue-schema` | `27fa268` | SQLite queue.db layer with 3 tables; `enqueue_issue()` with 24h TTL lock; `dequeue_issue()` with lease + max 3 retries; `bootstrap_databases()` in bootstrap.py |
+| Tests | 404 passed, 2 skipped, 0 failed | — | — | — |
 | TODOs | none | — | — | — |
