@@ -10,8 +10,9 @@ from orchestrator.schemas.artifacts import RunMetadata
 from orchestrator.schemas.experiment import Experiment, Verdict
 from orchestrator.storage import _wal_write
 
-# Only allow alphanumeric characters, underscores, and hyphens in run IDs.
+# Only allow alphanumeric characters, underscores, and hyphens in run IDs and worker IDs.
 _RUN_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+_WORKER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 def _validate_run_id(run_id: str) -> None:
@@ -37,6 +38,11 @@ class WorkspaceManager:
             resolved = Path(env_val).resolve()
         self.root = resolved
         if worker_id:
+            if not _WORKER_ID_RE.match(worker_id):
+                raise ValueError(
+                    f"Invalid worker_id {worker_id!r}. "
+                    "Only alphanumeric characters, underscores, and hyphens are allowed."
+                )
             self.root = self.root / worker_id
         self.runs = self.root / "runs"
         self.logs = self.root / "logs"
@@ -46,6 +52,9 @@ class WorkspaceManager:
         self.temp = self.root / "temp"
         self.manifest = self.outputs / "manifest.json"
         self._worker_id = worker_id
+
+    def touch_heartbeat(self) -> None:
+        (self.root / ".workspace").touch()
 
     def setup(self) -> None:
         """Create all workspace directories if they do not exist."""
@@ -59,7 +68,7 @@ class WorkspaceManager:
             self.temp,
         ]:
             directory.mkdir(parents=True, exist_ok=True)
-        (self.root / ".workspace").touch()
+        self.touch_heartbeat()
 
     def staging_dir_for_run(self, run_id: str) -> Path:
         path = self.outputs / "staging" / run_id
