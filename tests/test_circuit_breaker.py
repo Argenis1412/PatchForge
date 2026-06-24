@@ -3,7 +3,7 @@ tests/test_circuit_breaker.py
 
 10 unit tests for CircuitBreaker + 3 B4 tests for SQLite-backed store.
 
-Time is controlled via monkeypatching time.monotonic — no real waiting.
+Time is controlled via monkeypatching time.time — no real waiting.
 No network calls are made.
 """
 

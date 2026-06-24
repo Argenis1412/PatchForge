@@ -13,6 +13,11 @@ State machine:
 # In Executor with MAX_RETRIES=1, each failing task produces 2 calls to the CB.
 # Effective task threshold to OPEN ≈ failure_threshold / 2.
 # Example: failure_threshold=3 → ~1.5 failing tasks trigger OPEN.
+
+# B4: Uses time.time() for last_failure_at — NOT time.monotonic().
+# This ensures cross-process comparability: monotonic resets on reboot,
+# which would break the retry-after calculation when state persists in
+# SQLite across worker restarts.
 """
 
 from __future__ import annotations
@@ -100,6 +105,7 @@ class CircuitBreaker:
     # ------------------------------------------------------------------
 
     def _load_state(self) -> None:
+        """Load state from store at init. Called once during __init__."""
         row = self._store.get_state(self._provider_name)
         if row:
             self._state = CircuitBreakerState(row["state"])
@@ -199,6 +205,11 @@ class CircuitBreaker:
     def _execute_half_open(self, fn: Callable[[], T]) -> T:
         if self._half_open_in_flight:
             # A probe is already running — reject this call.
+            # Note: this flag is process-local. Cross-worker HALF_OPEN
+            # contention is not prevented — multiple workers may probe
+            # simultaneously. This is an accepted relaxation: the first
+            # successful probe resets to CLOSED, and others see the
+            # updated state on their next _reload_state().
             raise CircuitBreakerOpenError(
                 provider=self._provider_name,
                 state=self._state,

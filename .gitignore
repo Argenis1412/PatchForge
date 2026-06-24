@@ -51,3 +51,4 @@ exp-workspace/
 .coverage
 htmlcov/
 dist/
+*.db
