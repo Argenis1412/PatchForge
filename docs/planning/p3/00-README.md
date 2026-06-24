@@ -17,9 +17,9 @@
 | 1 | B4 — CB Externalized (SQLite) | ✅ Done | `feat/issue-126-cb-externalized` | `ac978c7` | SQLite-backed CB via `SqliteCircuitBreakerStore`; `_reload_state()` for cross-worker sharing; `time.time()` for restart-safe persistence; exponential backoff 1min→15min |
 | 1 | B7 — Workspace Isolation | ✅ Done | `feat/b7-workspace-isolation` | `2ff95a3` | WorkspaceManager worker_id scoping; repo_lock table in coordination.db; cleanup_stale_workspaces() |
 | 2 | B8a — Work Queue Schema | ✅ Done | `feat/issue-132-work-queue-schema` | `27fa268` | SQLite queue.db, enqueue_issue con TTL 24h, dequeue_issue con lease + max 3 retries |
-| 2 | B8b — Worker Loop | ❌ Pending | — | — | |
+| 2 | B5 — Artifact Store | ✅ Done | `feat/issue-134-b5-artifact-store` | `5551778` | Pluggable `ArtifactStore` ABC + `LocalArtifactStore` with atomic WAL writes; integrated into `WorkspaceManager` with dual-write |
 | 2 | B3 — GitHub Client | ❌ Pending | — | — | |
-| 2 | B5 — Artifact Store | ❌ Pending | — | — | |
+| 2 | B8b — Worker Loop | ❌ Pending | — | — | |
 | — | Post-Audit Fixes | ❌ Pending | — | — | |
 
 ---
@@ -40,9 +40,9 @@ Sprint 1 (Distribution Primitives)
 
 Sprint 2 (CI/CD Surface)
 ├── 01-b8a-work-queue-schema.md  Work Queue Schema & Enqueue/Dequeue
-├── 01-b8b-worker-loop.md        State-Machine Worker Loop + Resume
-├── 02-b3-github.md            GitHub Client + Webhook
-└── 03-b5-artifact-store.md    Pluggable ArtifactStore
+├── 02-b5-artifact-store.md      Pluggable ArtifactStore (no deps)
+├── 03-b3-github.md              GitHub Client + Webhook (needs PyGithub)
+└── 04-b8b-worker-loop.md        State-Machine Worker Loop + Resume (needs B3+B5)
 ```
 
 ---

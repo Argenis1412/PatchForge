@@ -38,11 +38,11 @@ sprint-1/
   01-b4-circuit-breaker.md ← Circuit Breaker externalized to SQLite
   02-b7-workspace-isolation.md ← Workspace isolation + repo lock (acquire/release)
 sprint-2/
-  01-b8a-work-queue-schema.md  ← SQLite work queue schema + enqueue_issue
-  01-b8b-worker-loop.md        ← Worker loop state machine + pipeline resume
-  02-b3-github.md              ← GitHubClient + webhook handler
-  03-b5-artifact-store.md      ← ArtifactStore abstraction + LocalArtifactStore
-  04-post-audit-fixes.md       ← Patches to apply AFTER implementing B1-B8b
+   01-b8a-work-queue-schema.md      ← B8a: SQLite work queue schema + enqueue_issue
+   02-b5-artifact-store.md          ← B5: ArtifactStore abstraction + LocalArtifactStore
+   03-b3-github.md                  ← B3: GitHubClient + webhook handler
+   04-b8b-worker-loop.md            ← B8b: Worker loop state machine (needs B3+B5)
+   04-post-audit-fixes.md           ← Patches to apply AFTER implementing B1-B8b
 ```
 
 ---
@@ -106,8 +106,9 @@ GitHubClient method for retry with jitter on rate limit. See 02-b3-github.md.
 
 ## Implementation Order
 
-**B1, B2, B4, B7, B8a completed.** Next: B8b → B3 → B5.
-**B8a must be complete before opening B8b.**
+**B1, B2, B4, B7, B8a completed.** Next: B5 → B3 → B8b.
+**B5 has zero deps — implement first. B5 must be complete before opening B3.**
+**B3 must be complete before opening B8b (B8b needs GitHubClient + ArtifactStore).**
 **After B8b is complete:** apply `04-post-audit-fixes.md`.
 
 ---
@@ -257,5 +258,6 @@ Final output:
 | B4 — CB Externalized (SQLite) | ✅ Done | `feat/issue-126-cb-externalized` | `ac978c7` | SQLite-backed CB with `_reload_state()`, `time.time()`, `SqliteCircuitBreakerStore`; `_call_with_half_open_probe` removed; cross-worker state sharing + exponential backoff |
 | B7 — Workspace Isolation & Repo Lock | ✅ Done | `feat/b7-workspace-isolation` | `2ff95a3` | `worker_id` scoping in WorkspaceManager; `acquire_repo_lock()` / `release_repo_lock()` in coordination.db; `cleanup_stale_workspaces()`; 4 new tests |
 | B8a — Work Queue Schema | ✅ Done | `feat/issue-132-work-queue-schema` | `27fa268` | SQLite queue.db layer with 3 tables; `enqueue_issue()` with 24h TTL lock; `dequeue_issue()` with lease + max 3 retries; `bootstrap_databases()` in bootstrap.py |
-| Tests | 404 passed, 2 skipped, 0 failed | — | — | — |
+| B5 — Artifact Store | ✅ Done | `feat/issue-134-b5-artifact-store` | `5551778` | Pluggable `ArtifactStore` ABC with `LocalArtifactStore` (atomic WAL writes); integrated into `WorkspaceManager` with dual-write pattern; committed_local reaches store |
+| Tests | — | — | — | — |
 | TODOs | none | — | — | — |
