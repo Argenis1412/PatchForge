@@ -154,9 +154,15 @@ class WorkspaceManager:
         return ref
 
     def read_artifact(self, run_id: str, name: str) -> str:
-        """Read content from an artifact via the configured store."""
+        """Read content from an artifact, falling back to local copy on store failure."""
         safe_name = validate_filename(name)
-        return self.store.read(f"{run_id}/{safe_name}")
+        try:
+            return self.store.read(f"{run_id}/{safe_name}")
+        except Exception:
+            local = self.run_dir(run_id) / safe_name
+            if local.exists():
+                return local.read_text(encoding="utf-8")
+            raise
 
     def write_run_json(self, run_id: str, metadata: RunMetadata) -> Path:
         """Write the run.json metadata file.

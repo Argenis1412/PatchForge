@@ -8,21 +8,15 @@ class LocalArtifactStore(ArtifactStore):
     def __init__(self, base_path: Path):
         self._base = Path(base_path).resolve()
 
-    def write(self, path: str, data: str | bytes) -> WriteResult:
+    def write(self, path: str, data: str) -> WriteResult:
         full_path = self._base / path
         full_path.parent.mkdir(parents=True, exist_ok=True)
 
         tmp = full_path.with_suffix(full_path.suffix + ".tmp")
-        if isinstance(data, str):
-            with tmp.open("w", encoding="utf-8") as f:
-                f.write(data)
-                f.flush()
-                os.fsync(f.fileno())
-        else:
-            with tmp.open("wb") as f:
-                f.write(data)
-                f.flush()
-                os.fsync(f.fileno())
+        with tmp.open("w", encoding="utf-8") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, full_path)
         if os.name == "posix":
             dir_fd = os.open(str(full_path.parent), os.O_RDONLY)
@@ -43,4 +37,7 @@ class LocalArtifactStore(ArtifactStore):
         return (self._base / ref).read_text(encoding="utf-8")
 
     def delete(self, ref: str) -> None:
-        Path(ref).unlink(missing_ok=True)
+        path = Path(ref)
+        if not path.is_absolute():
+            path = self._base / ref
+        path.unlink(missing_ok=True)

@@ -3,10 +3,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from orchestrator.schemas.artifacts import RunMetadata
 from orchestrator.storage.artifact_store import ArtifactStore, DurabilityLevel, WriteResult
 from orchestrator.storage.local_store import LocalArtifactStore
 from orchestrator.workspace import WorkspaceManager
-
 
 # ── LocalArtifactStore tests ──────────────────────────────────────────────
 
@@ -18,11 +18,12 @@ def test_local_store_str_roundtrip(tmp_path: Path):
     assert data == "Hello, world!"
 
 
-def test_local_store_bytes_write(tmp_path: Path):
+def test_local_store_unicode_str(tmp_path: Path):
     store = LocalArtifactStore(tmp_path)
-    result = store.write("test/data.bin", b"\x00\x01\x02\xff")
-    raw = Path(result.ref).read_bytes()
-    assert raw == b"\x00\x01\x02\xff"
+    content = "héllo wörld ☕\n\u00e9\u2603"
+    result = store.write("test/unicode.txt", content)
+    data = store.read(result.ref)
+    assert data == content
 
 
 def test_local_store_atomicity(tmp_path: Path):
@@ -93,9 +94,6 @@ def workspace_mgr(tmp_path: Path) -> WorkspaceManager:
 
 
 def _create_run(workspace_mgr: WorkspaceManager, run_id: str):
-    from datetime import datetime, timezone
-    from orchestrator.schemas.artifacts import RunMetadata
-
     workspace_mgr.create_run_directory(run_id)
     meta = RunMetadata(
         run_id=run_id,
@@ -147,9 +145,6 @@ def test_workspace_delegates_to_store(tmp_path: Path):
     mgr = WorkspaceManager(tmp_path, store=mock_store)
     mgr.setup()
 
-    from datetime import datetime, timezone
-    from orchestrator.schemas.artifacts import RunMetadata
-
     mgr.create_run_directory("r_1")
     meta = RunMetadata(
         run_id="r_1",
@@ -177,11 +172,6 @@ def test_workspace_default_store(tmp_path: Path):
 
 
 def test_dual_write_store_failure(tmp_path: Path):
-    from datetime import datetime, timezone
-    from unittest.mock import MagicMock
-
-    from orchestrator.schemas.artifacts import RunMetadata
-
     mock_store = MagicMock(spec=ArtifactStore)
     mock_store.write.side_effect = RuntimeError("store down")
 
@@ -209,10 +199,6 @@ def test_dual_write_store_failure(tmp_path: Path):
 
 
 def test_apply_json_final_success_reaches_store(tmp_path: Path):
-    from datetime import datetime, timezone
-
-    from orchestrator.schemas.artifacts import RunMetadata
-
     mock_store = MagicMock(spec=ArtifactStore)
     mgr = WorkspaceManager(tmp_path, store=mock_store)
     mgr.setup()
