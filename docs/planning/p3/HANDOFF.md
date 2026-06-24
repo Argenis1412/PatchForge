@@ -242,8 +242,8 @@ Final output:
 | Blocker | Status | Branch | Commit | Summary |
 |---------|--------|--------|--------|---------|
 | B1 — WAL Atomic Apply | ✅ Done | `feat/issue-XXX` | `COMMIT` | [1-line summary] |
-Tests: X passed, 0 failed
-TODOs: [none / list]
+| Tests | X passed, 0 failed | — | — | — |
+| TODOs | [none / list] | — | — | — |
 ```
 
 ---
@@ -255,5 +255,5 @@ TODOs: [none / list]
 | B1 — WAL Atomic Apply | ✅ Done | `feat/issue-121-b1-wal-atomic-apply` | `ccba78e` | WAL atomic apply with crash-safe 5-phase checkpointing via `_wal_write` |
 | B2 — RunMetadata SSoT | ✅ Done | `feat/issue-123-runmetadata-ssot` | `c59274b` | 9 execution-context fields added to RunMetadata; WorkspaceManager env-var fallback |
 | B4 — CB Externalized (SQLite) | ✅ Done | `feat/issue-126-cb-externalized` | `ac978c7` | SQLite-backed CB with `_reload_state()`, `time.time()`, `SqliteCircuitBreakerStore`; `_call_with_half_open_probe` removed; cross-worker state sharing + exponential backoff |
-Tests: 417 passed, 0 failed
-TODOs: none
+| Tests | 417 passed, 0 failed | — | — | — |
+| TODOs | none | — | — | — |
