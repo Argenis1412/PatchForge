@@ -119,7 +119,7 @@ def dequeue_issue(conn: sqlite3.Connection) -> Optional[dict]:
         "SELECT id FROM work_queue "
         "WHERE status = 'pending' "
         "OR (status = 'processing' AND lease_expires_at <= datetime('now') AND retries < 3) "
-        "ORDER BY created_at ASC LIMIT 1"
+        "ORDER BY created_at ASC, id ASC LIMIT 1"
         ") "
         "RETURNING run_id, issue_number, repo, payload, retries"
     )

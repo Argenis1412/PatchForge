@@ -42,12 +42,9 @@ def test_dequeue_lease_expiry(qdb):
     first = dequeue_issue(qdb)
     assert first is not None and first["retries"] == 0
     assert first["issue_number"] == 1
-    sim_id = qdb.execute(
-        "SELECT id FROM work_queue WHERE issue_number = 1"
-    ).fetchone()["id"]
+    sim_id = qdb.execute("SELECT id FROM work_queue WHERE issue_number = 1").fetchone()["id"]
     qdb.execute(
-        "UPDATE work_queue SET lease_expires_at = datetime('now', '-1 minute') "
-        "WHERE id = ?",
+        "UPDATE work_queue SET lease_expires_at = datetime('now', '-1 minute') WHERE id = ?",
         (sim_id,),
     )
     second = dequeue_issue(qdb)
