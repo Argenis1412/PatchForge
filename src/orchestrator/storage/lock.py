@@ -122,7 +122,10 @@ def acquire_repo_lock(
 ) -> bool:
     if db_dir is None:
         return False
-    conn = _sqlite_connect(db_dir / "coordination.db")
+    try:
+        conn = _sqlite_connect(db_dir / "coordination.db")
+    except Exception:
+        return False
     try:
         conn.execute(
             "CREATE TABLE IF NOT EXISTS repo_lock ("
@@ -154,7 +157,10 @@ def acquire_repo_lock(
 
 
 def release_repo_lock(repo_identity: str, worker_id: str, db_dir: Path) -> None:
-    conn = _sqlite_connect(db_dir / "coordination.db")
+    try:
+        conn = _sqlite_connect(db_dir / "coordination.db")
+    except Exception:
+        return
     try:
         conn.execute("BEGIN IMMEDIATE")
         conn.execute(

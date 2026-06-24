@@ -14,11 +14,9 @@ def workspace_mgr(tmp_path: Path) -> WorkspaceManager:
     return mgr
 
 
-def test_workspace_isolation():
+def test_workspace_isolation(tmp_path: Path):
     """Verify WorkspaceManager instances use unique paths based on worker_id."""
-    from pathlib import Path
-
-    root = Path("/tmp/test-isolation")
+    root = tmp_path / "test-isolation"
     w1 = WorkspaceManager(root, worker_id="worker-abc")
     w2 = WorkspaceManager(root, worker_id="worker-xyz")
 
@@ -51,7 +49,8 @@ def test_stale_workspace_cleanup(tmp_path: Path):
     non_worker = parent / "not-a-worker"
     non_worker.mkdir()
 
-    mgr = WorkspaceManager(parent / "worker-our")
+    mgr = WorkspaceManager(parent, worker_id="worker-our")
+    mgr.setup()
     mgr.cleanup_stale_workspaces(max_age_hours=24)
 
     assert not old_dir.exists()

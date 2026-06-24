@@ -59,6 +59,7 @@ class WorkspaceManager:
             self.temp,
         ]:
             directory.mkdir(parents=True, exist_ok=True)
+        (self.root / ".workspace").touch()
 
     def staging_dir_for_run(self, run_id: str) -> Path:
         path = self.outputs / "staging" / run_id
@@ -69,11 +70,16 @@ class WorkspaceManager:
         import shutil
         import time
 
+        if not self._worker_id:
+            return
+        base_dir = self.root.parent
         now = time.time()
         cutoff = now - (max_age_hours * 3600)
-        for child in self.root.parent.iterdir():
+        for child in base_dir.iterdir():
             if child.is_dir() and child.name.startswith("worker-"):
-                if child.stat().st_mtime < cutoff:
+                hb = child / ".workspace"
+                mtime = hb.stat().st_mtime if hb.exists() else child.stat().st_mtime
+                if mtime < cutoff:
                     shutil.rmtree(child, ignore_errors=True)
 
     def read_manifest(self) -> dict:
