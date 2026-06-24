@@ -123,6 +123,17 @@ class CircuitBreaker:
             },
         )
 
+    def _reload_state(self) -> None:
+        """Sync in-memory state from store. Picks up changes written by other workers.
+        Unlike _load_state(), keeps current defaults when no DB row exists yet."""
+        row = self._store.get_state(self._provider_name)
+        if row:
+            self._state = CircuitBreakerState(row["state"])
+            self._consecutive_failures = row.get("failures") or 0
+            self._last_failure_time = row.get("last_failure_at") or 0.0
+            if row.get("recovery_timeout") is not None:
+                self._recovery_timeout = float(row["recovery_timeout"])
+
     # ------------------------------------------------------------------
     # Public interface
     # ------------------------------------------------------------------
@@ -142,7 +153,8 @@ class CircuitBreaker:
                 elapsed, or if a HALF_OPEN probe is already in flight.
             Exception: whatever fn() raises — propagated as-is (never wrapped).
         """
-        now = time.monotonic()
+        self._reload_state()
+        now = time.time()
 
         if self._state == CircuitBreakerState.CLOSED:
             return self._execute_closed(fn)
@@ -212,7 +224,7 @@ class CircuitBreaker:
         if self._consecutive_failures >= self._failure_threshold:
             previous_state = self._state
             self._state = CircuitBreakerState.OPEN
-            self._last_failure_time = time.monotonic()
+            self._last_failure_time = time.time()
             # Exponential backoff: index = (consecutive-1) // threshold, capped.
             backoff_index = min(
                 (self._consecutive_failures - 1) // self._failure_threshold,

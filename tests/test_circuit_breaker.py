@@ -106,10 +106,10 @@ def test_open_to_half_open_after_timeout(monkeypatch):
     base_time = 1000.0
     current_time = [base_time]
 
-    def fake_monotonic():
+    def fake_time():
         return current_time[0]
 
-    monkeypatch.setattr(time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(time, "time", fake_time)
 
     # Open the CB
     for _ in range(2):
@@ -140,7 +140,7 @@ def test_half_open_success_closes(monkeypatch):
 
     base_time = 1000.0
     current_time = [base_time]
-    monkeypatch.setattr(time, "monotonic", lambda: current_time[0])
+    monkeypatch.setattr(time, "time", lambda: current_time[0])
 
     for _ in range(2):
         with pytest.raises(ValueError):
@@ -172,7 +172,7 @@ def test_half_open_failure_reopens(monkeypatch):
 
     base_time = 1000.0
     current_time = [base_time]
-    monkeypatch.setattr(time, "monotonic", lambda: current_time[0])
+    monkeypatch.setattr(time, "time", lambda: current_time[0])
 
     # Open the CB
     for _ in range(2):
@@ -253,7 +253,7 @@ def test_half_open_rejects_additional_calls(monkeypatch):
 
     base_time = 1000.0
     current_time = [base_time]
-    monkeypatch.setattr(time, "monotonic", lambda: current_time[0])
+    monkeypatch.setattr(time, "time", lambda: current_time[0])
 
     # Open the CB
     for _ in range(2):
@@ -288,7 +288,7 @@ def test_cb_open_error_not_self_counted(monkeypatch):
 
     base_time = 1000.0
     current_time = [base_time]
-    monkeypatch.setattr(time, "monotonic", lambda: current_time[0])
+    monkeypatch.setattr(time, "time", lambda: current_time[0])
 
     for _ in range(2):
         with pytest.raises(ValueError):
@@ -321,7 +321,7 @@ def test_half_open_inflight_reset_on_failure(monkeypatch):
 
     base_time = 1000.0
     current_time = [base_time]
-    monkeypatch.setattr(time, "monotonic", lambda: current_time[0])
+    monkeypatch.setattr(time, "time", lambda: current_time[0])
 
     # Step 1 — Open the CB
     for _ in range(2):
@@ -395,7 +395,7 @@ def test_exponential_backoff(monkeypatch):
     cb = make_cb(threshold=3, store=store)
 
     current_time = [0.0]
-    monkeypatch.setattr(time, "monotonic", lambda: current_time[0])
+    monkeypatch.setattr(time, "time", lambda: current_time[0])
 
     def fail():
         raise ValueError("x")
@@ -436,43 +436,37 @@ def test_exponential_backoff(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# B4 Test 13 — HALF_OPEN probe slot contention
+# B4 Test 13 — Cross-worker state sharing via _reload_state()
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-def test_half_open_probe_lock(tmp_path):
-    """_call_with_half_open_probe raises ProbeSlotBusyError when token held."""
-    from orchestrator.agents.executor.providers import (
-        ProbeSlotBusyError,
-        _call_with_half_open_probe,
-    )
-    from orchestrator.storage import _sqlite_connect
+def test_cross_worker_state_sharing(tmp_path):
+    """_reload_state() in call() picks up OPEN state written by another CB instance.
+
+    Simulates: CB2 is created when state is CLOSED, then CB1 opens the CB.
+    CB2's next call() must reload state and fast-reject without calling fn.
+    """
     from orchestrator.storage.lock import SqliteCircuitBreakerStore
 
     store = SqliteCircuitBreakerStore(tmp_path)
 
-    # Seed HALF_OPEN state
-    store.set_state(
-        "gemini",
-        {
-            "state": CircuitBreakerState.HALF_OPEN.value,
-            "failures": 3,
-            "last_failure_at": 0.0,
-            "recovery_timeout": 60.0,
-        },
-    )
+    # CB2 created while state is still CLOSED (nothing in DB yet)
+    cb2 = CircuitBreaker("test_provider", store, failure_threshold=3)
+    assert cb2.state is CircuitBreakerState.CLOSED
 
-    # Open a second connection and insert a probe token (simulates first worker)
-    conn = _sqlite_connect(tmp_path / "coordination.db")
-    conn.execute(
-        "INSERT INTO half_open_probe (provider, worker_id, acquired_at) "
-        "VALUES ('gemini', 'worker-1', datetime('now'))"
-    )
+    # CB1 opens the CB via 3 failures
+    cb1 = make_cb(threshold=3, store=store)
+    for _ in range(3):
+        with pytest.raises(ValueError):
+            cb1.call(lambda: (_ for _ in ()).throw(ValueError("x")))  # type: ignore[misc]
 
-    # Second worker should be rejected
+    assert cb1.state is CircuitBreakerState.OPEN
+
+    # CB2 was stale (CLOSED in memory), but call() reloads state and sees OPEN
     fn = MagicMock(return_value="ok")
-    with pytest.raises(ProbeSlotBusyError):
-        _call_with_half_open_probe(conn, "gemini", fn)
+    with pytest.raises(CircuitBreakerOpenError):
+        cb2.call(fn)
 
     fn.assert_not_called()
+    assert cb2.state is CircuitBreakerState.OPEN

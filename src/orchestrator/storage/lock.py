@@ -29,6 +29,7 @@ class SqliteCircuitBreakerStore(CircuitBreakerStore):
     """Shared SQLite-backed store. State persists across worker restarts."""
 
     def __init__(self, db_dir: Path) -> None:
+        db_dir.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection = _sqlite_connect(db_dir / "coordination.db")
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS cb_state ("
