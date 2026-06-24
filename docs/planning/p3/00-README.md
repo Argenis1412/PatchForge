@@ -15,7 +15,7 @@
 | 0 | B1 — WAL Atomic Apply | ✅ Done | `feat/issue-121-b1-wal-atomic-apply` | `ccba78e` | WAL atomic apply with crash-safe 5-phase checkpointing via `_wal_write` |
 | 0 | B2 — RunMetadata SSoT | ✅ Done | `feat/issue-123-runmetadata-ssot` | `c59274b` | 9 execution-context fields; WorkspaceManager env-var fallback |
 | 1 | B4 — CB Externalized (SQLite) | ✅ Done | `feat/issue-126-cb-externalized` | `ac978c7` | SQLite-backed CB via `SqliteCircuitBreakerStore`; `_reload_state()` for cross-worker sharing; `time.time()` for restart-safe persistence; exponential backoff 1min→15min |
-| 1 | B7 — Workspace Isolation | ❌ Pending | — | — | |
+| 1 | B7 — Workspace Isolation | ✅ Done | `feat/b7-workspace-isolation` | `2ff95a3` | WorkspaceManager worker_id scoping; repo_lock table in coordination.db; cleanup_stale_workspaces() |
 | 2 | B8a — Work Queue Schema | ❌ Pending | — | — | |
 | 2 | B8b — Worker Loop | ❌ Pending | — | — | |
 | 2 | B3 — GitHub Client | ❌ Pending | — | — | |
