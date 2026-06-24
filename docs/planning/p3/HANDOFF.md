@@ -259,5 +259,5 @@ Final output:
 | B7 — Workspace Isolation & Repo Lock | ✅ Done | `feat/b7-workspace-isolation` | `2ff95a3` | `worker_id` scoping in WorkspaceManager; `acquire_repo_lock()` / `release_repo_lock()` in coordination.db; `cleanup_stale_workspaces()`; 4 new tests |
 | B8a — Work Queue Schema | ✅ Done | `feat/issue-132-work-queue-schema` | `27fa268` | SQLite queue.db layer with 3 tables; `enqueue_issue()` with 24h TTL lock; `dequeue_issue()` with lease + max 3 retries; `bootstrap_databases()` in bootstrap.py |
 | B5 — Artifact Store | ✅ Done | `feat/issue-134-b5-artifact-store` | `5551778` | Pluggable `ArtifactStore` ABC with `LocalArtifactStore` (atomic WAL writes); integrated into `WorkspaceManager` with dual-write pattern; committed_local reaches store |
-| Tests | — | — | — | — |
+| Tests | 422 passed, 2 skipped, 0 failed | — | — | — |
 | TODOs | none | — | — | — |
