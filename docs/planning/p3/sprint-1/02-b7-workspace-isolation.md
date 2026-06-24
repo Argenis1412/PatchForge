@@ -164,7 +164,7 @@ def cleanup_stale_workspaces(self, max_age_hours: int = 24) -> None:
 - [ ] Two workers never write to the same staging directory
 - [ ] Repo lock prevents simultaneous `git apply` on the same clone — no TOCTOU race possible
 - [ ] Stale locks are reaped transactionally (TTL check in `BEGIN IMMEDIATE`)
-- [ ] Two stores for blast radius isolation: `coordination.db` (B4 cb_state + repo_lock + half_open_probe) and `queue.db` (B8 work_queue + pipeline_checkpoint + issue_lock). A corruption in one never blocks the other.
+- [ ] Two stores for blast radius isolation: `coordination.db` (B4 cb_state + B7 repo_lock) and `queue.db` (B8 work_queue + pipeline_checkpoint + issue_lock). A corruption in one never blocks the other.
 - [ ] Repo locking is **optional** and **disabled by default** (`REPO_LOCK_ENABLED=False`)
 
 ---

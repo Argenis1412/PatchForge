@@ -36,10 +36,7 @@ In `src/orchestrator/storage/circuit_breaker_store.py` (new from B4), replace al
 |----------|----------------|------------------------------|
 | `_persist_state()` | `"state": self._state.value` | ✅ already correct — writes lowercase |
 | `_load_full_state()` `state["state"] == "OPEN"` | `"OPEN"` | `state["state"] == CircuitBreakerState.OPEN.value` |
-| `_call_with_half_open_probe()` `fresh["state"] == "OPEN"` | `"OPEN"` | `CircuitBreakerState.OPEN.value` |
-| `_call_with_half_open_probe()` `SET state = 'HALF_OPEN'` | `'HALF_OPEN'` | `f"SET state = '{CircuitBreakerState.HALF_OPEN.value}'"` |
-| `_call_with_half_open_probe()` `current_state = ... "CLOSED"` | `"CLOSED"` | `CircuitBreakerState.CLOSED.value` |
-| `_call_with_half_open_probe()` `if current_state != "HALF_OPEN"` | `"HALF_OPEN"` | `CircuitBreakerState.HALF_OPEN.value` |
+| `_call_with_half_open_probe()` was **removed** in e81fafe | N/A | N/A — function eliminated; `CircuitBreaker.call()` uses `CircuitBreakerState.OPEN.value` via `_reload_state()` |
 | `_pre_dequeue_backpressure()` `WHERE state = 'OPEN'` | `'OPEN'` | `f"WHERE state = '{CircuitBreakerState.OPEN.value}'"` |
 | Manual verification test `set_state('gemini', {'state': 'OPEN', ...})` | `'OPEN'` | `CircuitBreakerState.OPEN.value` |
 
@@ -237,12 +234,13 @@ execute_apply(run_id=run_id, workspace=repo_path, issue_number=issue_number, wor
 
 **Cause:** The docs refer to exceptions that don't exist. The real class is `CircuitBreakerOpenError` (in `exceptions.py:106`).
 
+**Note:** `_call_with_half_open_probe` and `ProbeSlotBusyError` were **removed** in commit `e81fafe`. The `CircuitBreaker` class with `SqliteCircuitBreakerStore` is the sole mechanism. No `circuit_breaker_store.py` was ever created — the store lives in `lock.py`.
+
 **Fix:** Replace every occurrence:
 
 | File | Old | New |
 |------|-----|-----|
-| `circuit_breaker_store.py` | `class ProbeSlotBusy(CircuitBreakerException)` | `class ProbeSlotBusyError(PatchForgeError)` |
-| `circuit_breaker_store.py` | `raise CircuitBreakerOpenException(...)` | `raise CircuitBreakerOpenError(...)` |
+| `lock.py` | N/A | ✅ Already uses `CircuitBreakerOpenError` from `exceptions.py` |
 | `work_queue.py` | `except (CircuitBreakerOpenException, ProbeSlotBusy)` | `except CircuitBreakerOpenError` |
 
 And fix the import in `work_queue.py`:
@@ -255,25 +253,7 @@ from orchestrator.exceptions import CircuitBreakerOpenException
 from orchestrator.exceptions import CircuitBreakerOpenError
 ```
 
-Note: `ProbeSlotBusy` is a "yield, don't burn retry" signal. In the worker loop, handle it inside the `except CircuitBreakerOpenError:` block by checking `"probe" in str(e).lower()` or better, make it a subclass of `CircuitBreakerOpenError`. Add to `exceptions.py`:
-
-```python
-class ProbeSlotBusyError(CircuitBreakerOpenError):
-    """Raised when all half-open probe slots are occupied.
-    Caller should yield and retry without burning a retry count."""
-```
-
-Then in `work_queue.py`:
-
-```python
-# Old:
-except (CircuitBreakerOpenException, ProbeSlotBusy):
-
-# New:
-except CircuitBreakerOpenError:
-```
-
-The B8b AC already distinguishes CB→yield vs ProbeSlotBusy→yield — both yield without burning retries, so a single catch is correct.
+The `ProbeSlotBusy`/`ProbeSlotBusyError` class is **not needed** — it was part of the removed `_call_with_half_open_probe` approach. The worker loop catches `CircuitBreakerOpenError` only, which covers all CB rejections.
 
 ---
 
@@ -337,7 +317,7 @@ Then add imports to these files:
 |------|-----|
 | `src/orchestrator/storage/work_queue.py` | `from orchestrator.storage import _sqlite_connect` |
 | `src/orchestrator/storage/lock.py` | `from orchestrator.storage import _sqlite_connect` |
-| `src/orchestrator/storage/circuit_breaker_store.py` | `from orchestrator.storage import _sqlite_connect` |
+| `src/orchestrator/storage/circuit_breaker_store.py` (NOT CREATED) | N/A — store lives in `lock.py`, import already present |
 
 ---
 
@@ -693,10 +673,10 @@ def cleanup_stale_workspaces(workspace_mgr: WorkspaceManager, worker_id: str) ->
 | File | Changes |
 |------|---------|
 | `src/orchestrator/storage/__init__.py` | Create with `_sqlite_connect()` |
-| `src/orchestrator/circuit_breaker.py` | Add `state_value` property |
-| `src/orchestrator/storage/circuit_breaker_store.py` | Fix CB casing to `.value`; fix `ProbeSlotBusyError` |
+| `src/orchestrator/circuit_breaker.py` | Add `state_value` property (N/A — `_call_with_half_open_probe` removed; `CircuitBreaker` uses `.value` directly in `_persist_state()`) |
+| `src/orchestrator/storage/circuit_breaker_store.py` | **NOT CREATED** — store lives in `lock.py`; CB casing already correct via `.value` in `set_state()` |
 | `src/orchestrator/storage/work_queue.py` | Fix import; fix `_pre_dequeue_backpressure`; fix `_hydrate_workspace`; fix `_execute_apply_with_checkpoints` recovery; fix branch format; fix `_sqlite_connect` import |
-| `src/orchestrator/exceptions.py` | Add `ProbeSlotBusyError(CircuitBreakerOpenError)` |
+| `src/orchestrator/exceptions.py` | Add `ProbeSlotBusyError(CircuitBreakerOpenError)` — N/A, removed in e81fafe; `CircuitBreaker` + `SqliteCircuitBreakerStore` is sole mechanism |
 | `src/orchestrator/git.py` | Add `checkout_detached`, `delete_local_branch`, `push_delete_remote` |
 | `src/orchestrator/commands/apply.py` | Fix branch to unified format; add `issue_number` to `execute()`; fix failure-path `_wal_write`; wrap with repo lock; add TODO-B3 markers |
 | `src/orchestrator/schemas/artifacts.py` | Add `issue_number: Optional[int] = None` to `RunMetadata` |
@@ -717,7 +697,7 @@ def cleanup_stale_workspaces(workspace_mgr: WorkspaceManager, worker_id: str) ->
 - [ ] `checkout_detached`, `delete_local_branch`, `push_delete_remote` exist in `git.py` with correct git commands
 - [ ] `_execute_apply_with_checkpoints` recovery uses real functions, not phantoms
 - [ ] `CircuitBreakerOpenError` is the only CB exception in the codebase (no `CircuitBreakerOpenException` / `CircuitBreakerException`)
-- [ ] `ProbeSlotBusyError(CircuitBreakerOpenError)` exists in `exceptions.py`
+- [ ] `ProbeSlotBusyError(CircuitBreakerOpenError)` was **removed** in e81fafe — `CircuitBreaker.call()` with `SqliteCircuitBreakerStore` is the sole CB mechanism; no probe token needed
 - [ ] `apply.py:execute()` acquires repo lock when `coordination_db_dir` is provided
 - [ ] `_sqlite_connect()` is imported in all storage files via `from orchestrator.storage import _sqlite_connect`
 - [ ] `risk_gate.json` persisted via `workspace_mgr.write_artifact()` in both `check_plan_gate()` and `check_patch_gate()`

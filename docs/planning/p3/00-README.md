@@ -14,7 +14,7 @@
 | 0 | B6 — Risk Gate Audit Trail | ✅ Done | `feat/issue-118-risk-gate-audit-trail` | `b2b769d` | `_is_dangerous()`, `risk_gate.json` artifact, `failure_artifacts` |
 | 0 | B1 — WAL Atomic Apply | ✅ Done | `feat/issue-121-b1-wal-atomic-apply` | `ccba78e` | WAL atomic apply with crash-safe 5-phase checkpointing via `_wal_write` |
 | 0 | B2 — RunMetadata SSoT | ✅ Done | `feat/issue-123-runmetadata-ssot` | `c59274b` | 9 execution-context fields; WorkspaceManager env-var fallback |
-| 1 | B4 — CB Externalized (SQLite) | ❌ Pending | — | — | |
+| 1 | B4 — CB Externalized (SQLite) | ✅ Done | `feat/issue-126-cb-externalized` | `ac978c7` | SQLite-backed CB via `SqliteCircuitBreakerStore`; `_reload_state()` for cross-worker sharing; `time.time()` for restart-safe persistence; exponential backoff 1min→15min |
 | 1 | B7 — Workspace Isolation | ❌ Pending | — | — | |
 | 2 | B8a — Work Queue Schema | ❌ Pending | — | — | |
 | 2 | B8b — Worker Loop | ❌ Pending | — | — | |
@@ -63,7 +63,7 @@ Sprint 2 (CI/CD Surface)
 
 1. **Single source of truth:** `run.json` (RunMetadata) is the only context schema. No parallel `WorkerContext` or `PipelineRun` for routing.
 2. **WAL bypasses ArtifactStore:** `apply.json` with `status: "applying"` writes directly to local filesystem — never delegated to a pluggable store.
-3. **Circuit Breaker OPEN = zero calls:** No LLM call executes when state is OPEN. Guarda is inside `_call_with_half_open_probe`, not just `_pre_dequeue_backpressure`.
+3. **Circuit Breaker OPEN = zero calls:** No LLM call executes when state is OPEN. `CircuitBreaker.call()` reads state from shared SQLite via `_reload_state()` and rejects before any LLM call. In-process `_half_open_in_flight` is process-local — cross-worker HALF_OPEN contention is not prevented (accepted relaxation).
 4. **run_id ↔ patch bijection:** Each `run_id` produces exactly one patch. Checkpoints guarantee LLM stages run at most once per `run_id`.
 5. **Queue = source of truth for work:** Webhook enqueues via single-DB ACID transaction. `issue_lock` prevents duplicate admission.
 6. **Branch name is immutable idempotency key:** `patchforge/run_{run_id}/issue_{issue_number}` — never read PR body or GitHub labels for idempotency.
@@ -169,7 +169,7 @@ Repo layout: src/orchestrator/{commands,agents,schemas,storage,clients,integrati
 Active invariants (never violate):
 1. run.json is the only context schema — no WorkerContext
 2. apply.json WAL writes directly to filesystem — never to ArtifactStore
-3. CB OPEN = zero calls — guard is inside _call_with_half_open_probe
+3. CB OPEN = zero calls — guard is inside CircuitBreaker.call() with _reload_state() from shared SqliteCircuitBreakerStore
 4. Branch name is the idempotency key — never PR body or labels
 5. Two SQLite stores: coordination.db and queue.db
 6. _wal_write REQUIRES fsync — tmp.stat() does NOT guarantee durability

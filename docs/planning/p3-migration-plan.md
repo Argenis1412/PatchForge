@@ -227,56 +227,22 @@ P3 (Async Workers & CI/CD Integration) is **not ready** for implementation as-is
 5. Add reactive HALF_OPEN probe in the provider call layer — probe token is acquired only when the worker is about to actually call the LLM, not before dequeuing:
 
     ```python
-    class ProbeSlotBusy(CircuitBreakerException):
-        """HALF_OPEN probe slot is held by another worker — yield issue without burning retry."""
-
-    def _call_with_half_open_probe(conn_coord, provider_name, fn, *args):
-        """Reactive HALF_OPEN probe: acquire token only when calling the LLM.
-        Prevents wasted probes on non-LLM stages (apply, validator if local)."""
-        state = conn_coord.execute(
-            "SELECT state FROM cb_state WHERE provider = ?", (provider_name,)
-        ).fetchone()["state"]
-
-        if state == "OPEN":
-            raise CircuitBreakerOpenException(provider_name)
-        if state != "HALF_OPEN":
-            return fn(*args)  # CLOSED
-
-        # HALF_OPEN: try acquire probe token reactively
-        conn_coord.execute("BEGIN IMMEDIATE")
-        token = conn_coord.execute(
-            "SELECT 1 FROM half_open_probe WHERE provider = ?", (provider_name,)
-        ).fetchone()
-        if token:
-            conn_coord.rollback()
-            raise ProbeSlotBusy(provider_name)  # caught by worker loop → yield
-
-        conn_coord.execute(
-            "INSERT INTO half_open_probe (provider, worker_id, acquired_at) "
-            "VALUES (?, ?, datetime('now'))",
-            (provider_name, WORKER_ID)
-        )
-        conn_coord.commit()
-        try:
-            result = fn(*args)  # actual LLM call
-            return result
-        except Exception:
-            # Probe failed — release token; CB transitions back to OPEN
-            _release_probe_token(conn_coord, provider_name)
-            conn_coord.commit()
-            raise
-
-    # Usage in provider.generate():
-    def generate(provider, prompt, conn_coord, ...):
-        return _call_with_half_open_probe(conn_coord, provider, _do_generate, prompt, ...)
+    # NOTE: The implementation (commits e81fafe, ac978c7) diverged from this spec.
+    # _call_with_half_open_probe, ProbeSlotBusyError, _release_probe_token,
+    # and _cleanup_stale_probes were removed. Instead:
+    #   - CircuitBreaker.call() is the sole production gatekeeper
+    #   - SqliteCircuitBreakerStore is injected into circuit_breaker_for()
+    #   - _reload_state() reads shared SQLite state on every call()
+    #   - time.time() replaces time.monotonic() for restart-safe persistence
+    #   - _half_open_in_flight is process-local only; cross-worker contention is accepted
+    #   - half_open_probe table exists in coordination.db but is UNUSED by production code
     ```
 
 **ACs:**
-- CB state survives worker restart
-- A Gemini outage opens CB globally via shared SQLite
-- Exponential backoff prevents thundering herd on recovery
-- HALF_OPEN probe token is acquired reactively inside the provider call — non-LLM stages (`apply`, file-only validator) never waste the probe slot
-- `ProbeSlotBusy` is a `CircuitBreakerException` subclass — does not count toward retry budget in the worker loop
+- CB state survives worker restart — `SqliteCircuitBreakerStore` persists to `coordination.db`
+- A Gemini outage opens CB globally — `_reload_state()` on each `call()` reads latest state from shared SQLite
+- Exponential backoff prevents thundering herd on recovery (60s → 900s cap)
+- Cross-worker HALF_OPEN contention is NOT prevented — accepted relaxation (first probe success resets CB for all)
 
 ---
 
@@ -353,6 +319,8 @@ CREATE TABLE pipeline_checkpoint (
         acquired_at TEXT NOT NULL  -- datetime; cleanup stale > 5min
     );
     ```
+
+    **Implementation note:** This table is created by `SqliteCircuitBreakerStore.__init__()` but is **unused** by production code. The accepted relaxation is that cross-worker HALF_OPEN contention is not prevented.
 
 5. Stale lock TTL is enforced by the `expires_at` check — no separate cleanup needed. The store handles it transactionally.
 
@@ -535,21 +503,9 @@ def _hydrate_workspace(run_id: str, workspace: WorkspaceManager, store: Artifact
             pass  # not yet written — first attempt
     return run_dir
 
-def _release_probe_token(conn_coord: sqlite3.Connection, provider: Optional[str] = None):
-    """Release HALF_OPEN probe token. Called from provider layer after probe result is known."""
-    if provider:
-        conn_coord.execute("DELETE FROM half_open_probe WHERE provider = ?", (provider,))
-    else:
-        # Clear all tokens for this worker (if provider unknown)
-        worker = os.environ.get("WORKER_ID", "unknown")
-        conn_coord.execute("DELETE FROM half_open_probe WHERE worker_id = ?", (worker,))
-
-def _cleanup_stale_probes(conn_coord: sqlite3.Connection):
-    """Periodic cleanup: tokens older than 5 minutes are orphaned."""
-    conn_coord.execute(
-        "DELETE FROM half_open_probe "
-        "WHERE acquired_at < datetime('now', '-5 minutes')"
-    )
+# NOTE: _release_probe_token and _cleanup_stale_probes were removed in the actual
+# B4 implementation (commits e81fafe, ac978c7) along with _call_with_half_open_probe.
+# CircuitBreaker.call() + SqliteCircuitBreakerStore is the sole mechanism.
 
 def _ensure_clone(payload: dict, workspace: WorkspaceManager) -> Path:
     """Clone repo if not present in worker's workspace."""
@@ -718,13 +674,13 @@ def _execute_pipeline_with_resume(run_id: str, payload: str,
 - **Exactly-once PR output (cross-run_id):** Branch name encodes issue_number. Webhook handler checks `issue_N` in `pr.head.ref` via `GET /pulls?state=open` — no duplicate even after queue.db recovery. Branch name is immutable (not editable by UI).
 - **run_id ↔ result bijection preserved:** Retry reads `pipeline_checkpoint` table in `queue.db`. Worker B runs `_hydrate_workspace()` before any skip to materialize git clone + run.json + artifacts from ArtifactStore. Apply's 5-phase checkpoint guides exact rollback.
 - **Retry with backoff:** 0 → 5 → 15 minutes before 3rd attempt → dead_letter
-- **CB-aware backpressure:** `CircuitBreakerOpenException` does NOT count as a retry. Pre-dequeue check blocks workers when any provider is OPEN. `scheduled_after` yields by 15-45s (randomized) on HALF_OPEN probe contention. Reactive probe in provider layer prevents wasted probes on non-LLM stages.
+- **CB-aware backpressure:** `CircuitBreakerOpenError` does NOT count as a retry. Pre-dequeue check blocks workers when any provider is OPEN. `scheduled_after` yields by 15-45s (randomized) on HALF_OPEN. `CircuitBreaker.call()` with `_reload_state()` from shared SQLite is the sole production gatekeeper.
 - **Backpressure:** If all workers are busy, issues stay `pending` in the queue
 
 **Files to modify:**
 - `src/orchestrator/storage/work_queue.py` (NEW — work_queue + pipeline_checkpoint + issue_lock tables in `queue.db`)
 - `src/orchestrator/storage/lock.py` (NEW — repo_lock table in `coordination.db`)
-- `src/orchestrator/clients/bootstrap.py` (init both stores: `coordination.db` → cb_state + repo_lock + half_open_probe; `queue.db` → work_queue + pipeline_checkpoint + issue_lock; periodic `_cleanup_stale_probes` task)
+- `src/orchestrator/clients/bootstrap.py` (init both stores: `coordination.db` → cb_state + repo_lock; `queue.db` → work_queue + pipeline_checkpoint + issue_lock)
 
 **ACs:**
 - Worker crash mid-pipeline → retry hydrates workspace via `_hydrate_workspace()` → resumes from last checkpoint via state machine → same patch, same verdict, same PR
@@ -993,7 +949,7 @@ P3 Complete
 | Sprint 2 | Duplicate webhook delivery (re-delivery during inference) | `issue_lock` → `IntegrityError` → discard. No duplicate run_id, no double LLM cost |
 | Sprint 2 | Webhook re-delivery after queue.db corruption | `_existing_pr_for_webhook()` finds PR via `issue_N` in branch name → discards webhook → no duplicate PR |
 | Sprint 2 | CB outage (Gemini down 30 min) while 100 issues pending | Workers detect OPEN via pre-dequeue check → sleep → 0 retries burned, 0 dead-lettered. Non-LLM issues (`apply`) dequeued freely without probe contention |
-| Sprint 2 | CB outage recovers to HALF_OPEN, verify probe works | Reactive `_call_with_half_open_probe` acquires token inside LLM call. First LLM that succeeds transitions CB to CLOSED. Non-LLM issues never touch probe slot |
+| Sprint 2 | CB outage recovers to HALF_OPEN, verify probe works | `CircuitBreaker.call()` with `_reload_state()` sees HALF_OPEN from shared SQLite; process-local `_half_open_in_flight` prevents double-probe in same worker; cross-worker contention accepted; first success resets to CLOSED |
 | Sprint 2 | Backoff test: fail an issue 3 times consecutively | Retry at +0min, +5min, +15min → dead_letter after 3rd |
 | Sprint 2 | Colaborator edits PR body removing `#issue_number` | No effect — idempotency check uses branch name (`pr.head.ref`), not PR body |
 | Sprint 2 | Full retry idempotency | Execute pipeline twice, kill at every stage, compare final patch checksums — all identical |
@@ -1012,7 +968,7 @@ P3 Complete
 | Retry generates different patch under same `run_id` | **None** (design closed) | `pipeline_checkpoint` table in shared SQLite store — each LLM stage runs at most once per `run_id`; Validator and Apply are deterministic |
 | `queue.db` corruption with in-flight issues | Low | **Recovery:** Operator re-delivers webhooks from GitHub Settings (30-day retention). `_existing_pr_for_webhook()` via branch name discards issues with existing PR. Maximum loss: N stage checkpoints. `issue_lock` is lost with queue.db — recreated on re-enqueue (IntegrityError does not apply because there are no duplicates in recovery). `PRAGMA journal_mode=WAL` + daily backup |
 | `coordination.db` corruption | Low | CB resets to CLOSED (auto-recovered in mins), repo locks expire by TTL (max 5min). No human recovery needed |
-| CB open + long outage → workers idle but queue intact | Low | Pre-dequeue OPEN check blocks workers; HALF_OPEN handled reactively per-LLM-call. `CircuitBreakerOpenException`/`ProbeSlotBusy` don't burn retries. 0 issues lost per outage. |
+| CB open + long outage → workers idle but queue intact | Low | Pre-dequeue OPEN check blocks workers; HALF_OPEN handled by `CircuitBreaker.call()` with `_reload_state()`. `CircuitBreakerOpenError` doesn't burn retries. 0 issues lost per outage. |
 | repo_lock enabled unnecessarily | Low | Default is `REPO_LOCK_ENABLED=False`. Workspace isolation + unique branches guarantee no collisions. |
 | Shared SQLite store checkpoint corruption | Low | `PRAGMA journal_mode=WAL` for crash recovery; daily `.db` backup via cron; checkpoint table is INSERT-ONLY (no UPDATE if stage already exists — `INSERT OR REPLACE` is atomic, corruption only loses at most one stage) |
 
@@ -1034,9 +990,9 @@ P3 Complete
 | `storage/__init__.py` | — | — | — | NEW (two-store init: coordination.db + queue.db) |
 | `storage/artifact_store.py` | — | — | — | NEW (ABC) |
 | `storage/local_store.py` | — | — | — | NEW |
-| `storage/lock.py` | — | NEW (repo_lock + half_open_probe tables in coordination.db, BEGIN IMMEDIATE) | — | — |
+| `storage/lock.py` | — | NEW (CircuitBreakerStore ABC + SqliteCircuitBreakerStore; half_open_probe table created but unused) | — | repo_lock added |
 | `storage/work_queue.py` | — | — | — | NEW (work_queue + pipeline_checkpoint + issue_lock tables in queue.db, state-machine worker loop with hydration + CB backpressure + scheduled_after backoff) |
-| `clients/bootstrap.py` | — | NEW (init coordination.db: cb_state, repo_lock, half_open_probe + cleanup_stale_probes task) | — | NEW (init queue.db: work_queue, pipeline_checkpoint, issue_lock) |
+| `clients/bootstrap.py` | — | (table creation handled by SqliteCircuitBreakerStore.__init__) | — | NEW (init queue.db: work_queue, pipeline_checkpoint, issue_lock) |
 | `schemas/queue_payload.py` | — | — | NEW (QueuePayload contract) | — |
 | `clients/github.py` | — | — | define `get_pr_for_branch` signature | NEW (implementation) |
 | `integrations/webhook.py` | — | — | — | NEW |

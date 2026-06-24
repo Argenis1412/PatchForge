@@ -213,122 +213,64 @@ backoff_index = min(self._consecutive_failures // self._failure_threshold, len(R
 self._recovery_timeout = RECOVERY_BACKOFF[backoff_index]
 ```
 
-### 5. Reactive HALF_OPEN probe in provider layer
+### 5. Wire SqliteCircuitBreakerStore into providers.py
 
-Add `_call_with_half_open_probe()` to `src/orchestrator/agents/executor/providers.py`:
+After audit, the reactive HALF_OPEN probe function and its helpers (`_call_with_half_open_probe`, `ProbeSlotBusyError`, `_release_probe_token`, `_cleanup_stale_probes`) were **removed** in favor of a simpler approach: inject `SqliteCircuitBreakerStore` into the existing `circuit_breaker_for()` calls so `CircuitBreaker.call()` reads/writes state directly to shared SQLite.
+
+**Actual implementation** (see commit `e81fafe` / `ac978c7`):
 
 ```python
-from orchestrator.circuit_breaker import CircuitBreakerState
+# providers.py — module-level store, shared by all 3 CBs
+from pathlib import Path
+from orchestrator.storage.lock import SqliteCircuitBreakerStore
 
-class ProbeSlotBusyError(CircuitBreakerOpenError):
-    """HALF_OPEN probe slot is held by another worker — yield without burning retry.
+_coord_db_dir = Path(os.getenv("PATCHFORGE_DATA_DIR", "."))
+_coord_store = SqliteCircuitBreakerStore(_coord_db_dir)
 
-    NOTE: defined here for reference; final definition lives in exceptions.py."""
-
-def _call_with_half_open_probe(conn_coord, provider_name, fn, *args):
-    """Reactive HALF_OPEN probe: acquire token only when calling the LLM.
-    Prevents wasted probes on non-LLM stages (apply, validator if local)."""
-    state = conn_coord.execute(
-        "SELECT * FROM cb_state WHERE provider = ?", (provider_name,)
-    ).fetchone()
-
-    if state and state["state"] == CircuitBreakerState.OPEN.value:
-        last_failure = state["last_failure_at"]
-        recovery_timeout = state["recovery_timeout"]
-        import time
-        if time.time() < last_failure + recovery_timeout:
-            raise CircuitBreakerOpenError(provider_name)
-        # Timeout expired — no external process updates state, so we do it here
-        conn_coord.execute("BEGIN IMMEDIATE")
-        # Re-check inside lock (another worker may have beaten us)
-        fresh = conn_coord.execute(
-            "SELECT state FROM cb_state WHERE provider = ?", (provider_name,)
-        ).fetchone()
-        if fresh and fresh["state"] == CircuitBreakerState.OPEN.value:
-            conn_coord.execute(
-                f"UPDATE cb_state SET state = '{CircuitBreakerState.HALF_OPEN.value}' WHERE provider = ?", (provider_name,)
-            )
-        conn_coord.commit()
-        # Fall through to probe attempt
-        
-    current_state = state["state"] if state else CircuitBreakerState.CLOSED.value
-    if current_state != CircuitBreakerState.HALF_OPEN.value and not (state and state["state"] == CircuitBreakerState.OPEN.value):
-        return fn(*args)  # CLOSED
-
-    # HALF_OPEN: try acquire probe token reactively
-    conn_coord.execute("BEGIN IMMEDIATE")
-    token = conn_coord.execute(
-        "SELECT 1 FROM half_open_probe WHERE provider = ?", (provider_name,)
-    ).fetchone()
-    if token:
-        conn_coord.rollback()
-        raise ProbeSlotBusyError(provider_name)  # caught by worker loop → yield
-
-    conn_coord.execute(
-        "INSERT INTO half_open_probe (provider, worker_id, acquired_at) "
-        "VALUES (?, ?, datetime('now'))",
-        (provider_name, os.environ.get("WORKER_ID", "unknown"))
-    )
-    conn_coord.commit()
-    try:
-        result = fn(*args)  # actual LLM call
-        return result
-    except Exception:
-        _release_probe_token(conn_coord, provider_name)
-        conn_coord.commit()
-        raise
-
-def _release_probe_token(conn_coord, provider=None):
-    if provider:
-        conn_coord.execute("DELETE FROM half_open_probe WHERE provider = ?", (provider,))
-    else:
-        worker = os.environ.get("WORKER_ID", "unknown")
-        conn_coord.execute("DELETE FROM half_open_probe WHERE worker_id = ?", (worker,))
-
-def _cleanup_stale_probes(conn_coord):
-    conn_coord.execute(
-        "DELETE FROM half_open_probe "
-        "WHERE acquired_at < datetime('now', '-5 minutes')"
-    )
+_cb_gemini = circuit_breaker_for("gemini", store=_coord_store)
+_cb_groq   = circuit_breaker_for("groq", store=_coord_store)
+_cb_claude = circuit_breaker_for("claude", store=_coord_store)
 ```
+
+**Key design decisions:**
+- `CircuitBreaker.call()` calls `_reload_state()` at the start — picks up OPEN/HALF_OPEN state written by any worker
+- `_reload_state()` reads from the shared SQLite store — no caching, always fresh
+- `time.time()` replaces `time.monotonic()` for restart-safe persistence across workers
+- `_half_open_in_flight` is process-local only — cross-worker HALF_OPEN contention is NOT prevented (accepted relaxation: first successful probe resets to CLOSED for all)
+- The `half_open_probe` table exists in `coordination.db` but is **unused** by any production code
+- `_on_failure()` uses exponential backoff: `RECOVERY_BACKOFF = [60, 120, 240, 480, 900]`
 
 ---
 
 ## Files to Create/Modify
 
-- **NEW** `src/orchestrator/storage/__init__.py` — Package marker
-- **NEW** `src/orchestrator/storage/lock.py` — `CircuitBreakerStore` interface + `SqliteCircuitBreakerStore`
-- `src/orchestrator/circuit_breaker.py` — Accept store, persist state on mutation, exponential backoff
-- `src/orchestrator/agents/executor/providers.py` — `_call_with_half_open_probe()`, `_release_probe_token()`
-- `src/orchestrator/clients/bootstrap.py` — Initialize `coordination.db` (cb_state + half_open_probe tables)
+- **NEW** `src/orchestrator/storage/lock.py` — `CircuitBreakerStore` interface + `SqliteCircuitBreakerStore` + `_InMemoryCircuitBreakerStore`
+- `src/orchestrator/storage/__init__.py` — Add `_sqlite_connect()` canonical factory
+- `src/orchestrator/circuit_breaker.py` — Accept store, `_load_state()`/`_persist_state()`, `_reload_state()`, exponential backoff, `time.time()`
+- `src/orchestrator/agents/executor/providers.py` — Inject `SqliteCircuitBreakerStore` into `circuit_breaker_for()`
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] CB state survives worker restart (SQLite persistence)
-- [ ] A Gemini outage opens CB globally via shared `coordination.db`
-- [ ] Exponential backoff prevents thundering herd on recovery (1min → 15min cap)
-- [ ] `ProbeSlotBusyError(CircuitBreakerOpenError)` — does not count toward retry budget
-- [ ] Non-LLM stages (apply, file-only validator) never waste the probe slot
+- [ ] CB state survives worker restart — `SqliteCircuitBreakerStore` persists to `coordination.db`
+- [ ] A Gemini outage opens CB globally — `_reload_state()` on each `call()` reads latest state from shared SQLite
+- [ ] Exponential backoff prevents thundering herd on recovery (60s → 900s cap)
+- [ ] Cross-worker HALF_OPEN contention is NOT prevented — accepted relaxation (first probe success resets CB for all)
 
 ---
 
-## Test skeleton (create before running pytest)
+## Test skeleton (appended to `tests/test_circuit_breaker.py`)
 
-Append new cases to the existing `tests/test_circuit_breaker.py`:
 ```python
 def test_cb_state_persists():
     """Verify state transitions are written to SQLite via CircuitBreakerStore."""
-    pass
 
 def test_exponential_backoff():
     """Verify recovery timeout increases exponentially on repeated failures."""
-    pass
 
-def test_half_open_probe_lock():
-    """Verify _call_with_half_open_probe raises ProbeSlotBusy if lock held."""
-    pass
+def test_cross_worker_state_sharing():
+    """Verify _reload_state() in call() picks up OPEN state written by another CB instance."""
 ```
 
 ## Verification

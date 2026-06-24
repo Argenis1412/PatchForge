@@ -262,7 +262,7 @@ No changes needed to `pipeline.py` — it is legacy pre-V1 code (never instantia
 - [ ] Residual risk of task visibility lease expiration without worker heartbeat is documented (tasks exceeding 1 hour can suffer duplicate processing/split-brain)
 - [ ] After 3 failures (non-CB), issue moves to `dead_letter`
 - [ ] CB outage (OPEN) → `CircuitBreakerOpenError` yields issue without burning retry
-- [ ] CB outage (HALF_OPEN) → reactive probe in provider layer → non-LLM issues dequeued freely; only LLM calls compete for probe slot → `ProbeSlotBusyError` yields issue by 15-45s randomized
+- [ ] CB outage (HALF_OPEN) → `CircuitBreaker.call()` with `_reload_state()` reads HALF_OPEN from shared SQLite; process-local `_half_open_in_flight` prevents double-probe within same worker; cross-worker contention is accepted (first success resets CB for all)
 - [ ] `run_id` identifies exactly one patch + verdict
 
 ---
@@ -276,7 +276,7 @@ def test_worker_loop_resumes_from_checkpoint():
     pass
 
 def test_worker_loop_cb_half_open_yields():
-    """Verify ProbeSlotBusyError causes randomized yield without burning retries."""
+    """Verify CircuitBreakerOpenError from shared SQLite state causes randomized yield without burning retries."""
     pass
 ```
 
