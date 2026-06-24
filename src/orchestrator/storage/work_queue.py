@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import secrets
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -57,7 +57,7 @@ def init_queue_db(db_path: Path) -> sqlite3.Connection:
 
 
 def _generate_run_id() -> str:
-    now = datetime.now().strftime("%Y%m%d_%H%M%S")
+    now = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     rand = secrets.token_hex(4)
     return f"run_{now}_{rand}"
 
