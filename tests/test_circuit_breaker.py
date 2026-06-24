@@ -38,7 +38,9 @@ def make_cb(
         store.get_state.return_value = None
         store.set_state.return_value = None
         store.atomic_update.return_value = {}
-    return CircuitBreaker("test_provider", store, failure_threshold=threshold, recovery_timeout=timeout)
+    return CircuitBreaker(
+        "test_provider", store, failure_threshold=threshold, recovery_timeout=timeout
+    )
 
 
 def exhaust_to_open(cb: CircuitBreaker, threshold: int = 3) -> None:

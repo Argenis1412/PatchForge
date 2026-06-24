@@ -194,6 +194,7 @@ class WorkspaceManager:
             self.store.write(f"{run_id}/run.json", data)
         except Exception:
             import logging
+
             logging.getLogger(__name__).warning(
                 "Failed to write run.json to artifact store for run %s", run_id
             )
@@ -231,6 +232,7 @@ class WorkspaceManager:
             self.store.write(f"{run_id}/verdict.json", json_data)
         except Exception:
             import logging
+
             logging.getLogger(__name__).warning(
                 "Failed to write verdict.json to artifact store for run %s", run_id
             )

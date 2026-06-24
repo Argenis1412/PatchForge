@@ -242,6 +242,7 @@ def test_stale_lock_ttl_cleanup(tmp_path: Path):
     assert w1_ok
 
     import time
+
     time.sleep(0.1)
 
     w2_ok = acquire_repo_lock(repo_id, "worker-2", ttl_seconds=60, db_dir=tmp_path)
