@@ -40,107 +40,29 @@ Sprint 2   B8a → B3 → B5 → B8b → (post-audit-fixes.md)
 
 ---
 
-## §2 — Fix for B4 (Circuit Breaker)
+## §2 — Fix for B4 (Circuit Breaker) — IMPLEMENTATION NOTE
 
-### 2.1 `_call_with_half_open_probe` must be the SOLE gatekeeper
+**The original B4 spec defined `_call_with_half_open_probe` as the production gatekeeper. This was discarded after audit. The actual implementation (commits `e81fafe`, `ac978c7`) takes a different approach:**
 
-**Conscious decision:** `_call_with_half_open_probe()` replaces `CircuitBreaker.call()` as the production entry point. The old `CircuitBreaker` class becomes a legacy wrapper (kept for existing tests). **Reason:** The old one uses in-process state with `time.monotonic()` and `_half_open_in_flight` that cannot work across workers. The new one operates exclusively on shared SQLite.
+### 2.1 `CircuitBreaker.call()` with `SqliteCircuitBreakerStore` is the sole gatekeeper
 
-**Changes in `src/orchestrator/circuit_breaker.py`:**
-- The current `__init__` receives `(provider_name, failure_threshold, recovery_timeout)` — add `store: CircuitBreakerStore` parameter
-- Add `_load_state()` and `_persist_state()` (defined in b4 section 3, but with the `.value` fix below)
-- `_on_failure()` instead of mutating `self._state` directly, call `_persist_state()` after every transition
-- **DO NOT** modify `CircuitBreaker.call()` — leave as dead code (only for existing unit tests that don't touch SQLite)
+**Decision:** `CircuitBreaker.call()` is the production entry point, backed by `SqliteCircuitBreakerStore` injected into `circuit_breaker_for()`. `_call_with_half_open_probe`, `ProbeSlotBusyError`, `_release_probe_token`, and `_cleanup_stale_probes` were **removed** — they never existed in the final codebase.
 
-### 2.2 Fix: `CircuitBreakerOpenError(provider_name)` requires 3 arguments
+**Key design:**
+- `CircuitBreaker` accepts `store: CircuitBreakerStore` parameter
+- `_load_state()` reads from store at init; `_persist_state()` writes on every mutation
+- `_reload_state()` called at start of `call()` — picks up cross-worker state changes
+- `time.time()` replaces `time.monotonic()` for restart-safe comparison
+- In-process `_half_open_in_flight` prevents double-probe within same worker
+- Cross-worker HALF_OPEN contention is NOT prevented (accepted relaxation)
 
-In `_call_with_half_open_probe()` (b4 section 5, line 240), **replace**:
+### 2.2 No separate store file
 
-```python
-# WRONG (TypeError):
-raise CircuitBreakerOpenError(provider_name)
-raise ProbeSlotBusyError(provider_name)   # same
-```
+The `CircuitBreakerStore` ABC and `SqliteCircuitBreakerStore` live in `src/orchestrator/storage/lock.py`. The file `circuit_breaker_store.py` was **never created**. Ignore all `04-post-audit-fixes.md` references to it.
 
-**With:**
+### 2.3 No `ProbeSlotBusyError` needed
 
-```python
-# CORRECT:
-raise CircuitBreakerOpenError(
-    provider=provider_name,
-    state=CircuitBreakerState.OPEN,
-    retry_after=last_failure + recovery_timeout,
-)
-```
-
-And for `ProbeSlotBusyError` (line 265):
-
-```python
-# WRONG:
-raise ProbeSlotBusyError(provider_name)
-
-# CORRECT:
-raise ProbeSlotBusyError(
-    provider=provider_name,
-    state=CircuitBreakerState.HALF_OPEN,
-    retry_after=time.time() + 300,  # probe timeout ~5min
-    message="half-open probe slot occupied by another worker",
-)
-```
-
-### 2.3 `ProbeSlotBusyError` must exist before B4
-
-Add to `src/orchestrator/exceptions.py` **before or during B4** (don't wait for post-audit):
-
-```python
-class ProbeSlotBusyError(CircuitBreakerOpenError):
-    """Raised when all half-open probe slots are occupied.
-    Caller should yield and retry without burning a retry count."""
-```
-
-### 2.4 Fix: store in `storage/lock.py`, NOT in `storage/circuit_breaker_store.py`
-
-**Important:** B4 section 2 creates `CircuitBreakerStore` and `SqliteCircuitBreakerStore` in `src/orchestrator/storage/lock.py`. But `04-post-audit-fixes.md` references `src/orchestrator/storage/circuit_breaker_store.py` (which is never created). When implementing B4, ignore any reference to `circuit_breaker_store.py` — the real file is `lock.py`.
-
-### 2.5 `_call_with_half_open_probe` must handle state → HALF_OPEN (OPEN timeout expired)
-
-In b4 section 5, the block that checks OPEN timeout currently does:
-
-```python
-if time.time() < last_failure + recovery_timeout:
-    raise CircuitBreakerOpenError(provider_name)
-# Timeout expired — no external process updates state, so we do it here
-conn_coord.execute("BEGIN IMMEDIATE")
-```
-
-**This is fine** but is missing: after updating to HALF_OPEN and committing, it must reset `last_failure_at` to 0 (so the next `_call_with_half_open_probe` does not see OPEN again). Add:
-
-```python
-# After UPDATE cb_state SET state = 'half_open':
-conn_coord.execute(
-    "UPDATE cb_state SET last_failure_at = NULL WHERE provider = ?",
-    (provider_name,)
-)
-```
-
-### 2.6 Fix: persistent `consecutive_failures` counter in the store
-
-b4 section 5 `_call_with_half_open_probe` does not update `failures` (failure count) in the CB store when a probe error occurs. This means exponential backoff (using `consecutive_failures // failure_threshold`) never progresses. Add to the `except Exception` block of the probe:
-
-```python
-except Exception:
-    _release_probe_token(conn_coord, provider_name)
-    conn_coord.execute(
-        "UPDATE cb_state SET failures = failures + 1 WHERE provider = ?",
-        (provider_name,)
-    )
-    conn_coord.execute(
-        "UPDATE cb_state SET state = ?, last_failure_at = ? WHERE provider = ?",
-        (CircuitBreakerState.OPEN.value, time.time(), provider_name)
-    )
-    conn_coord.commit()
-    raise
-```
+Since `_call_with_half_open_probe` was removed, `ProbeSlotBusyError` was never added to `exceptions.py`. `CircuitBreakerOpenError` is the only CB exception in production code.
 
 ---
 
@@ -405,11 +327,11 @@ Location: method of `GitHubClient` in `src/orchestrator/clients/github.py`.
 
 ## §7 — Accepted Risks for V1 (non-blocking, documented)
 
-### 7.1 Two CB mechanisms not reconciled (architectural)
+### 7.1 Two CB mechanisms not reconciled (architectural) — RESOLVED
 
-`CircuitBreaker.call()` (old, in-process) and `_call_with_half_open_probe()` (new, SQLite) coexist. **Decision:** `_call_with_half_open_probe` is the sole production gatekeeper. The old `CircuitBreaker.call()` is kept exclusively for existing unit tests (`test_circuit_breaker.py`) that don't touch SQLite.
+`_call_with_half_open_probe()` was **removed** in e81fafe. `CircuitBreaker.call()` with `SqliteCircuitBreakerStore` is the **sole** mechanism for both production and tests. There is no dual-path conflict.
 
-**Impact on test coverage:** `test_circuit_breaker.py` tests test the legacy mechanism, not the new one. New integration tests against SQLite are needed to validate cross-worker behavior. This is in the B4 test skeleton.
+**Impact on test coverage:** All 13 tests in `test_circuit_breaker.py` exercise the real `CircuitBreaker` class with either `MagicMock` (in-memory unit tests) or `SqliteCircuitBreakerStore` (integration tests 11-13). Both paths use the same production code.
 
 ### 7.2 `ARTIFACT_MAP` never used in worker recovery
 

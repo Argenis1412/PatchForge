@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 import time
+from pathlib import Path
 
 from orchestrator.circuit_breaker import CircuitBreakerOpenError, circuit_breaker_for
 from orchestrator.clients.anthropic_client import get_anthropic_client
 from orchestrator.clients.gemini_client import get_gemini_client
 from orchestrator.clients.groq_client import get_groq_client
+from orchestrator.storage.lock import SqliteCircuitBreakerStore
 
 from .logging import _get_logger
 
@@ -38,12 +40,19 @@ _PROVIDER_CHAIN: dict[str, list] = {
 }
 
 # ---------------------------------------------------------------------------
-# Shared circuit breakers per provider (process-wide via registry)
+# Shared circuit breakers — backed by coordination.db (SQLite).
+# State persists across restarts and is visible to all workers on the same host.
+# Single-threaded use only: SqliteCircuitBreakerStore is not thread-safe.
+# _half_open_in_flight is process-local; multiple workers may probe simultaneously
+# in HALF_OPEN — acceptable since a successful probe closes the CB for everyone.
 # ---------------------------------------------------------------------------
 
-_cb_gemini = circuit_breaker_for("gemini")
-_cb_groq = circuit_breaker_for("groq")
-_cb_claude = circuit_breaker_for("claude")
+_coord_db_dir = Path(os.getenv("PATCHFORGE_DATA_DIR", "."))
+_coord_store = SqliteCircuitBreakerStore(_coord_db_dir)
+
+_cb_gemini = circuit_breaker_for("gemini", store=_coord_store)
+_cb_groq = circuit_breaker_for("groq", store=_coord_store)
+_cb_claude = circuit_breaker_for("claude", store=_coord_store)
 
 # ---------------------------------------------------------------------------
 # Model Helpers
