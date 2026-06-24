@@ -9,6 +9,8 @@ from orchestrator.safety import validate_filename
 from orchestrator.schemas.artifacts import RunMetadata
 from orchestrator.schemas.experiment import Experiment, Verdict
 from orchestrator.storage import _wal_write
+from orchestrator.storage.artifact_store import ArtifactStore
+from orchestrator.storage.local_store import LocalArtifactStore
 
 # Only allow alphanumeric characters, underscores, and hyphens in run IDs and worker IDs.
 _RUN_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -25,7 +27,13 @@ def _validate_run_id(run_id: str) -> None:
 
 
 class WorkspaceManager:
-    def __init__(self, workspace_path: Path | None = None, worker_id: str = ""):
+    def __init__(
+        self,
+        workspace_path: Path | None = None,
+        worker_id: str = "",
+        *,
+        store: ArtifactStore | None = None,
+    ):
         if workspace_path is not None:
             resolved = Path(workspace_path).resolve()
         else:
@@ -45,6 +53,7 @@ class WorkspaceManager:
                 )
             self.root = self.root / worker_id
         self.runs = self.root / "runs"
+        self.store = store or LocalArtifactStore(self.runs)
         self.logs = self.root / "logs"
         self.prompts = self.root / "prompts"
         self.outputs = self.root / "outputs"
@@ -119,50 +128,51 @@ class WorkspaceManager:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    def write_artifact(self, run_id: str, filename: str, content: str) -> Path:
-        """Write content to an artifact file in an *existing* run directory.
+    def write_artifact(self, run_id: str, name: str, data: str) -> str:
+        """Write content to an artifact file, delegating to the configured store.
 
-        Raises FileNotFoundError if the run does not exist yet — callers must
-        call create_run_directory (i.e. scan) before writing any artifact.
+        Raises FileNotFoundError if the run does not exist yet.
+        Returns the store ref (absolute path for LocalArtifactStore).
         """
         self.ensure_run_exists(run_id)
-        run_dir = self.run_dir(run_id)
-        path = run_dir / validate_filename(filename)
-        path.write_text(content, encoding="utf-8")
-        return path
+        safe_name = validate_filename(name)
+        local = self.run_dir(run_id) / safe_name
+        local.write_text(data, encoding="utf-8")
+        ref = self.store.write(f"{run_id}/{safe_name}", data).ref
+        return ref
 
-    def _write_artifact_unchecked(self, run_id: str, filename: str, content: str) -> Path:
+    def _write_artifact_unchecked(self, run_id: str, name: str, data: str) -> str:
         """Write to an artifact path without requiring the run to pre-exist.
 
         Used exclusively by write_run_json during the initial creation sequence
         inside scan (after create_run_directory but before the first run.json exists).
         """
-        run_dir = self.run_dir(run_id)
-        path = run_dir / validate_filename(filename)
-        path.write_text(content, encoding="utf-8")
-        return path
+        safe_name = validate_filename(name)
+        local = self.run_dir(run_id) / safe_name
+        local.write_text(data, encoding="utf-8")
+        ref = self.store.write(f"{run_id}/{safe_name}", data).ref
+        return ref
 
-    def read_artifact(self, run_id: str, filename: str) -> str:
-        """Read content from an artifact file in the run directory."""
-        path = self.run_dir(run_id) / validate_filename(filename)
-        if not path.exists():
-            raise FileNotFoundError(f"Artifact {filename} not found for run {run_id} in {path}")
-        return path.read_text(encoding="utf-8")
+    def read_artifact(self, run_id: str, name: str) -> str:
+        """Read content from an artifact via the configured store."""
+        safe_name = validate_filename(name)
+        return self.store.read(f"{run_id}/{safe_name}")
 
     def write_run_json(self, run_id: str, metadata: RunMetadata) -> Path:
         """Write the run.json metadata file.
 
         Uses the unchecked writer so it can be called both during initial
         creation (scan) and during subsequent status updates.
+        Dual-writes to the configured store (best-effort).
         """
         import traceback
 
         run_dir = self.run_dir(run_id)
         path = run_dir / "run.json"
+        data = metadata.model_dump_json(indent=2)
 
         try:
             _wal_write(metadata, path)
-            return path
         except Exception:
             failure_path = run_dir / "failure.json"
             failure_data = json.dumps(
@@ -171,8 +181,18 @@ class WorkspaceManager:
             try:
                 failure_path.write_text(failure_data, encoding="utf-8")
             except OSError:
-                pass  # best-effort write; don't mask the original error
+                pass
             raise
+
+        try:
+            self.store.write(f"{run_id}/run.json", data)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Failed to write run.json to artifact store for run %s", run_id
+            )
+
+        return path
 
     def read_run_json(self, run_id: str) -> RunMetadata:
         """Read and validate the run.json metadata file."""
@@ -184,6 +204,7 @@ class WorkspaceManager:
 
         Raises FileNotFoundError if the run directory does not exist.
         Raises ValueError if verdict.run_id does not match run_id.
+        Dual-writes to the configured store (best-effort).
         """
         if verdict.run_id != run_id:
             raise ValueError(
@@ -193,17 +214,27 @@ class WorkspaceManager:
         if not run_dir.exists():
             raise FileNotFoundError(f"Run directory not found: {run_dir}")
 
+        json_data = verdict.model_dump_json(indent=2)
         json_path = run_dir / "verdict.json"
-        json_path.write_text(verdict.model_dump_json(indent=2), encoding="utf-8")
+        json_path.write_text(json_data, encoding="utf-8")
 
         md_path = run_dir / "verdict.md"
         _write_verdict_markdown(md_path, verdict)
 
-    def write_experiment(self, run_id: str, experiment: Experiment) -> Path:
+        try:
+            self.store.write(f"{run_id}/verdict.json", json_data)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Failed to write verdict.json to artifact store for run %s", run_id
+            )
+
+    def write_experiment(self, run_id: str, experiment: Experiment) -> str:
         """Write the experiment.json file.
 
         Raises FileNotFoundError if the run directory does not exist.
         Raises ValueError if experiment.run_id does not match run_id.
+        Dual-writes to the configured store (best-effort).
         """
         if experiment.run_id != run_id:
             raise ValueError(
