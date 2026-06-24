@@ -41,8 +41,10 @@ def handle_issue_opened(
         }
 
     conn = _sqlite_connect(queue_db_path)
-    run_id = enqueue_issue(conn, issue_number, repo_name, json.dumps(event))
-    conn.close()
+    try:
+        run_id = enqueue_issue(conn, issue_number, repo_name, json.dumps(event))
+    finally:
+        conn.close()
 
     if run_id is None:
         return {

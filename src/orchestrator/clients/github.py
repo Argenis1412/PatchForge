@@ -125,7 +125,10 @@ class GitHubClient:
             except (GithubException, ConnectionError, TimeoutError) as e:
                 if isinstance(e, GithubException):
                     if e.status == 403 and "rate limit" in str(e).lower():
-                        wait = int(e.headers.get("Retry-After", 60))
+                        try:
+                            wait = int((e.headers or {}).get("Retry-After", 60))
+                        except (TypeError, ValueError):
+                            wait = 60
                         logger.warning(
                             "Rate limited, retrying in %ss (attempt %d/%d)",
                             wait,

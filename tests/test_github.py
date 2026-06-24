@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -119,30 +118,48 @@ class TestHandleIssueOpened:
             "repository": {"full_name": "owner/repo"},
         }
 
+    @pytest.fixture
+    def qdb_path(self, tmp_path):
+        return tmp_path / "queue.db"
+
     @patch("orchestrator.integrations.webhook._sqlite_connect")
     @patch("orchestrator.integrations.webhook.enqueue_issue")
-    def test_idempotency_skip(self, mock_enqueue, mock_connect, event, client):
+    def test_idempotency_skip(self, mock_enqueue, mock_connect, event, client, qdb_path):
         client.existing_pr_for_webhook = MagicMock(
             return_value=PR(1, "PR", "", "head", "open"),
         )
-        result = handle_issue_opened(event, client, Path("/tmp/q.db"))
+        result = handle_issue_opened(event, client, qdb_path)
         assert result["status"] == "skipped"
         mock_enqueue.assert_not_called()
 
     @patch("orchestrator.integrations.webhook._sqlite_connect")
     @patch("orchestrator.integrations.webhook.enqueue_issue")
-    def test_label_failure_does_not_raise(self, mock_enqueue, mock_connect, event, client):
+    def test_label_failure_does_not_raise(
+        self,
+        mock_enqueue,
+        mock_connect,
+        event,
+        client,
+        qdb_path,
+    ):
         client.existing_pr_for_webhook = MagicMock(return_value=None)
         mock_enqueue.return_value = "run_123"
         client.add_label = MagicMock(side_effect=ValueError("API error"))
-        result = handle_issue_opened(event, client, Path("/tmp/q.db"))
+        result = handle_issue_opened(event, client, qdb_path)
         assert result["status"] == "enqueued"
 
     @patch("orchestrator.integrations.webhook._sqlite_connect")
     @patch("orchestrator.integrations.webhook.enqueue_issue")
-    def test_enqueue_new_issue(self, mock_enqueue, mock_connect, event, client):
+    def test_enqueue_new_issue(
+        self,
+        mock_enqueue,
+        mock_connect,
+        event,
+        client,
+        qdb_path,
+    ):
         client.existing_pr_for_webhook = MagicMock(return_value=None)
         mock_enqueue.return_value = "run_123"
-        result = handle_issue_opened(event, client, Path("/tmp/q.db"))
+        result = handle_issue_opened(event, client, qdb_path)
         assert result["status"] == "enqueued"
         assert result["run_id"] == "run_123"
