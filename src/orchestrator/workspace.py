@@ -24,7 +24,7 @@ def _validate_run_id(run_id: str) -> None:
 
 
 class WorkspaceManager:
-    def __init__(self, workspace_path: Path | None = None):
+    def __init__(self, workspace_path: Path | None = None, worker_id: str = ""):
         if workspace_path is not None:
             resolved = Path(workspace_path).resolve()
         else:
@@ -36,6 +36,8 @@ class WorkspaceManager:
                 )
             resolved = Path(env_val).resolve()
         self.root = resolved
+        if worker_id:
+            self.root = self.root / worker_id
         self.runs = self.root / "runs"
         self.logs = self.root / "logs"
         self.prompts = self.root / "prompts"
@@ -43,6 +45,7 @@ class WorkspaceManager:
         self.cache = self.root / "cache"
         self.temp = self.root / "temp"
         self.manifest = self.outputs / "manifest.json"
+        self._worker_id = worker_id
 
     def setup(self) -> None:
         """Create all workspace directories if they do not exist."""
@@ -61,6 +64,17 @@ class WorkspaceManager:
         path = self.outputs / "staging" / run_id
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+    def cleanup_stale_workspaces(self, max_age_hours: int = 24) -> None:
+        import shutil
+        import time
+
+        now = time.time()
+        cutoff = now - (max_age_hours * 3600)
+        for child in self.root.parent.iterdir():
+            if child.is_dir() and child.name.startswith("worker-"):
+                if child.stat().st_mtime < cutoff:
+                    shutil.rmtree(child, ignore_errors=True)
 
     def read_manifest(self) -> dict:
         if not self.manifest.exists():

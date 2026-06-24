@@ -212,3 +212,39 @@ def test_force_reset_apply_restores_exact_state(git_repo: Path):
 def test_non_git_dir_reported_clearly(tmp_path: Path):
     with pytest.raises(ValueError, match="Not a Git repository"):
         repository_state(tmp_path)
+
+
+def test_repo_lock_mutual_exclusion(tmp_path: Path):
+    """Verify acquire_repo_lock prevents concurrent access."""
+    from orchestrator.storage.lock import acquire_repo_lock, release_repo_lock
+
+    repo_id = "https://github.com/org/repo.git"
+
+    w1_ok = acquire_repo_lock(repo_id, "worker-1", ttl_seconds=60, db_dir=tmp_path)
+    assert w1_ok
+
+    w2_ok = acquire_repo_lock(repo_id, "worker-2", ttl_seconds=60, db_dir=tmp_path)
+    assert not w2_ok
+
+    release_repo_lock(repo_id, "worker-1", db_dir=tmp_path)
+
+    w2_after_release = acquire_repo_lock(repo_id, "worker-2", ttl_seconds=60, db_dir=tmp_path)
+    assert w2_after_release
+
+
+def test_stale_lock_ttl_cleanup(tmp_path: Path):
+    """Verify expired locks are reaped."""
+    from orchestrator.storage.lock import acquire_repo_lock, release_repo_lock
+
+    repo_id = "https://github.com/org/repo.git"
+
+    w1_ok = acquire_repo_lock(repo_id, "worker-1", ttl_seconds=0, db_dir=tmp_path)
+    assert w1_ok
+
+    import time
+    time.sleep(0.1)
+
+    w2_ok = acquire_repo_lock(repo_id, "worker-2", ttl_seconds=60, db_dir=tmp_path)
+    assert w2_ok
+
+    release_repo_lock(repo_id, "worker-2", db_dir=tmp_path)
