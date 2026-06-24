@@ -18,7 +18,7 @@
 | 1 | B7 — Workspace Isolation | ✅ Done | `feat/b7-workspace-isolation` | `2ff95a3` | WorkspaceManager worker_id scoping; repo_lock table in coordination.db; cleanup_stale_workspaces() |
 | 2 | B8a — Work Queue Schema | ✅ Done | `feat/issue-132-work-queue-schema` | `27fa268` | SQLite queue.db, enqueue_issue con TTL 24h, dequeue_issue con lease + max 3 retries |
 | 2 | B5 — Artifact Store | ✅ Done | `feat/issue-134-b5-artifact-store` | `5551778` | Pluggable `ArtifactStore` ABC + `LocalArtifactStore` with atomic WAL writes; integrated into `WorkspaceManager` with dual-write |
-| 2 | B3 — GitHub Client | ❌ Pending | — | — | |
+| 2 | B3 — GitHub Client | ✅ Done | `feat/issue-136-b3-github-client` | `e5a8f61` | `GitHubClient` with O(1) webhook idempotency; `_with_retry` capturing `(GithubException, ConnectionError, TimeoutError)`; `handle_issue_opened` webhook handler; 10 tests |
 | 2 | B8b — Worker Loop | ❌ Pending | — | — | |
 | — | Post-Audit Fixes | ❌ Pending | — | — | |
 
