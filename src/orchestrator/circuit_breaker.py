@@ -23,6 +23,7 @@ from typing import Callable, TypeVar
 
 from orchestrator.exceptions import CircuitBreakerOpenError  # re-exported for callers
 from orchestrator.observability.events import FailureType, log_event, log_failure
+from orchestrator.storage.lock import CircuitBreakerStore, _InMemoryCircuitBreakerStore
 
 T = TypeVar("T")
 
@@ -43,6 +44,10 @@ class CircuitBreakerState(Enum):
 # from orchestrator.circuit_breaker.
 # See exceptions.py for the class definition and rationale.
 
+# Exponential backoff schedule for recovery_timeout (seconds).
+# Index = consecutive_failures // failure_threshold (capped at last element).
+RECOVERY_BACKOFF: list[float] = [60.0, 120.0, 240.0, 480.0, 900.0]
+
 
 # ---------------------------------------------------------------------------
 # CircuitBreaker
@@ -60,11 +65,15 @@ class CircuitBreaker:
     Internal invariant: _half_open_in_flight is ALWAYS False when
     _state is CLOSED or OPEN. It is only True transiently when
     _state is HALF_OPEN and a probe call is executing.
+
+    B4: State is persisted to store on every mutation. SQLite store enables
+    cross-worker sharing; in-process fallback used when no store is provided.
     """
 
     def __init__(
         self,
         provider_name: str,
+        store: CircuitBreakerStore,
         failure_threshold: int = 3,
         recovery_timeout: float = 60.0,
     ) -> None:
@@ -73,15 +82,46 @@ class CircuitBreaker:
         if recovery_timeout < 0:
             raise ValueError("recovery_timeout must be >= 0")
         self._provider_name = provider_name
+        self._store = store
         self._failure_threshold = failure_threshold
         self._recovery_timeout = recovery_timeout
 
-        # Internal state
+        # Internal state — loaded from store on init, authoritative in store.
         self._consecutive_failures: int = 0
         self._last_failure_time: float = 0.0
         self._state: CircuitBreakerState = CircuitBreakerState.CLOSED
-        # Mutual exclusion flag for HALF_OPEN: only one probe call in flight.
+        # Process-level guard against concurrent probes in the same worker.
         self._half_open_in_flight: bool = False
+
+        self._load_state()
+
+    # ------------------------------------------------------------------
+    # Persistence helpers
+    # ------------------------------------------------------------------
+
+    def _load_state(self) -> None:
+        row = self._store.get_state(self._provider_name)
+        if row:
+            self._state = CircuitBreakerState(row["state"])
+            self._consecutive_failures = row.get("failures") or 0
+            self._last_failure_time = row.get("last_failure_at") or 0.0
+            if row.get("recovery_timeout") is not None:
+                self._recovery_timeout = float(row["recovery_timeout"])
+        else:
+            self._state = CircuitBreakerState.CLOSED
+            self._consecutive_failures = 0
+            self._last_failure_time = 0.0
+
+    def _persist_state(self) -> None:
+        self._store.set_state(
+            self._provider_name,
+            {
+                "state": self._state.value,
+                "failures": self._consecutive_failures,
+                "last_failure_at": self._last_failure_time,
+                "recovery_timeout": self._recovery_timeout,
+            },
+        )
 
     # ------------------------------------------------------------------
     # Public interface
@@ -118,6 +158,7 @@ class CircuitBreaker:
                 )
             # Timeout elapsed — transition to HALF_OPEN and probe.
             self._state = CircuitBreakerState.HALF_OPEN
+            self._persist_state()
             return self._execute_half_open(fn)
 
         # _state == HALF_OPEN
@@ -129,6 +170,7 @@ class CircuitBreaker:
         self._consecutive_failures = 0
         self._last_failure_time = 0.0
         self._half_open_in_flight = False
+        self._persist_state()
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -171,6 +213,12 @@ class CircuitBreaker:
             previous_state = self._state
             self._state = CircuitBreakerState.OPEN
             self._last_failure_time = time.monotonic()
+            # Exponential backoff: index = (consecutive-1) // threshold, capped.
+            backoff_index = min(
+                (self._consecutive_failures - 1) // self._failure_threshold,
+                len(RECOVERY_BACKOFF) - 1,
+            )
+            self._recovery_timeout = RECOVERY_BACKOFF[backoff_index]
             # Differentiate message: first opening vs re-opening after a probe.
             if previous_state == CircuitBreakerState.HALF_OPEN:
                 log_msg = (
@@ -192,6 +240,7 @@ class CircuitBreaker:
                 source="circuit_breaker",
                 data={"provider": self._provider_name, "failures": self._consecutive_failures},
             )
+        self._persist_state()
         raise exc  # always re-raise the original exception
 
     def _on_success(self) -> None:
@@ -199,6 +248,7 @@ class CircuitBreaker:
         self._consecutive_failures = 0
         self._half_open_in_flight = False  # safety: clear if was HALF_OPEN
         self._state = CircuitBreakerState.CLOSED
+        self._persist_state()
         if previous_state != CircuitBreakerState.CLOSED:
             # Auto-observability: emit only on transition to CLOSED from another state.
             log_event(
@@ -225,6 +275,7 @@ _registry: dict[str, CircuitBreaker] = {}
 def circuit_breaker_for(
     provider_name: str,
     *,
+    store: CircuitBreakerStore | None = None,
     failure_threshold: int = 3,
     recovery_timeout: float = 60.0,
 ) -> CircuitBreaker:
@@ -233,9 +284,15 @@ def circuit_breaker_for(
     State is shared across all callers within the process.
     The first call creates the instance; subsequent calls with the same
     provider_name return the same object (singleton per process).
+
+    When store is None an in-process _InMemoryCircuitBreakerStore is used
+    (backwards-compatible behaviour for callers that predate B4).
     """
     if provider_name not in _registry:
         _registry[provider_name] = CircuitBreaker(
-            provider_name, failure_threshold, recovery_timeout
+            provider_name,
+            store if store is not None else _InMemoryCircuitBreakerStore(),
+            failure_threshold,
+            recovery_timeout,
         )
     return _registry[provider_name]

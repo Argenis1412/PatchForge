@@ -1,7 +1,7 @@
 """
 tests/test_circuit_breaker.py
 
-10 unit tests for CircuitBreaker.
+10 unit tests for CircuitBreaker + 3 B4 tests for SQLite-backed store.
 
 Time is controlled via monkeypatching time.monotonic — no real waiting.
 No network calls are made.
@@ -15,19 +15,30 @@ from unittest.mock import MagicMock
 import pytest
 
 from orchestrator.circuit_breaker import (
+    RECOVERY_BACKOFF,
     CircuitBreaker,
     CircuitBreakerOpenError,
     CircuitBreakerState,
 )
+from orchestrator.storage.lock import CircuitBreakerStore
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def make_cb(threshold: int = 3, timeout: float = 60.0) -> CircuitBreaker:
+def make_cb(
+    threshold: int = 3,
+    timeout: float = 60.0,
+    store: CircuitBreakerStore | None = None,
+) -> CircuitBreaker:
     """Return a fresh CircuitBreaker (not from the registry)."""
-    return CircuitBreaker("test_provider", failure_threshold=threshold, recovery_timeout=timeout)
+    if store is None:
+        store = MagicMock(spec=CircuitBreakerStore)
+        store.get_state.return_value = None
+        store.set_state.return_value = None
+        store.atomic_update.return_value = {}
+    return CircuitBreaker("test_provider", store, failure_threshold=threshold, recovery_timeout=timeout)
 
 
 def exhaust_to_open(cb: CircuitBreaker, threshold: int = 3) -> None:
@@ -339,3 +350,129 @@ def test_half_open_inflight_reset_on_failure(monkeypatch):
     probe_fn.assert_called_once()
     assert result == "recovered"
     assert cb.state is CircuitBreakerState.CLOSED
+
+
+# ---------------------------------------------------------------------------
+# B4 Test 11 — SQLite state persistence across "restarts"
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_cb_state_persists(tmp_path):
+    """State transitions written to SQLite; new instance reads same state (restart sim)."""
+    from orchestrator.storage.lock import SqliteCircuitBreakerStore
+
+    store1 = SqliteCircuitBreakerStore(tmp_path)
+    cb1 = make_cb(threshold=3, store=store1)
+
+    # Open CB with 3 failures
+    for _ in range(3):
+        with pytest.raises(ValueError):
+            cb1.call(lambda: (_ for _ in ()).throw(ValueError("x")))  # type: ignore[misc]
+
+    assert cb1.state is CircuitBreakerState.OPEN
+
+    # "Restart": new store + new CB instance, same DB directory
+    store2 = SqliteCircuitBreakerStore(tmp_path)
+    cb2 = CircuitBreaker("test_provider", store2, failure_threshold=3)
+
+    assert cb2.state is CircuitBreakerState.OPEN
+    assert cb2._consecutive_failures == 3
+
+
+# ---------------------------------------------------------------------------
+# B4 Test 12 — Exponential backoff schedule
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_exponential_backoff(monkeypatch):
+    """Recovery timeout increases exponentially as consecutive failures accumulate."""
+    store = MagicMock(spec=CircuitBreakerStore)
+    store.get_state.return_value = None
+    store.set_state.return_value = None
+
+    cb = make_cb(threshold=3, store=store)
+
+    current_time = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: current_time[0])
+
+    def fail():
+        raise ValueError("x")
+
+    # failures 1-3 → 60s  (first OPEN at consecutive=3)
+    for _ in range(3):
+        with pytest.raises(ValueError):
+            cb.call(fail)
+    assert cb._recovery_timeout == RECOVERY_BACKOFF[0]  # 60s
+
+    # Each subsequent probe failure increments consecutive and may raise backoff.
+    # failures 4-6 → 120s
+    for _ in range(3):
+        current_time[0] += cb._recovery_timeout + 1.0
+        with pytest.raises(ValueError):
+            cb.call(fail)
+    assert cb._recovery_timeout == RECOVERY_BACKOFF[1]  # 120s
+
+    # failures 7-9 → 240s
+    for _ in range(3):
+        current_time[0] += cb._recovery_timeout + 1.0
+        with pytest.raises(ValueError):
+            cb.call(fail)
+    assert cb._recovery_timeout == RECOVERY_BACKOFF[2]  # 240s
+
+    # failures 10-12 → 480s
+    for _ in range(3):
+        current_time[0] += cb._recovery_timeout + 1.0
+        with pytest.raises(ValueError):
+            cb.call(fail)
+    assert cb._recovery_timeout == RECOVERY_BACKOFF[3]  # 480s
+
+    # failure 13 → 900s (cap)
+    current_time[0] += cb._recovery_timeout + 1.0
+    with pytest.raises(ValueError):
+        cb.call(fail)
+    assert cb._recovery_timeout == RECOVERY_BACKOFF[4]  # 900s
+
+
+# ---------------------------------------------------------------------------
+# B4 Test 13 — HALF_OPEN probe slot contention
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_half_open_probe_lock(tmp_path):
+    """_call_with_half_open_probe raises ProbeSlotBusyError when token held."""
+    from orchestrator.agents.executor.providers import (
+        ProbeSlotBusyError,
+        _call_with_half_open_probe,
+    )
+    from orchestrator.storage import _sqlite_connect
+    from orchestrator.storage.lock import SqliteCircuitBreakerStore
+
+    store = SqliteCircuitBreakerStore(tmp_path)
+
+    # Seed HALF_OPEN state
+    store.set_state(
+        "gemini",
+        {
+            "state": CircuitBreakerState.HALF_OPEN.value,
+            "failures": 3,
+            "last_failure_at": 0.0,
+            "recovery_timeout": 60.0,
+        },
+    )
+
+    # Open a second connection and insert a probe token (simulates first worker)
+    conn = _sqlite_connect(tmp_path / "coordination.db")
+    conn.execute(
+        "INSERT INTO half_open_probe (provider, worker_id, acquired_at) "
+        "VALUES ('gemini', 'worker-1', datetime('now'))"
+    )
+
+    # Second worker should be rejected
+    fn = MagicMock(return_value="ok")
+    with pytest.raises(ProbeSlotBusyError):
+        _call_with_half_open_probe(conn, "gemini", fn)
+
+    fn.assert_not_called()

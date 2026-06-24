@@ -3,14 +3,28 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import time
+from collections.abc import Callable
 
-from orchestrator.circuit_breaker import CircuitBreakerOpenError, circuit_breaker_for
+from orchestrator.circuit_breaker import (
+    RECOVERY_BACKOFF,
+    CircuitBreakerOpenError,
+    CircuitBreakerState,
+    circuit_breaker_for,
+)
 from orchestrator.clients.anthropic_client import get_anthropic_client
 from orchestrator.clients.gemini_client import get_gemini_client
 from orchestrator.clients.groq_client import get_groq_client
 
 from .logging import _get_logger
+
+
+class ProbeSlotBusyError(CircuitBreakerOpenError):
+    """HALF_OPEN probe slot is held by another worker — contention, not a provider failure."""
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(provider, None, 0.0, "probe slot busy — another worker holds the token")
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -199,6 +213,133 @@ def _call_claude(prompt: str, run_id: str) -> tuple[str, int, int]:
 _PROVIDER_CHAIN["low"] = [_call_gemini, _call_groq, _call_claude]
 _PROVIDER_CHAIN["medium"] = [_call_groq, _call_gemini, _call_claude]
 _PROVIDER_CHAIN["high"] = [_call_claude]
+
+
+def _call_with_half_open_probe(
+    conn_coord: sqlite3.Connection,
+    provider_name: str,
+    fn: Callable[..., object],
+    *args: object,
+) -> object:
+    """Reactive HALF_OPEN probe using a SQLite-backed token.
+
+    CLOSED → call fn directly.
+    OPEN (timeout not elapsed) → fast-reject with CircuitBreakerOpenError.
+    OPEN (timeout elapsed) → transition to HALF_OPEN under lock, fall through.
+    HALF_OPEN (slot held) → raise ProbeSlotBusyError (not counted as failure).
+    HALF_OPEN (slot free) → acquire token, call fn, persist result, release token.
+    """
+    row = conn_coord.execute(
+        "SELECT state, last_failure_at, recovery_timeout, failures "
+        "FROM cb_state WHERE provider = ?",
+        (provider_name,),
+    ).fetchone()
+
+    current_state = row["state"] if row else CircuitBreakerState.CLOSED.value
+
+    if current_state == CircuitBreakerState.CLOSED.value:
+        return fn(*args)
+
+    if current_state == CircuitBreakerState.OPEN.value:
+        last_failure = row["last_failure_at"] or 0.0
+        recovery_timeout = row["recovery_timeout"] or 60.0
+        retry_after = last_failure + recovery_timeout
+
+        if time.monotonic() < retry_after:
+            raise CircuitBreakerOpenError(provider_name, CircuitBreakerState.OPEN, retry_after)
+
+        # Timeout expired — transition to HALF_OPEN under lock.
+        conn_coord.execute("BEGIN IMMEDIATE")
+        try:
+            fresh = conn_coord.execute(
+                "SELECT state FROM cb_state WHERE provider = ?", (provider_name,)
+            ).fetchone()
+            if fresh and fresh["state"] == CircuitBreakerState.OPEN.value:
+                conn_coord.execute(
+                    "UPDATE cb_state SET state = ? WHERE provider = ?",
+                    (CircuitBreakerState.HALF_OPEN.value, provider_name),
+                )
+            conn_coord.execute("COMMIT")
+        except Exception:
+            conn_coord.execute("ROLLBACK")
+            raise
+        current_state = CircuitBreakerState.HALF_OPEN.value
+
+    # HALF_OPEN: acquire probe token.
+    conn_coord.execute("BEGIN IMMEDIATE")
+    try:
+        token = conn_coord.execute(
+            "SELECT 1 FROM half_open_probe WHERE provider = ?", (provider_name,)
+        ).fetchone()
+        if token:
+            conn_coord.execute("ROLLBACK")
+            raise ProbeSlotBusyError(provider_name)
+        conn_coord.execute(
+            "INSERT INTO half_open_probe (provider, worker_id, acquired_at) "
+            "VALUES (?, ?, datetime('now'))",
+            (provider_name, os.environ.get("WORKER_ID", "unknown")),
+        )
+        conn_coord.execute("COMMIT")
+    except ProbeSlotBusyError:
+        raise
+    except Exception:
+        conn_coord.execute("ROLLBACK")
+        raise
+
+    try:
+        result = fn(*args)
+        # Success: reset to CLOSED.
+        conn_coord.execute(
+            "INSERT OR REPLACE INTO cb_state "
+            "(provider, state, failures, last_failure_at, recovery_timeout) "
+            "VALUES (?, ?, 0, 0.0, 60.0)",
+            (provider_name, CircuitBreakerState.CLOSED.value),
+        )
+        return result
+    except Exception as exc:
+        # Failure: transition to OPEN with exponential backoff.
+        curr = conn_coord.execute(
+            "SELECT failures FROM cb_state WHERE provider = ?", (provider_name,)
+        ).fetchone()
+        failures = (curr["failures"] if curr else 0) + 1
+        threshold = 3
+        backoff_index = min((failures - 1) // threshold, len(RECOVERY_BACKOFF) - 1)
+        new_timeout = RECOVERY_BACKOFF[backoff_index]
+        conn_coord.execute(
+            "INSERT OR REPLACE INTO cb_state "
+            "(provider, state, failures, last_failure_at, recovery_timeout) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                provider_name,
+                CircuitBreakerState.OPEN.value,
+                failures,
+                time.monotonic(),
+                new_timeout,
+            ),
+        )
+        raise exc
+    finally:
+        _release_probe_token(conn_coord, provider_name)
+
+
+def _release_probe_token(
+    conn_coord: sqlite3.Connection, provider: str | None = None
+) -> None:
+    if provider:
+        conn_coord.execute(
+            "DELETE FROM half_open_probe WHERE provider = ?", (provider,)
+        )
+    else:
+        worker = os.environ.get("WORKER_ID", "unknown")
+        conn_coord.execute(
+            "DELETE FROM half_open_probe WHERE worker_id = ?", (worker,)
+        )
+
+
+def _cleanup_stale_probes(conn_coord: sqlite3.Connection) -> None:
+    conn_coord.execute(
+        "DELETE FROM half_open_probe WHERE acquired_at < datetime('now', '-5 minutes')"
+    )
 
 
 def _recoverable_exceptions() -> tuple:

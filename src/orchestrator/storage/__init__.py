@@ -1,17 +1,29 @@
 """Storage helpers for PatchForge orchestrator.
 
 B1: _wal_write — atomic crash-safe write for apply.json and other artifacts.
-B4: _sqlite_connect — canonical SQLite connection (added later).
+B4: _sqlite_connect — canonical SQLite connection factory.
 """
 
 __all__ = [
     "_wal_write",
+    "_sqlite_connect",
 ]
 
 import os
+import sqlite3
 from pathlib import Path
 
 from pydantic import BaseModel
+
+
+def _sqlite_connect(db_path: Path, *, timeout: float = 30.0) -> sqlite3.Connection:
+    """Canonical SQLite connection factory. Always enables WAL mode and autocommit.
+    Never call sqlite3.connect() directly — always use this factory."""
+    conn = sqlite3.connect(str(db_path), timeout=timeout, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
+    return conn
 
 
 def _wal_write(result: BaseModel, path: Path) -> None:
