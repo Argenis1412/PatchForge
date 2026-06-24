@@ -14,6 +14,50 @@ def workspace_mgr(tmp_path: Path) -> WorkspaceManager:
     return mgr
 
 
+def test_workspace_isolation(tmp_path: Path):
+    """Verify WorkspaceManager instances use unique paths based on worker_id."""
+    root = tmp_path / "test-isolation"
+    w1 = WorkspaceManager(root, worker_id="worker-abc")
+    w2 = WorkspaceManager(root, worker_id="worker-xyz")
+
+    assert w1.root != w2.root
+    assert "worker-abc" in str(w1.root)
+    assert "worker-xyz" in str(w2.root)
+    assert w1.root.parent == w2.root.parent
+    assert w1._worker_id == "worker-abc"
+    assert w2._worker_id == "worker-xyz"
+
+
+def test_stale_workspace_cleanup(tmp_path: Path):
+    """Verify cleanup_stale_workspaces removes only old worker directories."""
+    import os
+    import time
+
+    parent = tmp_path / "workspaces"
+    parent.mkdir()
+
+    old_dir = parent / "worker-old"
+    old_dir.mkdir()
+    old_time = time.time() - 48 * 3600
+    os_utime = getattr(os, "utime", None)
+    if os_utime:
+        os_utime(str(old_dir), (old_time, old_time))
+
+    fresh_dir = parent / "worker-fresh"
+    fresh_dir.mkdir()
+
+    non_worker = parent / "not-a-worker"
+    non_worker.mkdir()
+
+    mgr = WorkspaceManager(parent, worker_id="worker-our")
+    mgr.setup()
+    mgr.cleanup_stale_workspaces(max_age_hours=24)
+
+    assert not old_dir.exists()
+    assert fresh_dir.exists()
+    assert non_worker.exists()
+
+
 def test_create_run_directory(workspace_mgr: WorkspaceManager):
     run_id = "run_20260603_120000_123456"
     run_path = workspace_mgr.create_run_directory(run_id)

@@ -10,8 +10,9 @@ from orchestrator.schemas.artifacts import RunMetadata
 from orchestrator.schemas.experiment import Experiment, Verdict
 from orchestrator.storage import _wal_write
 
-# Only allow alphanumeric characters, underscores, and hyphens in run IDs.
+# Only allow alphanumeric characters, underscores, and hyphens in run IDs and worker IDs.
 _RUN_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+_WORKER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 def _validate_run_id(run_id: str) -> None:
@@ -24,7 +25,7 @@ def _validate_run_id(run_id: str) -> None:
 
 
 class WorkspaceManager:
-    def __init__(self, workspace_path: Path | None = None):
+    def __init__(self, workspace_path: Path | None = None, worker_id: str = ""):
         if workspace_path is not None:
             resolved = Path(workspace_path).resolve()
         else:
@@ -36,6 +37,13 @@ class WorkspaceManager:
                 )
             resolved = Path(env_val).resolve()
         self.root = resolved
+        if worker_id:
+            if not _WORKER_ID_RE.match(worker_id):
+                raise ValueError(
+                    f"Invalid worker_id {worker_id!r}. "
+                    "Only alphanumeric characters, underscores, and hyphens are allowed."
+                )
+            self.root = self.root / worker_id
         self.runs = self.root / "runs"
         self.logs = self.root / "logs"
         self.prompts = self.root / "prompts"
@@ -43,6 +51,10 @@ class WorkspaceManager:
         self.cache = self.root / "cache"
         self.temp = self.root / "temp"
         self.manifest = self.outputs / "manifest.json"
+        self._worker_id = worker_id
+
+    def touch_heartbeat(self) -> None:
+        (self.root / ".workspace").touch()
 
     def setup(self) -> None:
         """Create all workspace directories if they do not exist."""
@@ -56,11 +68,28 @@ class WorkspaceManager:
             self.temp,
         ]:
             directory.mkdir(parents=True, exist_ok=True)
+        self.touch_heartbeat()
 
     def staging_dir_for_run(self, run_id: str) -> Path:
         path = self.outputs / "staging" / run_id
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+    def cleanup_stale_workspaces(self, max_age_hours: int = 24) -> None:
+        import shutil
+        import time
+
+        if not self._worker_id:
+            return
+        base_dir = self.root.parent
+        now = time.time()
+        cutoff = now - (max_age_hours * 3600)
+        for child in base_dir.iterdir():
+            if child.is_dir() and child.name.startswith("worker-"):
+                hb = child / ".workspace"
+                mtime = hb.stat().st_mtime if hb.exists() else child.stat().st_mtime
+                if mtime < cutoff:
+                    shutil.rmtree(child, ignore_errors=True)
 
     def read_manifest(self) -> dict:
         if not self.manifest.exists():

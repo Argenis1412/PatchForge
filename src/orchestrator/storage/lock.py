@@ -7,6 +7,7 @@ B4: CircuitBreakerStore ABC + SqliteCircuitBreakerStore (coordination.db).
 from __future__ import annotations
 
 import sqlite3
+import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Callable
@@ -114,3 +115,60 @@ class _InMemoryCircuitBreakerStore(CircuitBreakerStore):
         new_state = txn(current)
         self._data[provider] = new_state
         return new_state
+
+
+def acquire_repo_lock(
+    repo_identity: str, worker_id: str, ttl_seconds: int = 300, db_dir: Path | None = None
+) -> bool:
+    if db_dir is None:
+        return False
+    try:
+        conn = _sqlite_connect(db_dir / "coordination.db")
+    except Exception:
+        return False
+    try:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS repo_lock ("
+            "repo TEXT PRIMARY KEY,"
+            "worker_id TEXT NOT NULL,"
+            "expires_at REAL NOT NULL)"
+        )
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT worker_id, expires_at FROM repo_lock WHERE repo = ?",
+            (repo_identity,),
+        ).fetchone()
+        now = time.time()
+        if row:
+            if now < row["expires_at"] and row["worker_id"] != worker_id:
+                conn.rollback()
+                return False
+        conn.execute(
+            "INSERT OR REPLACE INTO repo_lock (repo, worker_id, expires_at) VALUES (?, ?, ?)",
+            (repo_identity, worker_id, now + ttl_seconds),
+        )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
+def release_repo_lock(repo_identity: str, worker_id: str, db_dir: Path) -> None:
+    try:
+        conn = _sqlite_connect(db_dir / "coordination.db")
+    except Exception:
+        return
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "DELETE FROM repo_lock WHERE repo = ? AND worker_id = ?",
+            (repo_identity, worker_id),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+    finally:
+        conn.close()
