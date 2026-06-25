@@ -261,6 +261,50 @@ def revert_apply(repo_root: Path) -> GitCommandResult:
         return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {e}")
 
 
+def git_push(repo_root: Path, branch: str, remote: str = "origin") -> GitCommandResult:
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root), "push", "-u", remote, branch],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        return GitCommandResult(return_code=res.returncode, stdout=res.stdout, stderr=res.stderr)
+    except FileNotFoundError as e:
+        return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {e}")
+
+
+def push_delete_remote(
+    repo_root: Path, branch: str, remote: str = "origin"
+) -> GitCommandResult:
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root), "push", remote, "--delete", branch],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        return GitCommandResult(return_code=res.returncode, stdout=res.stdout, stderr=res.stderr)
+    except FileNotFoundError as e:
+        return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {e}")
+
+
+def delete_local_branch(
+    repo_root: Path, branch: str, force: bool = True
+) -> GitCommandResult:
+    flag = "-D" if force else "-d"
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root), "branch", flag, branch],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return GitCommandResult(return_code=res.returncode, stdout=res.stdout, stderr=res.stderr)
+    except FileNotFoundError as e:
+        return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {e}")
+
+
 def normalize_git_url(url: str) -> str:
     """Normalize a git remote URL or directory path to a standardized representation.
 

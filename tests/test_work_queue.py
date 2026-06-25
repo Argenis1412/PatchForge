@@ -50,3 +50,23 @@ def test_dequeue_lease_expiry(qdb):
     second = dequeue_issue(qdb)
     assert second is not None and second["issue_number"] == 1
     assert second["retries"] == 1
+
+
+def test_dequeue_respects_scheduled_after(qdb):
+    enqueue_issue(qdb, 1, "a/b", "payload")
+    # Simulate a backoff re-queue: job back to pending with a future scheduled_after.
+    sim_id = qdb.execute("SELECT id FROM work_queue WHERE issue_number = 1").fetchone()["id"]
+    qdb.execute(
+        "UPDATE work_queue SET status='pending', scheduled_after=datetime('now', '+1 hour') "
+        "WHERE id = ?",
+        (sim_id,),
+    )
+    # Must NOT dequeue while scheduled_after is in the future.
+    assert dequeue_issue(qdb) is None
+    # Backdate to past — must dequeue now.
+    qdb.execute(
+        "UPDATE work_queue SET scheduled_after=datetime('now', '-1 second') WHERE id = ?",
+        (sim_id,),
+    )
+    row = dequeue_issue(qdb)
+    assert row is not None and row["issue_number"] == 1

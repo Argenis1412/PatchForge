@@ -103,6 +103,22 @@ class SchedulerInvariantError(PatchForgeError):
     """
 
 
+class PatchApplyError(PatchForgeError):
+    """Raised when a patch cannot be applied (deterministic failure).
+
+    Covers `git apply` non-zero returns (conflict, malformed patch, missing
+    file) and risk-gate blocks after the executor materializes the diff.
+    Listed in the worker loop's DETERMINISTIC_EXCEPTIONS so it routes to
+    dead_letter instead of retrying.
+    """
+
+
+class GitConflictError(PatchForgeError):
+    """Raised when a git operation reports a deterministic conflict
+    (e.g. branch creation against an existing branch, checkout against a
+    divergent tree). Listed in DETERMINISTIC_EXCEPTIONS."""
+
+
 class CircuitBreakerOpenError(PatchForgeError):
     """Raised when a call is rejected by an OPEN circuit breaker.
 
