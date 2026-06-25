@@ -692,23 +692,26 @@ def cleanup_stale_workspaces(workspace_mgr: WorkspaceManager, worker_id: str) ->
 
 ## Acceptance Criteria
 
-- [ ] CB state queries match enum values (all lowercase) — verify via `grep -rn "state = 'OPEN'" src/` returns 0 hits
-- [ ] All branch names use `patchforge/run_{run_id}/issue_{issue_number}` or `patchforge/run_{run_id}` — one format per run_id+issue combination
-- [ ] `checkout_detached`, `delete_local_branch`, `push_delete_remote` exist in `git.py` with correct git commands
-- [ ] `_execute_apply_with_checkpoints` recovery uses real functions, not phantoms
-- [ ] `CircuitBreakerOpenError` is the only CB exception in the codebase (no `CircuitBreakerOpenException` / `CircuitBreakerException`)
-- [ ] `ProbeSlotBusyError(CircuitBreakerOpenError)` was **removed** in e81fafe — `CircuitBreaker.call()` with `SqliteCircuitBreakerStore` is the sole CB mechanism; no probe token needed
-- [ ] `apply.py:execute()` acquires repo lock when `coordination_db_dir` is provided
+- [ ] CB state queries match enum values (all lowercase) — verify via `grep -rn "state = 'OPEN'" src/` returns 0 hits *(deferred — H-1 excluded from #142 scope)*
+- [x] All branch names use `patchforge/run_{run_id}/issue_{issue_number}` or `patchforge/run_{run_id}` — one format per run_id+issue combination *(H-2, fixed in #142 commit `380177a`)*
+- [ ] `checkout_detached`, `delete_local_branch`, `push_delete_remote` exist in `git.py` with correct git commands *(deferred — H-3 excluded from #142 scope)*
+- [ ] `_execute_apply_with_checkpoints` recovery uses real functions, not phantoms *(deferred — H-3 excluded from #142 scope)*
+- [ ] `CircuitBreakerOpenError` is the only CB exception in the codebase *(deferred — H-4 excluded from #142 scope)*
+- [ ] `ProbeSlotBusyError(CircuitBreakerOpenError)` was **removed** in e81fafe *(deferred — H-4 excluded from #142 scope)*
+- [x] `apply.py:execute()` acquires repo lock when `coordination_db_dir` is provided *(H-5, fixed in #142 commit `380177a`)*
 - [x] `_sqlite_connect()` is imported in all storage files via `from orchestrator.storage import _sqlite_connect` (H-6, already fixed pre-Issue-A)
 - [x] `risk_gate.json` persisted via `workspace_mgr.write_artifact()` in both `check_plan_gate()` and `check_patch_gate()` (H-7a, already fixed pre-Issue-A)
 - [x] `events.jsonl` removed from `_hydrate_workspace` recovery list (H-7b, already fixed pre-Issue-A)
 - [x] Failure-path `apply.json` writes use `_wal_write()`, not `write_artifact()` (H-7c, fixed in Issue-A commit `f437f46`)
 - [x] `pipeline.py` has zero P3 diffs (H-8 — encoding fixes applied instead of revert, in Issue-A commit `f437f46`)
-- [ ] `DANGEROUS_PATTERNS` correctly matches directory entries like `.github/workflows/deploy.yml`
-- [ ] `check_patch_gate()` accepts `workspace_mgr` param and persists `risk_gate.json`
-- [ ] WAL phases 3-4 gated behind `# TODO-B3` markers
+- [x] Removed stale `# TODO-B3` comments from production code *(H-8, fixed in #142 commit `380177a`)*
+- [ ] `DANGEROUS_PATTERNS` correctly matches directory entries like `.github/workflows/deploy.yml` *(deferred — H-9 risk.py part excluded from #142 scope)*
+- [ ] `check_patch_gate()` accepts `workspace_mgr` param and persists `risk_gate.json` *(deferred — H-10 excluded from #142 scope)*
+- [ ] WAL phases 3-4 gated behind `# TODO-B3` markers *(deferred — H-11 excluded from #142 scope; existing code has only 2 phases)*
 - [x] All `encoding="utf-8"` present in dual-write paths (M-7, fixed in Issue-A commit `f437f46`)
-- [ ] All documented env vars (`PATCHFORGE_WORKSPACE`, `REPO_LOCK_ENABLED`, `WORKER_ID`, `PATCHFORGE_GITHUB_TOKEN`) are read in production code
+- [x] `PATCHFORGE_WORKSPACE` read in `apply.py` *(M-3, fixed in #142 commit `380177a`)*
+- [x] `REPO_LOCK_ENABLED` and `WORKER_ID` read in `lock.py` *(M-4/M-5, fixed in #142 commit `380177a`)*
+- [ ] `PATCHFORGE_GITHUB_TOKEN` validated at module level in `github.py` *(M-6 — replaced by token validation in `GitHubClient.__init__()` per #142 H-9)*
 
 ---
 

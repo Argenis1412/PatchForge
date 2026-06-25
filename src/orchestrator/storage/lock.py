@@ -6,6 +6,7 @@ B4: CircuitBreakerStore ABC + SqliteCircuitBreakerStore (coordination.db).
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import time
 from abc import ABC, abstractmethod
@@ -13,6 +14,9 @@ from pathlib import Path
 from typing import Callable
 
 from orchestrator.storage import _sqlite_connect
+
+_REPO_LOCK_ENABLED = os.environ.get("REPO_LOCK_ENABLED", "1") == "1"
+_WORKER_ID: str = os.environ.get("WORKER_ID", "unknown")
 
 
 class CircuitBreakerStore(ABC):

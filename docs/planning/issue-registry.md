@@ -2,7 +2,7 @@
 
 > **Date:** 2026-06-13
 > **Source:** Roadmap decomposition (`roadmap-phase2.md`) + adversarial audit (`adversarial-audit.md`)
-> **Total:** 20 issues (12 completed, 0 specified, 8 scoped but needing detailed ACs)
+> **Total:** 20 issues (13 completed, 0 specified, 7 scoped but needing detailed ACs)
 
 ---
 
@@ -469,6 +469,13 @@ ADR-0004 must answer exactly five questions:
 - **Goal:** Resolve critical findings from the 6th adversarial audit — ensure all `apply.json` writes use atomic `_wal_write()` with guaranteed fsync, and fix missing `encoding="utf-8"` in legacy pipeline persistence.
 - **Scope on implementation:** 3 remaining `write_artifact("apply.json")` calls converted to `_wal_write()`; 2 `write_text()`/`read_text()` calls in `pipeline.py` given explicit UTF-8 encoding. All other originally scoped fixes (H-6, H-7a/b, M-7) were already present in the codebase.
 - **Files:** `src/orchestrator/commands/apply.py`, `src/orchestrator/pipeline.py`
+
+### ✅ Issue #142: Post-Audit Remaining Fixes
+- **Priority:** P3 | **Status:** ✅ **Completed**
+- **Branch:** `fix/issue-142-post-audit-fixes`
+- **Goal:** Resolve remaining actionable findings (H-2, H-5, H-8, H-9) from the 6th adversarial audit — patchforge branch naming with issue_number support, repository locks with retry, stale TODO-B3 comments, and environment variable enforcement.
+- **Scope on implementation:** 42 insertions across 3 files. `apply.py` — branch format `patchforge/{run_id}[/issue_{issue_number}]`, repo lock acquire/release with worker_id, PATCHFORGE_WORKSPACE env guard. `github.py` — token validation moved inside `__init__`. `lock.py` — reads REPO_LOCK_ENABLED and WORKER_ID from env.
+- **Files:** `src/orchestrator/commands/apply.py`, `src/orchestrator/clients/github.py`, `src/orchestrator/storage/lock.py`
 
 ### Docker Containerization
 - **Priority:** P3 | **Status:** 📐 Scoped
