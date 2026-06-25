@@ -13,14 +13,17 @@ def format_duration(seconds: float) -> str:
     """Convert seconds to a human-readable string with hours, minutes, and seconds."""
     if seconds == 0:
         return "0s"
-    if seconds < SECONDS_PER_MINUTE:
-        return f"{int(seconds)}s"
-    if seconds < SECONDS_PER_HOUR:
-        minutes = int(seconds) // SECONDS_PER_MINUTE
-        secs = int(seconds) % SECONDS_PER_MINUTE
+    if 0 < seconds < 1:
+        return "<1s"
+    total_seconds = int(seconds)
+    if total_seconds < SECONDS_PER_MINUTE:
+        return f"{total_seconds}s"
+    if total_seconds < SECONDS_PER_HOUR:
+        minutes = total_seconds // SECONDS_PER_MINUTE
+        secs = total_seconds % SECONDS_PER_MINUTE
         return f"{minutes}m {secs}s"
-    hours = int(seconds) // SECONDS_PER_HOUR
-    remaining = int(seconds) % SECONDS_PER_HOUR
+    hours = total_seconds // SECONDS_PER_HOUR
+    remaining = total_seconds % SECONDS_PER_HOUR
     minutes = remaining // SECONDS_PER_MINUTE
     secs = remaining % SECONDS_PER_MINUTE
     return f"{hours}h {minutes}m {secs}s"

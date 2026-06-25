@@ -40,8 +40,8 @@
 ## 5. Workspace hash inconsistent between commands
 
 - **Symptom:** `scan` and `plan` computed different workspace hashes from the same directory.
-- **Root cause:** The workspace hash derives from the exact CWD; minor differences (trailing slash, symlinks, case) change the hash.
-- **Lesson:** Use explicit `--workspace` on every command to guarantee consistency.
+- **Root cause:** `_workspace_hash()` uses `Path(root_path).resolve()`, which already normalizes trailing slashes and symlinks. The actual divergence came from different resolved repo roots — e.g. when commands are run from different working directories, `resolve_git_root()` may return different paths.
+- **Lesson:** Use explicit `--workspace` on every command to guarantee consistency, or ensure all commands are run from the same working directory.
 
 ---
 
