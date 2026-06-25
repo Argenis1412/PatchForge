@@ -5,6 +5,26 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+SECONDS_PER_MINUTE = 60
+SECONDS_PER_HOUR = 3600
+
+
+def format_duration(seconds: float) -> str:
+    """Convert seconds to a human-readable string with hours, minutes, and seconds."""
+    if seconds == 0:
+        return "0s"
+    if seconds < SECONDS_PER_MINUTE:
+        return f"{int(seconds)}s"
+    if seconds < SECONDS_PER_HOUR:
+        minutes = int(seconds) // SECONDS_PER_MINUTE
+        secs = int(seconds) % SECONDS_PER_MINUTE
+        return f"{minutes}m {secs}s"
+    hours = int(seconds) // SECONDS_PER_HOUR
+    remaining = int(seconds) % SECONDS_PER_HOUR
+    minutes = remaining // SECONDS_PER_MINUTE
+    secs = remaining % SECONDS_PER_MINUTE
+    return f"{hours}h {minutes}m {secs}s"
+
 
 def _append_and_fsync(path: Path, entry: dict[str, Any]) -> None:
     is_new = not path.exists()
