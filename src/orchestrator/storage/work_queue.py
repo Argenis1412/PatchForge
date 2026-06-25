@@ -223,7 +223,8 @@ def _hydrate_stage(
                 )
     else:
         data = checkpoint_output
-    workspace.write_artifact(run_id, name, data)
+    local = workspace.run_dir(run_id) / name
+    local.write_text(data, encoding="utf-8")
 
 
 def _ensure_clone(payload: dict, workspace: Any, run_id: str) -> Path:
@@ -325,7 +326,9 @@ def _execute_apply_with_checkpoints(
             wal = ApplyResult.model_validate_json(wal_path.read_text(encoding="utf-8"))
         except Exception:
             wal = None
-        if wal is not None and wal.status != "applied":
+        if wal is not None and wal.status == "applied":
+            return
+        if wal is not None:
             if wal.status == "pr_created" and wal.pr_number:
                 try:
                     github.close_pr(wal.pr_number)
@@ -397,8 +400,16 @@ def _execute_apply_with_checkpoints(
 
     # ---- Phase 2: commit ------------------------------------------------
     commit_msg = f"PatchForge: {run_id} [skip ci]"
+    ar = subprocess.run(
+        ["git", "-C", str(repo_path), "add", "-A"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if ar.returncode != 0:
+        raise PatchApplyError(f"git add failed: {ar.stderr}")
     cr = subprocess.run(
-        ["git", "-C", str(repo_path), "commit", "-am", commit_msg],
+        ["git", "-C", str(repo_path), "commit", "-m", commit_msg],
         capture_output=True,
         text=True,
         timeout=30,
