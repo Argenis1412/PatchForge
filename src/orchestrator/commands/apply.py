@@ -340,6 +340,7 @@ def execute(
             applied_at=datetime.now(timezone.utc),
             branch=branch_name,
             success=False,
+            status="apply_failed",
             rolled_back=rollback_succeeded,
             error=apply_res.stderr,
             pre_apply_head=pre_apply_head,
@@ -424,6 +425,7 @@ def execute(
             applied_at=datetime.now(timezone.utc),
             branch=branch_name,
             success=False,
+            status="apply_failed",
             rolled_back=rollback_succeeded,
             error=error_msg,
             pre_apply_head=pre_apply_head,
@@ -442,12 +444,12 @@ def execute(
         workspace_mgr.write_run_json(run_id, run_metadata)
         raise typer.Exit(code=1)
 
-    # 11. Checkpoint 5: status="committed_local", success=True
+    # 11. Checkpoint 5: status="applied", success=True
     # TODO-B3: push branch (phase 3)
     # TODO-B3: open PR (phase 4)
     apply_result.applied_at = datetime.now(timezone.utc)
     apply_result.success = True
-    apply_result.status = "committed_local"
+    apply_result.status = "applied"
     _wal_write(apply_result, run_dir / "apply.json")
 
     # 12. Update metadata
