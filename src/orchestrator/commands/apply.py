@@ -276,227 +276,230 @@ def execute(
             db_dir=coordination_db_dir,
         )
 
-    # 7. Check out explicit, system-controlled Git branch
-    if issue_number is not None:
-        branch_name = f"patchforge/{run_id}/issue_{issue_number}"
-    else:
-        branch_name = f"patchforge/{run_id}"
+    try:
+        # 7. Check out explicit, system-controlled Git branch
+        if issue_number is not None:
+            branch_name = f"patchforge/{run_id}/issue_{issue_number}"
+        else:
+            branch_name = f"patchforge/{run_id}"
 
-    # Checkpoint 1: status="applying" before any git operation
-    apply_result = ApplyResult(
-        run_id=run_id,
-        applied_at=datetime.now(timezone.utc),
-        branch=branch_name,
-        success=False,
-        pre_apply_head=pre_apply_head,
-        pre_apply_branch=pre_apply_branch,
-        status="applying",
-    )
-    _wal_write(apply_result, run_dir / "apply.json")
-
-    branch_res = create_controlled_branch(target_path, branch_name)
-    if branch_res.return_code != 0:
-        console.print(
-            f"[bold red]Error checking out branch {branch_name}: {branch_res.stderr}[/bold red]"
-        )
-        log_failure(
-            trace_id=run_id,
-            run_id=run_id,
-            stage="apply",
-            error_type="checkout_failed",
-            message=branch_res.stderr,
-            logs_dir=logs_dir,
-            run_dir=run_dir,
-        )
-        run_metadata.status = "failed"
-        run_metadata.apply_status = "failed"
-        run_metadata.updated_at = datetime.now(timezone.utc)
-        if run_metadata.failure_artifacts is None:
-            run_metadata.failure_artifacts = []
-        if "checkout_failure" not in run_metadata.failure_artifacts:
-            run_metadata.failure_artifacts.append("checkout_failure")
-        workspace_mgr.write_run_json(run_id, run_metadata)
-        raise typer.Exit(code=1)
-
-    # 8. Apply patch
-    backup_path = run_dir / "patch.apply-backup.diff"
-    shutil.copy2(patch_path, backup_path)
-    apply_result.pre_apply_diff_backup = str(backup_path)
-    _wal_write(apply_result, run_dir / "apply.json")
-
-    apply_res = apply_patch(target_path, patch_path)
-    if apply_res.return_code != 0:
-        console.print(f"[bold red]Error applying patch: {apply_res.stderr}[/bold red]")
-        log_failure(
-            trace_id=run_id,
-            run_id=run_id,
-            stage="apply",
-            error_type="apply_failed",
-            message=apply_res.stderr,
-            logs_dir=logs_dir,
-            run_dir=run_dir,
-        )
-        # Revert: force reset to pre-apply state
-        rollback_succeeded = False
-        try:
-            rollback_to_commit(target_path, pre_apply_head, backup_diff=backup_path)
-            rollback_succeeded = True
-        except RollbackError as exc:
-            console.print(
-                "[bold red]FATAL: Patch application failed AND the automatic revert also failed. "
-                "Your repository may be in a partially applied state.\n"
-                f"Revert stderr: {exc.stderr}\n"
-                "Please run 'git checkout .' and 'git clean -fd' manually "
-                "to restore a clean state.[/bold red]"
-            )
-            log_failure(
-                trace_id=run_id,
-                run_id=run_id,
-                stage="apply",
-                error_type="revert_failed",
-                message=exc.stderr,
-                logs_dir=logs_dir,
-                run_dir=run_dir,
-            )
-        # Write apply.json failure using ApplyResult model
+        # Checkpoint 1: status="applying" before any git operation
         apply_result = ApplyResult(
             run_id=run_id,
             applied_at=datetime.now(timezone.utc),
             branch=branch_name,
             success=False,
-            status="apply_failed",
-            rolled_back=rollback_succeeded,
-            error=apply_res.stderr,
             pre_apply_head=pre_apply_head,
             pre_apply_branch=pre_apply_branch,
-            rollback_head=pre_apply_head if rollback_succeeded else None,
+            status="applying",
         )
         _wal_write(apply_result, run_dir / "apply.json")
-        run_metadata.status = "failed"
-        run_metadata.apply_status = "rolled_back" if rollback_succeeded else "rollback_failed"
-        run_metadata.updated_at = datetime.now(timezone.utc)
-        if run_metadata.failure_artifacts is None:
-            run_metadata.failure_artifacts = []
-        if "apply.json" not in run_metadata.failure_artifacts:
-            run_metadata.failure_artifacts.append("apply.json")
-        workspace_mgr.write_run_json(run_id, run_metadata)
-        raise typer.Exit(code=1)
 
-    # 9. Run post-apply validation checks
-    with Progress(
-        SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console
-    ) as progress:
-        task = progress.add_task("[green]Running post-apply validation checks...", total=None)
-        try:
-            post_val_output, _ = run_validator(config=config)
-            progress.update(task, completed=100)
-        except Exception as exc:
-            progress.update(task, completed=100)
+        branch_res = create_controlled_branch(target_path, branch_name)
+        if branch_res.return_code != 0:
             console.print(
-                "[bold yellow]Warning: post-apply validation failed to execute: "
-                f"{exc}[/bold yellow]"
-            )
-            post_val_output = None
-
-    if post_val_output is not None:
-        workspace_mgr.write_artifact(
-            run_id, "post_apply_validation.json", post_val_output.model_dump_json(indent=2)
-        )
-
-    # 10. Handle post-apply validation failure: rollback automatically
-    if post_val_output is not None and not post_val_output.overall_passed:
-        console.print("[bold yellow]Post-apply validation failed. Rolling back...[/bold yellow]")
-        rollback_succeeded = False
-        try:
-            rollback_to_commit(target_path, pre_apply_head, backup_diff=backup_path)
-            rollback_succeeded = True
-        except RollbackError as exc:
-            console.print(
-                "[bold red]FATAL: Post-apply validation failed AND automatic rollback also failed. "
-                "Your repository may be in a partially applied state.\n"
-                f"Revert stderr: {exc.stderr}\n"
-                "Please run 'git checkout .' and 'git clean -fd' manually "
-                "to restore a clean state.[/bold red]"
+                f"[bold red]Error checking out branch {branch_name}: {branch_res.stderr}[/bold red]"
             )
             log_failure(
                 trace_id=run_id,
                 run_id=run_id,
                 stage="apply",
-                error_type="rollback_failed",
-                message=exc.stderr,
+                error_type="checkout_failed",
+                message=branch_res.stderr,
                 logs_dir=logs_dir,
                 run_dir=run_dir,
             )
+            run_metadata.status = "failed"
+            run_metadata.apply_status = "failed"
+            run_metadata.updated_at = datetime.now(timezone.utc)
+            if run_metadata.failure_artifacts is None:
+                run_metadata.failure_artifacts = []
+            if "checkout_failure" not in run_metadata.failure_artifacts:
+                run_metadata.failure_artifacts.append("checkout_failure")
+            workspace_mgr.write_run_json(run_id, run_metadata)
+            raise typer.Exit(code=1)
 
-        # Write post_apply_failure.json
-        failure_detail = {
-            "stage": "post_apply_validation",
-            "reason": "validation_failed",
-            "validation_output": post_val_output.model_dump(),
-            "rollback_succeeded": rollback_succeeded,
-        }
-        workspace_mgr.write_artifact(
-            run_id, "post_apply_failure.json", json.dumps(failure_detail, indent=2)
-        )
-
-        error_msg = (
-            "Post-apply validation failed; rollback also failed"
-            if not rollback_succeeded
-            else "Post-apply validation failed"
-        )
-        apply_result = ApplyResult(
-            run_id=run_id,
-            applied_at=datetime.now(timezone.utc),
-            branch=branch_name,
-            success=False,
-            status="apply_failed",
-            rolled_back=rollback_succeeded,
-            error=error_msg,
-            pre_apply_head=pre_apply_head,
-            pre_apply_branch=pre_apply_branch,
-            rollback_head=pre_apply_head if rollback_succeeded else None,
-        )
+        # 8. Apply patch
+        backup_path = run_dir / "patch.apply-backup.diff"
+        shutil.copy2(patch_path, backup_path)
+        apply_result.pre_apply_diff_backup = str(backup_path)
         _wal_write(apply_result, run_dir / "apply.json")
-        run_metadata.status = "failed"
-        run_metadata.apply_status = "rolled_back" if rollback_succeeded else "rollback_failed"
+
+        apply_res = apply_patch(target_path, patch_path)
+        if apply_res.return_code != 0:
+            console.print(f"[bold red]Error applying patch: {apply_res.stderr}[/bold red]")
+            log_failure(
+                trace_id=run_id,
+                run_id=run_id,
+                stage="apply",
+                error_type="apply_failed",
+                message=apply_res.stderr,
+                logs_dir=logs_dir,
+                run_dir=run_dir,
+            )
+            # Revert: force reset to pre-apply state
+            rollback_succeeded = False
+            try:
+                rollback_to_commit(target_path, pre_apply_head, backup_diff=backup_path)
+                rollback_succeeded = True
+            except RollbackError as exc:
+                console.print(
+                    "[bold red]FATAL: Patch application failed AND the automatic revert also "
+                    "failed. Your repository may be in a partially applied state.\n"
+                    f"Revert stderr: {exc.stderr}\n"
+                    "Please run 'git checkout .' and 'git clean -fd' manually "
+                    "to restore a clean state.[/bold red]"
+                )
+                log_failure(
+                    trace_id=run_id,
+                    run_id=run_id,
+                    stage="apply",
+                    error_type="revert_failed",
+                    message=exc.stderr,
+                    logs_dir=logs_dir,
+                    run_dir=run_dir,
+                )
+            # Write apply.json failure using ApplyResult model
+            apply_result = ApplyResult(
+                run_id=run_id,
+                applied_at=datetime.now(timezone.utc),
+                branch=branch_name,
+                success=False,
+                status="apply_failed",
+                rolled_back=rollback_succeeded,
+                error=apply_res.stderr,
+                pre_apply_head=pre_apply_head,
+                pre_apply_branch=pre_apply_branch,
+                rollback_head=pre_apply_head if rollback_succeeded else None,
+            )
+            _wal_write(apply_result, run_dir / "apply.json")
+            run_metadata.status = "failed"
+            run_metadata.apply_status = "rolled_back" if rollback_succeeded else "rollback_failed"
+            run_metadata.updated_at = datetime.now(timezone.utc)
+            if run_metadata.failure_artifacts is None:
+                run_metadata.failure_artifacts = []
+            if "apply.json" not in run_metadata.failure_artifacts:
+                run_metadata.failure_artifacts.append("apply.json")
+            workspace_mgr.write_run_json(run_id, run_metadata)
+            raise typer.Exit(code=1)
+
+        # 9. Run post-apply validation checks
+        with Progress(
+            SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console
+        ) as progress:
+            task = progress.add_task("[green]Running post-apply validation checks...", total=None)
+            try:
+                post_val_output, _ = run_validator(config=config)
+                progress.update(task, completed=100)
+            except Exception as exc:
+                progress.update(task, completed=100)
+                console.print(
+                    "[bold yellow]Warning: post-apply validation failed to execute: "
+                    f"{exc}[/bold yellow]"
+                )
+                post_val_output = None
+
+        if post_val_output is not None:
+            workspace_mgr.write_artifact(
+                run_id, "post_apply_validation.json", post_val_output.model_dump_json(indent=2)
+            )
+
+        # 10. Handle post-apply validation failure: rollback automatically
+        if post_val_output is not None and not post_val_output.overall_passed:
+            console.print(
+                "[bold yellow]Post-apply validation failed. Rolling back...[/bold yellow]"
+            )
+            rollback_succeeded = False
+            try:
+                rollback_to_commit(target_path, pre_apply_head, backup_diff=backup_path)
+                rollback_succeeded = True
+            except RollbackError as exc:
+                console.print(
+                    "[bold red]FATAL: Post-apply validation failed AND automatic rollback "
+                    "also failed. Your repository may be in a partially applied state.\n"
+                    f"Revert stderr: {exc.stderr}\n"
+                    "Please run 'git checkout .' and 'git clean -fd' manually "
+                    "to restore a clean state.[/bold red]"
+                )
+                log_failure(
+                    trace_id=run_id,
+                    run_id=run_id,
+                    stage="apply",
+                    error_type="rollback_failed",
+                    message=exc.stderr,
+                    logs_dir=logs_dir,
+                    run_dir=run_dir,
+                )
+
+            # Write post_apply_failure.json
+            failure_detail = {
+                "stage": "post_apply_validation",
+                "reason": "validation_failed",
+                "validation_output": post_val_output.model_dump(),
+                "rollback_succeeded": rollback_succeeded,
+            }
+            workspace_mgr.write_artifact(
+                run_id, "post_apply_failure.json", json.dumps(failure_detail, indent=2)
+            )
+
+            error_msg = (
+                "Post-apply validation failed; rollback also failed"
+                if not rollback_succeeded
+                else "Post-apply validation failed"
+            )
+            apply_result = ApplyResult(
+                run_id=run_id,
+                applied_at=datetime.now(timezone.utc),
+                branch=branch_name,
+                success=False,
+                status="apply_failed",
+                rolled_back=rollback_succeeded,
+                error=error_msg,
+                pre_apply_head=pre_apply_head,
+                pre_apply_branch=pre_apply_branch,
+                rollback_head=pre_apply_head if rollback_succeeded else None,
+            )
+            _wal_write(apply_result, run_dir / "apply.json")
+            run_metadata.status = "failed"
+            run_metadata.apply_status = "rolled_back" if rollback_succeeded else "rollback_failed"
+            run_metadata.updated_at = datetime.now(timezone.utc)
+            if run_metadata.failure_artifacts is None:
+                run_metadata.failure_artifacts = []
+            for artifact in ["apply.json", "post_apply_failure.json"]:
+                if artifact not in run_metadata.failure_artifacts:
+                    run_metadata.failure_artifacts.append(artifact)
+            workspace_mgr.write_run_json(run_id, run_metadata)
+            raise typer.Exit(code=1)
+
+        # 11. Checkpoint 5: status="applied", success=True
+        apply_result.applied_at = datetime.now(timezone.utc)
+        apply_result.success = True
+        apply_result.status = "applied"
+        _wal_write(apply_result, run_dir / "apply.json")
+
+        # 12. Update metadata
+        run_metadata.status = "applied"
+        run_metadata.apply_status = "success"
         run_metadata.updated_at = datetime.now(timezone.utc)
-        if run_metadata.failure_artifacts is None:
-            run_metadata.failure_artifacts = []
-        for artifact in ["apply.json", "post_apply_failure.json"]:
-            if artifact not in run_metadata.failure_artifacts:
-                run_metadata.failure_artifacts.append(artifact)
         workspace_mgr.write_run_json(run_id, run_metadata)
-        raise typer.Exit(code=1)
 
-    # 11. Checkpoint 5: status="applied", success=True
-    apply_result.applied_at = datetime.now(timezone.utc)
-    apply_result.success = True
-    apply_result.status = "applied"
-    _wal_write(apply_result, run_dir / "apply.json")
-
-    # 12. Update metadata
-    run_metadata.status = "applied"
-    run_metadata.apply_status = "success"
-    run_metadata.updated_at = datetime.now(timezone.utc)
-    workspace_mgr.write_run_json(run_id, run_metadata)
-
-    log_event(
-        trace_id=run_id,
-        run_id=run_id,
-        level="info",
-        source="pipeline",
-        stage="apply",
-        event="stage_end",
-        data={
-            "success": True,
-            "post_apply_passed": post_val_output.overall_passed if post_val_output else None,
-        },
-        logs_dir=logs_dir,
-        run_dir=run_dir,
-    )
-
-    if coordination_db_dir is not None and acquired:
-        release_repo_lock(repo_identity, worker_id or "unknown", db_dir=coordination_db_dir)
+        log_event(
+            trace_id=run_id,
+            run_id=run_id,
+            level="info",
+            source="pipeline",
+            stage="apply",
+            event="stage_end",
+            data={
+                "success": True,
+                "post_apply_passed": post_val_output.overall_passed if post_val_output else None,
+            },
+            logs_dir=logs_dir,
+            run_dir=run_dir,
+        )
+    finally:
+        if coordination_db_dir is not None and acquired:
+            release_repo_lock(repo_identity, worker_id or "unknown", db_dir=coordination_db_dir)
 
     console.print(
         Panel(
