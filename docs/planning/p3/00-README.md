@@ -19,7 +19,7 @@
 | 2 | B8a — Work Queue Schema | ✅ Done | `feat/issue-132-work-queue-schema` | `27fa268` | SQLite queue.db, enqueue_issue con TTL 24h, dequeue_issue con lease + max 3 retries |
 | 2 | B5 — Artifact Store | ✅ Done | `feat/issue-134-b5-artifact-store` | `5551778` | Pluggable `ArtifactStore` ABC + `LocalArtifactStore` with atomic WAL writes; integrated into `WorkspaceManager` with dual-write |
 | 2 | B3 — GitHub Client | ✅ Done | `feat/issue-136-b3-github-client` | `e5a8f61` | `GitHubClient` with O(1) webhook idempotency; `_with_retry` capturing `(GithubException, ConnectionError, TimeoutError)`; `handle_issue_opened` webhook handler; 10 tests |
-| 2 | B8b — Worker Loop | ❌ Pending | — | — | |
+| 2 | B8b — Worker Loop | ✅ Done | `feat/issue-138-b8b-worker-loop` | `6c4e639` | Headless `worker_loop` with `pipeline_checkpoint` resume; 5-phase `apply.json` WAL recovery; strict re-hydration with SHA256 verification; CB pre-warm via `SqliteCircuitBreakerStore`; deterministic vs transient classifier; risk gate enforced post-executor; 16 tests |
 | — | Post-Audit Fixes | ❌ Pending | — | — | |
 
 ---
