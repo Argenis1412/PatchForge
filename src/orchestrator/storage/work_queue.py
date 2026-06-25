@@ -294,6 +294,8 @@ def _execute_apply_with_checkpoints(
     workspace: Any,
     github: Any,
     store: Any,
+    *,
+    base_branch: str = "main",
 ) -> None:
     """Headless 5-phase apply with apply.json WAL.
 
@@ -431,7 +433,7 @@ def _execute_apply_with_checkpoints(
         title=f"PatchForge: {run_id}",
         body=f"Automated patch from PatchForge run `{run_id}` (issue #{issue_number}).",
         head=branch,
-        base="main",
+        base=base_branch,
     )
     apply_result.pr_number = pr_obj.number
     apply_result.status = "pr_created"
@@ -477,7 +479,8 @@ def _execute_pipeline_with_resume(
     for stage in STAGES:
         if stage == "apply":
             _execute_apply_with_checkpoints(
-                run_id, issue_number, repo_path, workspace, github, store
+                run_id, issue_number, repo_path, workspace, github, store,
+                base_branch=run_metadata.branch,
             )
             continue
 
@@ -571,7 +574,16 @@ def worker_loop(
             run_id = row["run_id"]
             issue_number = row["issue_number"]
             branch = f"patchforge/run_{run_id}/issue_{issue_number}"
-            existing_pr = github.get_pr_for_branch(branch)
+            try:
+                existing_pr = github.get_pr_for_branch(branch)
+            except Exception:
+                conn_queue.execute(
+                    "UPDATE work_queue SET status='pending', "
+                    "scheduled_after=datetime('now', '+5 minutes') WHERE run_id=?",
+                    (run_id,),
+                )
+                conn_queue.commit()
+                continue
             if existing_pr is not None:
                 conn_queue.execute(
                     "UPDATE work_queue SET status='completed', "
