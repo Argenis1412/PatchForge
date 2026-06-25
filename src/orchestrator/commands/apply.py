@@ -7,6 +7,7 @@ __all__ = [
 ]
 
 import json
+import os
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -19,6 +20,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from orchestrator.clients.bootstrap import bootstrap_environment
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.storage import _wal_write
+from orchestrator.storage.lock import acquire_repo_lock, release_repo_lock
 from orchestrator.workspace import WorkspaceManager
 
 console = Console()
@@ -29,6 +31,9 @@ def execute(
     allow_dirty: bool = False,
     env_file: Optional[Path] = None,
     workspace: Optional[Path] = None,
+    issue_number: Optional[int] = None,
+    worker_id: Optional[str] = None,
+    coordination_db_dir: Optional[Path] = None,
 ) -> None:
     """Apply the validated patch to the target repository."""
     console.print(
@@ -59,6 +64,8 @@ def execute(
     # 1. Resolve workspace path and ensure run exists
     if workspace is not None:
         workspace_path = Path(workspace).resolve()
+    elif os.environ.get("PATCHFORGE_WORKSPACE"):
+        workspace_path = Path(os.environ["PATCHFORGE_WORKSPACE"]).resolve()
     else:
         workspace_path = default_workspace_path(Path.cwd())
 
@@ -71,6 +78,9 @@ def execute(
 
     # 2. Read run.json and patch.diff
     run_metadata = workspace_mgr.read_run_json(run_id)
+
+    if issue_number is None and run_metadata.issue_number is not None:
+        issue_number = run_metadata.issue_number
 
     if run_metadata.status != "previewed":
         _status_msgs = {
@@ -255,8 +265,22 @@ def execute(
     pre_apply_head = current_head(target_path)
     pre_apply_branch = current_branch(target_path)
 
+    # 6b. Acquire repo lock before any git mutation
+    acquired = False
+    repo_identity = str(target_path.resolve())
+    if coordination_db_dir is not None:
+        acquired = acquire_repo_lock(
+            repo_identity,
+            worker_id or "unknown",
+            ttl_seconds=300,
+            db_dir=coordination_db_dir,
+        )
+
     # 7. Check out explicit, system-controlled Git branch
-    branch_name = f"patchforge/{run_id}"
+    if issue_number is not None:
+        branch_name = f"patchforge/{run_id}/issue_{issue_number}"
+    else:
+        branch_name = f"patchforge/{run_id}"
 
     # Checkpoint 1: status="applying" before any git operation
     apply_result = ApplyResult(
@@ -445,8 +469,6 @@ def execute(
         raise typer.Exit(code=1)
 
     # 11. Checkpoint 5: status="applied", success=True
-    # TODO-B3: push branch (phase 3)
-    # TODO-B3: open PR (phase 4)
     apply_result.applied_at = datetime.now(timezone.utc)
     apply_result.success = True
     apply_result.status = "applied"
@@ -472,6 +494,9 @@ def execute(
         logs_dir=logs_dir,
         run_dir=run_dir,
     )
+
+    if coordination_db_dir is not None and acquired:
+        release_repo_lock(repo_identity, worker_id or "unknown", db_dir=coordination_db_dir)
 
     console.print(
         Panel(

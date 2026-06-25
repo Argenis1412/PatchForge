@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import random
 import time
 from dataclasses import dataclass
@@ -35,6 +36,15 @@ class PR:
 
 class GitHubClient:
     def __init__(self, token: str, repo: str) -> None:
+        if not token:
+            token = (
+                os.environ.get("PATCHFORGE_GITHUB_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
+            )
+        if not token:
+            raise RuntimeError(
+                "GitHubClient requires a token: pass it explicitly or set "
+                "PATCHFORGE_GITHUB_TOKEN or GITHUB_TOKEN environment variable"
+            )
         self._gh = Github(token, timeout=5)
         self._repo = self._gh.get_repo(repo)
 
