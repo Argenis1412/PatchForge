@@ -125,7 +125,8 @@ def dequeue_issue(conn: sqlite3.Connection) -> Optional[dict]:
         "retries = CASE WHEN status = 'processing' THEN retries + 1 ELSE retries END "
         "WHERE id = ("
         "SELECT id FROM work_queue "
-        "WHERE status = 'pending' "
+        "WHERE (status = 'pending' "
+        "AND (scheduled_after IS NULL OR scheduled_after <= datetime('now'))) "
         "OR (status = 'processing' AND lease_expires_at <= datetime('now') AND retries < 3) "
         "ORDER BY created_at ASC, id ASC LIMIT 1"
         ") "
@@ -381,7 +382,7 @@ def _execute_apply_with_checkpoints(
     # Post-apply validation against the freshly applied tree.
     config = TargetConfig.load(target_path=repo_path, workspace_path=workspace.root)
     try:
-        val_out, _ = run_validator(config=config)
+        val_out, _ = run_validator(config=config, staging_dir=None)  # validate real working tree
     except Exception:
         val_out = None
     if val_out is not None and not val_out.overall_passed:
