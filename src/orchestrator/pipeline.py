@@ -212,7 +212,7 @@ class Pipeline:
                 data={"stage": stage, "filename": filename},
             )
         try:
-            return model_class.model_validate_json(path.read_text())
+            return model_class.model_validate_json(path.read_text(encoding="utf-8"))
         except Exception as e:
             raise PipelineAbortError(
                 f"Failed to load {stage} output: {e}. Re-run from an earlier stage.",
@@ -377,7 +377,7 @@ class Pipeline:
 
     def _persist(self) -> None:
         path = self.workspace.runs / f"pipeline_{self.run.run_id}.json"
-        path.write_text(self.run.model_dump_json(indent=2))
+        path.write_text(self.run.model_dump_json(indent=2), encoding="utf-8")
 
 
 def _ms(t0: float) -> int:

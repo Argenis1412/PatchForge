@@ -346,7 +346,7 @@ def execute(
             pre_apply_branch=pre_apply_branch,
             rollback_head=pre_apply_head if rollback_succeeded else None,
         )
-        workspace_mgr.write_artifact(run_id, "apply.json", apply_result.model_dump_json(indent=2))
+        _wal_write(apply_result, run_dir / "apply.json")
         run_metadata.status = "failed"
         run_metadata.apply_status = "rolled_back" if rollback_succeeded else "rollback_failed"
         run_metadata.updated_at = datetime.now(timezone.utc)
@@ -430,7 +430,7 @@ def execute(
             pre_apply_branch=pre_apply_branch,
             rollback_head=pre_apply_head if rollback_succeeded else None,
         )
-        workspace_mgr.write_artifact(run_id, "apply.json", apply_result.model_dump_json(indent=2))
+        _wal_write(apply_result, run_dir / "apply.json")
         run_metadata.status = "failed"
         run_metadata.apply_status = "rolled_back" if rollback_succeeded else "rollback_failed"
         run_metadata.updated_at = datetime.now(timezone.utc)
@@ -448,7 +448,7 @@ def execute(
     apply_result.applied_at = datetime.now(timezone.utc)
     apply_result.success = True
     apply_result.status = "committed_local"
-    workspace_mgr.write_artifact(run_id, "apply.json", apply_result.model_dump_json(indent=2))
+    _wal_write(apply_result, run_dir / "apply.json")
 
     # 12. Update metadata
     run_metadata.status = "applied"
