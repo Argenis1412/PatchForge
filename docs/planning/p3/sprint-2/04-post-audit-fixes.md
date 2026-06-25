@@ -699,15 +699,15 @@ def cleanup_stale_workspaces(workspace_mgr: WorkspaceManager, worker_id: str) ->
 - [ ] `CircuitBreakerOpenError` is the only CB exception in the codebase (no `CircuitBreakerOpenException` / `CircuitBreakerException`)
 - [ ] `ProbeSlotBusyError(CircuitBreakerOpenError)` was **removed** in e81fafe — `CircuitBreaker.call()` with `SqliteCircuitBreakerStore` is the sole CB mechanism; no probe token needed
 - [ ] `apply.py:execute()` acquires repo lock when `coordination_db_dir` is provided
-- [ ] `_sqlite_connect()` is imported in all storage files via `from orchestrator.storage import _sqlite_connect`
-- [ ] `risk_gate.json` persisted via `workspace_mgr.write_artifact()` in both `check_plan_gate()` and `check_patch_gate()`
-- [ ] `events.jsonl` removed from `_hydrate_workspace` recovery list
-- [ ] Failure-path `apply.json` writes use `_wal_write()`, not `write_artifact()`
-- [ ] `pipeline.py` has zero P3 diffs (reverted)
+- [x] `_sqlite_connect()` is imported in all storage files via `from orchestrator.storage import _sqlite_connect` (H-6, already fixed pre-Issue-A)
+- [x] `risk_gate.json` persisted via `workspace_mgr.write_artifact()` in both `check_plan_gate()` and `check_patch_gate()` (H-7a, already fixed pre-Issue-A)
+- [x] `events.jsonl` removed from `_hydrate_workspace` recovery list (H-7b, already fixed pre-Issue-A)
+- [x] Failure-path `apply.json` writes use `_wal_write()`, not `write_artifact()` (H-7c, fixed in Issue-A commit `f437f46`)
+- [x] `pipeline.py` has zero P3 diffs (H-8 — encoding fixes applied instead of revert, in Issue-A commit `f437f46`)
 - [ ] `DANGEROUS_PATTERNS` correctly matches directory entries like `.github/workflows/deploy.yml`
 - [ ] `check_patch_gate()` accepts `workspace_mgr` param and persists `risk_gate.json`
 - [ ] WAL phases 3-4 gated behind `# TODO-B3` markers
-- [ ] All `encoding="utf-8"` present in dual-write paths
+- [x] All `encoding="utf-8"` present in dual-write paths (M-7, fixed in Issue-A commit `f437f46`)
 - [ ] All documented env vars (`PATCHFORGE_WORKSPACE`, `REPO_LOCK_ENABLED`, `WORKER_ID`, `PATCHFORGE_GITHUB_TOKEN`) are read in production code
 
 ---

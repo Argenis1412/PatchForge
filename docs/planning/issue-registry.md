@@ -462,6 +462,14 @@ ADR-0004 must answer exactly five questions:
 
 ## P3 — Async Workers & CI/CD Integration
 
+### ✅ Issue #140: Storage, WAL & Core Persistence
+- **Priority:** P3 | **Status:** ✅ **Completed**
+- **Commit:** `f437f46`
+- **Branch:** `fix/issue-140-core-persistence`
+- **Goal:** Resolve critical findings from the 6th adversarial audit — ensure all `apply.json` writes use atomic `_wal_write()` with guaranteed fsync, and fix missing `encoding="utf-8"` in legacy pipeline persistence.
+- **Scope on implementation:** 3 remaining `write_artifact("apply.json")` calls converted to `_wal_write()`; 2 `write_text()`/`read_text()` calls in `pipeline.py` given explicit UTF-8 encoding. All other originally scoped fixes (H-6, H-7a/b, M-7) were already present in the codebase.
+- **Files:** `src/orchestrator/commands/apply.py`, `src/orchestrator/pipeline.py`
+
 ### Docker Containerization
 - **Priority:** P3 | **Status:** 📐 Scoped
 - **Goal:** Package core (orchestration, git wrappers, schema validation) as standalone container.
