@@ -106,8 +106,7 @@ GitHubClient method for retry with jitter on rate limit. See 02-b3-github.md.
 
 ## Implementation Order
 
-**B1, B2, B4, B7, B8a completed.** Next: B5 → B3 → B8b.
-**B5 has zero deps — implement first. B5 must be complete before opening B3.**
+**B1, B2, B4, B7, B8a, B5, B3 completed.** Next: B8b.
 **B3 must be complete before opening B8b (B8b needs GitHubClient + ArtifactStore).**
 **After B8b is complete:** apply `04-post-audit-fixes.md`.
 
@@ -259,5 +258,6 @@ Final output:
 | B7 — Workspace Isolation & Repo Lock | ✅ Done | `feat/b7-workspace-isolation` | `2ff95a3` | `worker_id` scoping in WorkspaceManager; `acquire_repo_lock()` / `release_repo_lock()` in coordination.db; `cleanup_stale_workspaces()`; 4 new tests |
 | B8a — Work Queue Schema | ✅ Done | `feat/issue-132-work-queue-schema` | `27fa268` | SQLite queue.db layer with 3 tables; `enqueue_issue()` with 24h TTL lock; `dequeue_issue()` with lease + max 3 retries; `bootstrap_databases()` in bootstrap.py |
 | B5 — Artifact Store | ✅ Done | `feat/issue-134-b5-artifact-store` | `5551778` | Pluggable `ArtifactStore` ABC with `LocalArtifactStore` (atomic WAL writes); integrated into `WorkspaceManager` with dual-write pattern; committed_local reaches store |
-| Tests | 422 passed, 2 skipped, 0 failed | — | — | — |
+| B3 — GitHub Client | ✅ Done | `feat/issue-136-b3-github-client` | `e5a8f61` | `GitHubClient` with O(1) first-page webhook idempotency; `_with_retry` capturing `(GithubException, ConnectionError, TimeoutError)` with exponential backoff; `handle_issue_opened` webhook handler; `PATCHFORGE_LABELS` with best-effort logging; `close_pr` guard against double-close; 10 tests |
+| Tests | 453 passed, 2 skipped, 0 failed | — | — | — |
 | TODOs | none | — | — | — |

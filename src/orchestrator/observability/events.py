@@ -20,7 +20,6 @@ def _append_and_fsync(path: Path, entry: dict[str, Any]) -> None:
             os.close(dir_fd)
 
 
-
 class FailureType(StrEnum):
     LLM_ERROR = "llm_error"
     SCHEMA_VALIDATION_ERROR = "schema_validation_error"
