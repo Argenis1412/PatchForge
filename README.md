@@ -16,7 +16,7 @@ PatchForge is built around a simple principle:
 > AI proposes. PatchForge proves. Humans decide.
 
 See:
-- [Product Thesis](./docs/PRODUCT_THESIS.md) — Why PatchForge exists, its principles, and competitive moat.
+- [Product Thesis](./docs/product-thesis-v2.md) — Why PatchForge exists, its principles, and competitive moat.
 - [ADR-0003: Product Contract](./docs/adr/ADR-0003-product-contract.md) — The binding repository safety contract and patch lifecycle.
 
 ## Why PatchForge Exists
@@ -89,7 +89,7 @@ PatchForge focuses on repository safety.
 | Plandex | Large-context planning |
 | **PatchForge** | **Reviewable, auditable patches** |
 
-See the [Product Thesis](./docs/PRODUCT_THESIS.md) for a detailed competitive analysis.
+See the [Product Thesis](./docs/product-thesis-v2.md) for a detailed competitive analysis.
 
 ## Target Architecture
 
@@ -121,34 +121,12 @@ workspace/
 The patch is the unit of value. A successful run is not “all agents completed”; it is a reviewable
 patch, successful validation, and explicit human approval before repository modification.
 
-## Current Implementation Status
+## Current Status
 
-The repository currently contains the runtime foundation:
-
-- Typer CLI entrypoint with `scan` and `run` commands.
-- Internal Scout, Architect, Executor, and Validator stages.
-- Pydantic schemas for stage contracts.
-- Workspace, logs, outputs, and pipeline run persistence.
-- Provider clients and explicit environment bootstrap.
-- Structured events and failure reporting.
-
-The product roadmap is now focused on moving from an agent-stage pipeline toward an explicit
-Scan → Plan → Preview → Apply workflow. See [Product Roadmap](./docs/ROADMAP.md).
-
-## Immediate Roadmap
-
-The next phases are intentionally narrow:
-
-1. **Product contract and docs** — align terminology around reviewable patches.
-2. **`doctor`** — verify Git, Python, Ruff, Pytest, workspace, and environment readiness.
-3. **Separate `plan` from `preview`** — make intent and patch generation distinct.
-4. **Run artifact redesign** — persist `workspace/runs/{run_id}/` as the product unit.
-5. **Git-safe `apply`** — apply patches only through explicit Git checks and branch creation.
-6. **Risk budgets** — add `--risk-budget`, `--max-files`, and `--max-diff-lines`.
-7. **Patch lifecycle management** — validate patch state before apply: VALID, STALE, REBASEABLE, or CONFLICT.
-
-V1 is scoped to Python repositories using Git, Ruff, and Pytest. TypeScript, monorepos, migration
-packs, CI review, and autonomous bug investigation are deferred until the patch workflow is reliable.
+- V1 complete: 5 commands (`doctor`, `scan`, `plan`, `preview`, `apply`).
+- Current phase: P2 Dogfooding & Hardening.
+- QA: pytest 481 passed, 2 skipped | ruff 0 errors.
+- See the [Phase 2 Roadmap](./docs/planning/roadmap-phase2.md) for current priorities.
 
 ## Quickstart
 
@@ -176,9 +154,9 @@ The design goals are:
 - **Small reliable changes** — bounded refactors beat broad unreliable automation.
 - **Human approval** — repository modification happens only at `apply`.
 
-## Non-goals for V1
+## Non-goals
 
-PatchForge V1 is **NOT**:
+PatchForge is **NOT**:
 
 - A general-purpose agent framework.
 - A chatbot or conversational IDE.
@@ -195,12 +173,22 @@ These may be explored later only after the Git-native patch workflow is reliable
 ```text
 src/
 └── orchestrator/
-    ├── main.py          # CLI entry point
-    ├── pipeline.py      # Pipeline execution engine
-    ├── agents/          # Internal implementation stages
-    ├── schemas/         # Typed contracts (Pydantic models)
-    ├── clients/         # LLM provider clients
-    └── observability/   # Structured logging & telemetry
+    ├── main.py                # CLI entry point
+    ├── pipeline.py            # Pipeline execution engine
+    ├── doctor.py              # Readiness checks
+    ├── git.py                 # Git operations
+    ├── lifecycle.py           # Patch lifecycle state machine
+    ├── risk.py                # Risk gates
+    ├── circuit_breaker.py     # Per-provider circuit breaker
+    ├── workspace.py           # Workspace management
+    ├── agents/                # Scout, Architect, Executor, Validator
+    ├── clients/               # LLM provider clients
+    ├── commands/              # CLI commands (scan, plan, preview)
+    ├── integrations/          # External tool integrations
+    ├── llm/                   # LLM routing
+    ├── observability/         # Structured logging & telemetry
+    ├── scanners/              # Repository scanners
+    └── schemas/               # Typed contracts (Pydantic models)
 tests/
 docs/
 ```
