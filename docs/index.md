@@ -13,8 +13,7 @@ Repository → Scan → Plan → Patch → Validation → Apply
 ## Quick Links
 
 - [README](../README.md) - Project overview and quickstart
-- [Product Thesis V2](./product-thesis-v2.md) - Product definition, artifact contract, and non-goals (post-adversarial)
-- [Product Thesis](./PRODUCT_THESIS.md) - Why PatchForge exists, its principles, and competitive moat
+- [Product Thesis](./product-thesis-v2.md) - Product definition, artifact contract, and non-goals (post-adversarial)
 - [Product Roadmap](./ROADMAP.md) - Phased plan toward the reviewable patch workflow
 - [Issue Registry](./planning/issue-registry.md) - Tracked issues with ACs, priorities, and dependencies (ADR-01 decomposed)
 - [ADR-0003: Product Contract](./adr/ADR-0003-product-contract.md) - Binding repository safety contract and patch lifecycle
@@ -69,23 +68,14 @@ Design and architecture decisions are documented in Architecture Decision Record
 - [ADR-0002: Runtime Boundaries & Operational Hygiene](./adr/ADR-0002-runtime-boundaries.md)
 - [ADR-0001: Architect Model Comparison](./adr/ADR-0001-architect-comparison.md)
 
-## Roadmap Summary
+## Current Status
 
-The current plan is intentionally narrow:
+- V1 complete: 5 commands (`doctor`, `scan`, `plan`, `preview`, `apply`).
+- Current phase: P2 Dogfooding & Hardening.
+- QA: pytest 481 passed, 2 skipped | ruff 0 errors.
 
-1. Product contract and documentation alignment.
-2. `doctor` command.
-3. Separate `plan` from `preview`.
-4. Self-contained `workspace/runs/{run_id}/` artifacts.
-5. Git-safe `apply`.
-6. Risk budgets and change limits.
-7. Python framework awareness.
-8. Python monorepos.
-9. TypeScript.
-10. Migration packs.
-11. CI review.
-
-See [Product Roadmap](./ROADMAP.md) for details.
+See [Phase 2 Roadmap](./planning/roadmap-phase2.md) for current priorities and
+[Product Roadmap](./ROADMAP.md) for the full phased plan.
 
 ## Getting Started
 
