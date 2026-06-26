@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-06-26 | Session: chore/doc-cleanup-pr-template
+> Last updated: 2026-06-26 | Session: feat/issue-151-validator-timeout-feedback
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 481 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 507 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant until P3).
 
@@ -150,6 +150,7 @@ tests/                     (20 test files, 481 tests)
 | 140 | Core Persistence (WAL atomic writes) | All apply.json uses `_wal_write()` |
 | 142 | Post-Audit Remaining Fixes | Branch naming, repo locks, env guards |
 | 145 | Hardening Sprint | Provider visibility, `--force-provider`, test fix |
+| 151 | Validator timeout config + feedback | CLI `--validator-timeout`, env var, per-tool spinner, `timed_out` field |
 
 ---
 
@@ -214,9 +215,9 @@ These must not change without a new ADR in `docs/adr/`:
 - ✅ Issue #98 — Executor DAG Scheduler
 - ✅ Issue #140 — Core Persistence (WAL atomic writes)
 - ✅ Issue #142 — Post-Audit Remaining Fixes
-- ✅ Issue #145 — Hardening Sprint
-- ✅ Issue #149 — Workspace Hash Inconsistency
-- ✅ Issue #151 — Validator timeout produces no actionable feedback
+- ✅ Issue #145 — Hardening Sprint (#146)
+- ✅ Issue #149 — Workspace Hash Inconsistency (#150)
+- ✅ Issue #151 — Validator timeout config + feedback (#151)
 - ✅ Formalize Experiment Schema (debt P2→P3)
 
 ---
