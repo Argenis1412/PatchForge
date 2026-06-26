@@ -107,7 +107,11 @@ def execute(
         cleaned_count = 0
         if staging_dir.exists():
             cleaned_count = sum(1 for _ in staging_dir.rglob("*") if _.is_file())
-            shutil.rmtree(staging_dir, ignore_errors=True)
+            try:
+                shutil.rmtree(staging_dir)
+            except OSError as exc:
+                console.print(f"[bold red]Error clearing staging directory: {exc}[/bold red]")
+                raise typer.Exit(code=1)
         staging_dir.mkdir(parents=True, exist_ok=True)
         if cleaned_count > 0:
             console.print(

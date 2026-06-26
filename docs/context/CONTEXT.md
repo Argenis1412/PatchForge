@@ -123,7 +123,7 @@ tests/                     (20 test files, 208 tests)
 
 | Check | Result |
 |-------|--------|
-| `pytest` | **481 passed, 2 skipped** |
+| `pytest` | **481 passed, 2 skipped** (symlinks N/A in `test_workspace_safety.py`; Windows skip in `test_safety.py`) |
 | `ruff check .` | **0 errors** — clean across all files |
 | `ruff format --check` | **Clean** (77 files formatted) |
 

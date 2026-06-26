@@ -81,7 +81,13 @@ def _apply_task(
     # (pending_human_review) and staging writes below.
     if force_provider:
         by_name = _provider_by_name()
-        chain = [by_name[force_provider]]
+        provider = by_name.get(force_provider)
+        if provider is None:
+            raise ValueError(
+                f"Unknown provider: {force_provider}. "
+                f"Available: {tuple(sorted(by_name))}"
+            )
+        chain = [provider]
     else:
         chain = _PROVIDER_CHAIN.get(task.risk_level)
     if not chain:
