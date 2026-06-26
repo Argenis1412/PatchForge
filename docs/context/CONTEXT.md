@@ -1,39 +1,40 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-06-25 | Session: #145 hardening sprint
+> Last updated: 2026-06-26 | Session: chore/doc-cleanup-pr-template
 > This document is the single source of truth for AI sessions. Read before any implementation work.
+
+---
+
+## Project at a Glance
+
+**What:** PatchForge — AI-powered, safety-first code modification tool. Generates, validates, and applies patches through a deterministic Plan → Preview → Validate → Apply pipeline.
+
+**Phase:** P2 — Dogfooding & Hardening (V1 complete, P0/P1/P2 entry complete)
+
+**Stack:** Python 3.10+ | Pydantic schemas | Typer CLI | ruff + pytest QA
+
+**CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
+
+**QA:** `pytest` → 481 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+
+**Key constraint:** Single-threaded, synchronous pipeline (invariant until P3).
 
 ---
 
 ## Working Style
 
-10-step workflow per issue:
+**Core rule:** The refactor is never the unit of work. The unit is a self-contained issue with limited scope and verifiable criteria.
 
-1. Read and understand the issue
-2. Run **AI: Issue Clarifier** — find undefined terms, edge cases, unmapped interactions, ambiguities
-3. Update the issue if gaps are found
-4. Define acceptance criteria + **Exit Conditions** + **Out of Scope by Construction**
-5. Run **AI: AC Challenger** — find untestable criteria, missing edge cases, redundancies
-6. Create implementation plan with **Modification Budget**
-7. Run **AI: Adversarial Reviewer** — challenge assumptions, find pre-existing solutions, unmapped interactions, silent bugs
-8. Wait for approval
-9. Create branch (`<type>/issue-<N>-<slug>`)
-10. Implement → **AI: Diff Reviewer** → Add/update tests → QA (`ruff check` · `ruff format --check` · `pytest`) → atomic commit → push → PR
-
-**Core rule:** The refactor is never the unit of work. The unit of work is a self-contained issue with limited scope and verifiable criteria.
-
-**Risk distribution:** Each AI has a distinct responsibility (Clarifier, AC Challenger, Adversarial Reviewer, Diff Reviewer). No single AI has authority to design the whole solution.
+**Risk distribution:** Each AI role (Clarifier, AC Challenger, Adversarial Reviewer, Diff Reviewer) has a distinct responsibility. No single AI has authority to design the whole solution.
 
 **Rules:**
-- Stop and ask if anything is ambiguous
-- Implement only what the issue requires
-- No unrelated refactors, no speculative improvements
-- Keep diffs minimal
-- Code, comments, commits, and PRs in **English only**
-- Conventional commits only (`feat`, `fix`, `docs`, `refactor`, `chore`)
-- Behavior changes require tests
-- GPG-verified commits
-- Golden Rule: Implement the smallest correct change that satisfies all acceptance criteria
+- Implement only what the issue requires. No unrelated refactors, no speculative improvements.
+- Keep diffs minimal. Code, comments, commits, and PRs in English only.
+- Conventional commits only (`feat`, `fix`, `docs`, `refactor`, `chore`).
+- Behavior changes require tests. GPG-verified commits.
+- **Golden Rule:** Implement the smallest correct change that satisfies all acceptance criteria.
+
+> For the full 10-step workflow, QA gates, branch naming, and commit format, see `docs/context/Workflow.md`.
 
 ---
 
@@ -63,12 +64,12 @@ src/orchestrator/          (41 Python files)
 │   └── python.py          # V1 deterministic Python scanner
 ├── schemas/
 │   ├── architect_output.py
-│   ├── artifacts.py       # RunMetadata — source of truth for run state (within a single execution under consistent schema version; no cross-version compatibility guarantee)
+│   ├── artifacts.py       # RunMetadata — run state source of truth
 │   ├── config.py          # TargetConfig + TargetCapabilities
 │   ├── executor_output.py
 │   ├── findings.py        # ScanFindings — V1 deterministic scan schema
 │   ├── issue.py           # IssueInput — human issue frontmatter parser
-│   ├── git.py              # GitCommandResult, ValidationWorkspace, etc.
+│   ├── git.py             # GitCommandResult, ValidationWorkspace, etc.
 │   ├── pipeline_run.py
 │   ├── risk.py
 │   ├── scout_output.py
@@ -82,63 +83,73 @@ src/orchestrator/          (41 Python files)
 ├── validation_workspace.py
 └── workspace.py           # WorkspaceManager — disk layout
 
-tests/                     (20 test files, 208 tests)
+tests/                     (20 test files, 481 tests)
 ```
 
 ---
 
 ## Current State
 
+### V1 — Complete (May 27 – Jun 8)
+
+22 issues implementing the deterministic CLI pipeline: doctor, scan, plan, preview, apply. No AI dependency in scan and doctor.
+
 | # | Title | Date |
 |---|-------|------|
-| 59 | Fix remaining ruff violations (N818, E501, E402, I001) | Jun 8 |
-| 57 | Update documentation to use `patchforge` CLI | Jun 8 |
-| 55 | Rename CLI from `orchestrator` to `patchforge` | Jun 8 |
-| 53 | Deprecate and hide legacy `run` command | Jun 8 |
-| 51 | Fix: conditional preview status and pre-apply validation gate | Jun 7 |
-| 49 | Implement `plan run_id` with bounded AI-assisted planning | Jun 7 |
-| 45 | Replace AI Scout behavior with deterministic V1 scan | Jun 7 |
-| 9c | Fix: block REBASEABLE patches from being applied in V1 | Jun 7 |
-| 9b | Patch lifecycle states for V1 | Jun 6 |
-| 41 | V1 risk gates and patch size limits | Jun 6 |
-| 39 | Failure-state handling and apply rollback | Jun 6 |
-| 37 | Fix architect: deprecated model + harden JSON parsing | Jun 6 |
+| 18 | PatchForge thesis (initial scaffold) | May 27 |
+| 20 | Enforce external workspace safety | Jun 2 |
+| 21 | Deterministic Git safety primitives + V1 isolated validation | Jun 3 |
+| 24 | Translate all Spanish to English | Jun 4 |
+| 25 | V1 run-centric artifact persistence and commands | Jun 4 |
+| 26 | Deterministic doctor command + V1 support gate | Jun 5 |
+| 28 | API key warnings | Jun 5 |
+| 30 | Doctor: TypeScript out-of-scope warning | Jun 5 |
 | 31 | Doctor docstrings: edge cases + return value docs | Jun 5 |
 | 33 | Doctor docstrings: all functions | Jun 5 |
-| 30 | Doctor: TypeScript out-of-scope warning | Jun 5 |
-| 28 | API key warnings | Jun 5 |
-| 26 | Deterministic doctor command + V1 support gate | Jun 5 |
-| 25 | V1 run-centric artifact persistence and commands | Jun 4 |
-| 24 | Translate all Spanish to English | Jun 4 |
-| 21 | Deterministic Git safety primitives + V1 isolated validation | Jun 3 |
-| 20 | Enforce external workspace safety | Jun 2 |
-  | 81 | Atomic Rollback Validation (T-02) | Jun 12 |
-   | 85 | Path Traversal Hardening (T-01) | Jun 12 |
-   | 87 | Circuit Breaker — LLM Provider Failure Isolation (T-07B) | Jun 13 |
-   | 92 | Issue Contracts — --issue-file (ISS-B) | Jun 13 |
-   | 145 | Hardening Sprint (provider visibility, --force-provider, test fix) | Jun 25 |
-   | 18 | PatchForge thesis (initial scaffold) | May 27 |
+| 37 | Fix architect: deprecated model + harden JSON parsing | Jun 6 |
+| 39 | Failure-state handling and apply rollback | Jun 6 |
+| 41 | V1 risk gates and patch size limits | Jun 6 |
+| 9b | Patch lifecycle states for V1 | Jun 6 |
+| 9c | Fix: block REBASEABLE patches from being applied in V1 | Jun 7 |
+| 45 | Replace AI Scout behavior with deterministic V1 scan | Jun 7 |
+| 49 | Implement `plan run_id` with bounded AI-assisted planning | Jun 7 |
+| 51 | Fix: conditional preview status and pre-apply validation gate | Jun 7 |
+| 53 | Deprecate and hide legacy `run` command | Jun 8 |
+| 55 | Rename CLI from `orchestrator` to `patchforge` | Jun 8 |
+| 57 | Update documentation to use `patchforge` CLI | Jun 8 |
+| 59 | Fix remaining ruff violations (N818, E501, E402, I001) | Jun 8 |
 
-### QA Metrics
+### P0 — Core Stability (Jun 12–13)
 
-| Check | Result |
-|-------|--------|
-| `pytest` | **481 passed, 2 skipped** (symlinks N/A in `test_workspace_safety.py`; Windows skip in `test_safety.py`) |
-| `ruff check .` | **0 errors** — clean across all files |
-| `ruff format --check` | **Clean** (77 files formatted) |
+| # | Title | PR |
+|---|-------|----|
+| 81 | Atomic Rollback Validation (T-02) | #81 |
+| 85 | Path Traversal Hardening (T-01) | #86 |
+| 87 | Circuit Breaker — LLM Provider Failure Isolation (T-07B) | #87 |
+| — | Issue A: Structured Contract Parsing (parse_llm_response) | — |
+| — | DOC-01: Consolidate adversarial documentation | — |
 
-### V1 Complete
+### P1 / P2 Entry — Contracts & Schema Versioning
 
-**16/16 V1 issues implemented.** CLI: `patchforge` (primary), `orchestrator` (legacy alias).
+| # | Title | PR |
+|---|-------|----|
+| 92 | Issue Contracts — `--issue-file` (Issue B) | #93 |
+| 73 | ADR-01/1: Write ADR-0004 (Schema Versioning Policy) | — |
+| 75 | ADR-01/2: Add `schema_version` to `RunMetadata` | — |
+| 77 | ADR-01/3: Version Guard at Pipeline Load Point | — |
 
-| Command | Status | Description |
-|---------|--------|-------------|
-| `doctor` | ✅ | Readiness check (no AI, no modifications) |
-| `scan` | ✅ | Deterministic repository analysis (no AI) |
-| `plan` | ✅ | AI-assisted (Claude) — bounded by risk gate |
-| `preview` | ✅ | Patch generation + validation |
-| `apply` | ✅ | Git-safe patch application |
-| `run` | ❌ deprecated | Stub with warning, hidden from help |
+### P2 — Dogfooding & Hardening (Jun 13–25)
+
+| # | Title | Details |
+|---|-------|---------|
+| — | Experiment Artifacts Schema | Verdict schema + write_verdict utility |
+| — | Experiment 001 | First successful self-modification workflow |
+| — | Experiment 002 | Move write_verdict() to workspace.py |
+| — | Experiment 003 | Add `--risk-budget` flag to scan |
+| 98 | Executor DAG Scheduler | Task dependency resolution (Kahn's algorithm) |
+| 140 | Core Persistence (WAL atomic writes) | All apply.json uses `_wal_write()` |
+| 142 | Post-Audit Remaining Fixes | Branch naming, repo locks, env guards |
+| 145 | Hardening Sprint | Provider visibility, `--force-provider`, test fix |
 
 ---
 
@@ -157,15 +168,15 @@ These must not change without a new ADR in `docs/adr/`:
        1. **Code inspection** — the pipeline must contain no execution path from stage N's persist call to stage N+1's invocation that does not pass through `workspace.load()`.
        2. **Call-sequence integration test** — asserts that `workspace.load()` is called during the transition and that the value passed to stage N+1 is equal (by Pydantic model equality) to the value returned by `workspace.load()`.
    - The mutation test previously specified is **withdrawn**: it verifies disk-reading behavior under Model B (disk as live source, where external mutations are valid) and must not be used as a conformance criterion for this invariant.
-    - **Scope:** the source-of-truth guarantee applies to stage transitions within a single pipeline run. If an artifact persisted under an incompatible schema version is loaded, Pydantic raises a `ValidationError` at load time before any stage transition proceeds. This is the enforcement mechanism for the schema boundary — a hard failure, not silent corruption. The system does not verify schema version proactively; it enforces it structurally. Cross-version artifact loading — the ability to reload artifacts produced by older schema versions using current code — requires an explicit policy (schema versioning, migration, or formal expiration) introduced via ADR when it becomes a system requirement.
-    - **Contract vs Persistence boundary:** The architectural boundary between contract validation (agent ↔ agent) and persistence decoding (disk → runtime) is enforced by **temporal separation**, not exception-type differentiation. `SchemaValidationError` (Issue A) captures contract violations at production time — before an artifact is written. A `ValidationError` at reload time cannot be an agent contract violation. This guarantee rests on two foundations:
-        1. **Same-schema case** — Invariant #2 (round-trip stability, deterministic validators, no external state) guarantees that a validly-produced artifact under schema V always survives reload under schema V. A reload failure under same-version conditions therefore indicates persistence corruption, not agent error.
-        2. **Cross-schema case** — if the schema version changed between production and reload, the agent correctly implemented the schema it was given; the incompatibility is a deployment or evolution issue, not an agent contract violation.
-    In neither case is the agent at fault. The word "unambiguously" refers exclusively to this exclusion of agent fault. It does not claim certainty over the sub-classification between corruption, truncation, and evolution — this remains a **known diagnostic gap**: the pipeline terminates on any `ValidationError` before an invalid stage transition proceeds, regardless of the root cause within persistence/evolution failures.
-    - **Behavioral consequences (clarified 2026-06-10):** The behavioral equivalence of load-from-disk vs in-memory copy is acknowledged for valid single-machine runs without failures. The architectural status of this invariant derives from two concrete observable properties:
-        1. **Pipeline resumability** — a run interrupted after Stage N's persist can be resumed from the persisted artifact; an in-memory copy implementation cannot support this.
-        2. **Distributed execution correctness** — P3 workers operating on separate machines must read persisted artifacts; they have no access to another worker's in-memory state.
-    Both properties are observable behavioral differences under their respective conditions and are required by the roadmap. Violations produce no immediate test failure but foreclose these properties without making that foreclosure observable. Happy-path behavioral equivalence is not a criterion for invariant status: architectural invariants may protect properties observable only under specific conditions (crash, distribution, authorization).
+   - **Scope:** the source-of-truth guarantee applies to stage transitions within a single pipeline run. If an artifact persisted under an incompatible schema version is loaded, Pydantic raises a `ValidationError` at load time before any stage transition proceeds. This is the enforcement mechanism for the schema boundary — a hard failure, not silent corruption. The system does not verify schema version proactively; it enforces it structurally. Cross-version artifact loading — the ability to reload artifacts produced by older schema versions using current code — requires an explicit policy (schema versioning, migration, or formal expiration) introduced via ADR when it becomes a system requirement.
+   - **Contract vs Persistence boundary:** The architectural boundary between contract validation (agent ↔ agent) and persistence decoding (disk → runtime) is enforced by **temporal separation**, not exception-type differentiation. `SchemaValidationError` (Issue A) captures contract violations at production time — before an artifact is written. A `ValidationError` at reload time cannot be an agent contract violation. This guarantee rests on two foundations:
+       1. **Same-schema case** — Invariant #2 (round-trip stability, deterministic validators, no external state) guarantees that a validly-produced artifact under schema V always survives reload under schema V. A reload failure under same-version conditions therefore indicates persistence corruption, not agent error.
+       2. **Cross-schema case** — if the schema version changed between production and reload, the agent correctly implemented the schema it was given; the incompatibility is a deployment or evolution issue, not an agent contract violation.
+   In neither case is the agent at fault. The word "unambiguously" refers exclusively to this exclusion of agent fault. It does not claim certainty over the sub-classification between corruption, truncation, and evolution — this remains a **known diagnostic gap**: the pipeline terminates on any `ValidationError` before an invalid stage transition proceeds, regardless of the root cause within persistence/evolution failures.
+   - **Behavioral consequences (clarified 2026-06-10):** The behavioral equivalence of load-from-disk vs in-memory copy is acknowledged for valid single-machine runs without failures. The architectural status of this invariant derives from two concrete observable properties:
+       1. **Pipeline resumability** — a run interrupted after Stage N's persist can be resumed from the persisted artifact; an in-memory copy implementation cannot support this.
+       2. **Distributed execution correctness** — P3 workers operating on separate machines must read persisted artifacts; they have no access to another worker's in-memory state.
+   Both properties are observable behavioral differences under their respective conditions and are required by the roadmap. Violations produce no immediate test failure but foreclose these properties without making that foreclosure observable. Happy-path behavioral equivalence is not a criterion for invariant status: architectural invariants may protect properties observable only under specific conditions (crash, distribution, authorization).
    - **Execution identity addendum (clarified 2026-06-10):** `run_id` is the canonical execution identifier. Assigned at pipeline initiation, before any artifact is persisted. The `runs/<run_id>/` directory is the execution boundary. `workspace`, `commit_anchor`, and `software_version` are attributes of an execution, not identity candidates. Two executions with identical content but distinct `run_id`s are distinct executions by definition. Cross-version execution identity — determining whether two artifacts produced by different software versions represent "the same execution" — is deferred to ADR-01.
 4. **`main.py` is CLI surface only** — no business logic
 5. **`git.py` is a pure command wrapper** — no domain logic, no `run.json` access
@@ -178,22 +189,45 @@ These must not change without a new ADR in `docs/adr/`:
 
 ---
 
-## Completed
+## Completed (18 items)
 
-✅ **ADR-01/1** — Write ADR-0004: Schema Versioning Policy (#73)
-✅ **ADR-01/2** — Add `schema_version` to `RunMetadata` (#75)
-✅ **ADR-01/3** — Version Guard at Pipeline Load Point (#77)
-✅ **Experiment Artifacts Schema** — Verdict + write_verdict utility (#79)
-✅ **Issue B** — Issue Contracts (`--issue-file`) (#92)
-✅ **Experiment 002** — Move `write_verdict()` to `workspace.py`
-✅ **Experiment 001** — First successful self-modification workflow
-✅ **T-01** — Path Traversal Hardening (#85)
-✅ **T-07B** — Circuit Breaker — LLM Provider Failure Isolation (#87)
+### P0 — Core Stability
+- ✅ T-02: Atomic Rollback Validation (#81)
+- ✅ T-01: Path Traversal Hardening (#85)
+- ✅ T-07: Exception Hierarchy + Circuit Breaker (#71, #87, #90)
+- ✅ Issue A: Structured Contract Parsing (parse_llm_response)
+- ✅ DOC-01: Consolidate adversarial session documentation
+
+### P1 — Input Contracts
+- ✅ Issue B: Issue Contracts (`--issue-file`) (#92)
+
+### P2 Entry — Schema Versioning
+- ✅ ADR-01/1: Write ADR-0004: Schema Versioning Policy (#73)
+- ✅ ADR-01/2: Add `schema_version` to `RunMetadata` (#75)
+- ✅ ADR-01/3: Version Guard at Pipeline Load Point (#77)
+
+### P2 — Dogfooding & Hardening
+- ✅ Experiment Artifacts Schema — Verdict + write_verdict utility (#79)
+- ✅ Experiment 001 — First successful self-modification workflow
+- ✅ Experiment 002 — Move write_verdict() to workspace.py
+- ✅ Experiment 003 — Add `--risk-budget` flag to scan
+- ✅ Issue #98 — Executor DAG Scheduler
+- ✅ Issue #140 — Core Persistence (WAL atomic writes)
+- ✅ Issue #142 — Post-Audit Remaining Fixes
+- ✅ Issue #145 — Hardening Sprint
+- ✅ Formalize Experiment Schema (debt P2→P3)
 
 ---
 
-For reference materials (known technical debt, failed approaches, design questions, QA history), see `docs/context/reference.md`.
+## Document Map
 
-For technical debt discovered during implementation, see `docs/context/discoveries.md`.
+| Document | Purpose |
+|----------|---------|
+| `docs/context/Workflow.md` | Daily workflow, QA gates, branch naming, commit format, AI roles |
+| `docs/context/reference.md` | Known technical debt, failed approaches, open design questions, QA history |
+| `docs/context/discoveries.md` | Technical debt discovered during implementation |
+| `docs/planning/issue-registry.md` | Full issue inventory (P0–P5) with status, scope, and acceptance criteria |
+| `docs/planning/roadmap-phase2.md` | Strategic roadmap, priority rationale, dependency chain |
+| `docs/product-thesis-v2.md` | Product definition, non-goals, artifact contract |
 
-For the product thesis (product definition, non-goals, artifact contract), see `docs/product-thesis-v2.md`.
+For ADR records, see `docs/adr/`.
