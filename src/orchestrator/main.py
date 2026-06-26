@@ -166,6 +166,11 @@ def preview(
         help="Force a specific LLM ('gemini'|'groq'|'claude') for all tasks, "
         "ignoring risk_level routing. Does not affect high-risk gating.",
     ),
+    validator_timeout: Optional[int] = typer.Option(
+        None,
+        "--validator-timeout",
+        help="Timeout in seconds for each validation tool (default: 120). Must be > 0.",
+    ),
 ) -> None:
     """Generate and validate a unified patch without modifying the target repository."""
     from orchestrator.agents.executor.providers import KNOWN_PROVIDER_NAMES
@@ -178,8 +183,16 @@ def preview(
         )
         raise typer.Exit(1)
 
+    if validator_timeout is not None and validator_timeout <= 0:
+        console.print("[bold red]Error: --validator-timeout must be greater than 0.[/bold red]")
+        raise typer.Exit(1)
+
     execute_preview(
-        run_id=run_id, workspace=workspace, env_file=env_file, force_provider=force_provider
+        run_id=run_id,
+        workspace=workspace,
+        env_file=env_file,
+        force_provider=force_provider,
+        validator_timeout=validator_timeout,
     )
 
 

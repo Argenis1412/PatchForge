@@ -37,6 +37,7 @@ def execute(
     workspace: Optional[Path] = None,
     env_file: Optional[Path] = None,
     force_provider: Optional[str] = None,
+    validator_timeout: Optional[int] = None,
 ) -> None:
     console.print(
         Panel(
@@ -84,7 +85,11 @@ def execute(
     # 3. Bootstrap target environment & load config
     bootstrap_environment(env_file=env_file, target_path=target_path)
     try:
-        config = TargetConfig.load(target_path=target_path, workspace_path=workspace_path)
+        config = TargetConfig.load(
+            target_path=target_path,
+            workspace_path=workspace_path,
+            validator_timeout=validator_timeout,
+        )
     except Exception as exc:
         console.print(f"[bold red]Error loading target config: {exc}[/bold red]")
         raise typer.Exit(code=1)
