@@ -216,6 +216,7 @@ These must not change without a new ADR in `docs/adr/`:
 - ✅ Issue #142 — Post-Audit Remaining Fixes
 - ✅ Issue #145 — Hardening Sprint
 - ✅ Issue #149 — Workspace Hash Inconsistency
+- ✅ Issue #151 — Validator timeout produces no actionable feedback
 - ✅ Formalize Experiment Schema (debt P2→P3)
 
 ---

@@ -466,6 +466,11 @@ ADR-0004 must answer exactly five questions:
 - **Root cause:** `Path.resolve()` on Windows with `strict=False` does not guarantee consistent casing normalization. `Path.cwd()` preserves shell-provided casing. Two invocations from the same repo could produce different workspace paths.
 - **Files:** `src/orchestrator/schemas/config.py` (normalize in `_workspace_hash`), `tests/test_workspace_safety.py` (regression test)
 
+### ✅ Issue #151 — Validator timeout produces no actionable feedback
+- **Priority:** P2 | **Status:** ✅ **Completed**
+- **Goal:** Make validator timeout configurable via CLI/env/config, show per-tool spinner progress, surface actionable timeout details in the final Panel, and short-circuit remaining tools on timeout.
+- **Files:** `config.py`, `validator_output.py`, `runners.py`, `validator/__init__.py`, `validation_workspace.py`, `preview.py`, `main.py`, `tests/test_validator_timeout.py`
+
 ### ✅ Formalize Experiment Schema (debt P2→P3)
 - **Priority:** P2 | **Status:** ✅ **Completed**
 - **Goal:** Formalize "Experiment" as a schema concept carrying execution context (commit SHA, repository identity, workspace path, run ID).
