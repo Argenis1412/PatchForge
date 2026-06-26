@@ -150,7 +150,9 @@ def test_runner_passes_timeout_to_subprocess(tmp_path):
 
 @pytest.mark.unit
 def test_short_circuit_on_ruff_timeout(tmp_path, monkeypatch):
-    timeout_result = ToolResult(tool="ruff", passed=False, return_code=-2, timed_out=True, stderr="Timeout")
+    timeout_result = ToolResult(
+        tool="ruff", passed=False, return_code=-2, timed_out=True, stderr="Timeout"
+    )
     pass_result = ToolResult(tool="pytest", passed=True, return_code=0)
 
     pytest_called = []
@@ -180,7 +182,9 @@ def test_short_circuit_on_ruff_timeout(tmp_path, monkeypatch):
 @pytest.mark.unit
 def test_short_circuit_on_pytest_timeout(tmp_path, monkeypatch):
     pass_result = ToolResult(tool="ruff", passed=True, return_code=0)
-    timeout_result = ToolResult(tool="pytest", passed=False, return_code=-2, timed_out=True, stderr="Timeout")
+    timeout_result = ToolResult(
+        tool="pytest", passed=False, return_code=-2, timed_out=True, stderr="Timeout"
+    )
     tsc_result = ToolResult(tool="tsc", passed=True, return_code=0)
 
     tsc_called = []
@@ -331,3 +335,70 @@ def test_progress_callback_on_timeout_skip(tmp_path, monkeypatch):
     validator_run(config=config, progress_callback=messages.append)
 
     assert any("skip" in m.lower() for m in messages)
+
+
+# ---------------------------------------------------------------------------
+# Commit 3: timeout surfaced in validation_summary
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_validation_summary_contains_timeout_info(tmp_path, monkeypatch):
+    """validation_summary stored in run_metadata must mention timeout tool and hint."""
+    from orchestrator.schemas.config import TargetCapabilities
+
+    timeout_tool = ToolResult(
+        tool="ruff", passed=False, return_code=-2, timed_out=True,
+        stderr="Timeout: ruff exceeded 5s limit. Increase with --validator-timeout"
+    )
+    validator_output = __import__(
+        "orchestrator.schemas.validator_output", fromlist=["ValidatorOutput"]
+    ).ValidatorOutput(
+        overall_passed=False,
+        tools=[timeout_tool],
+        llm_summary=None,
+        run_id="test-run",
+    )
+
+    workspace = tmp_path.parent / f"{tmp_path.name}-ws"
+    config = TargetConfig(
+        target_path=tmp_path,
+        workspace_path=workspace,
+        validator_timeout=5,
+        capabilities=TargetCapabilities(),
+    )
+
+    from orchestrator.agents.validator.runners import DEFAULT_TIMEOUT
+
+    timeout_tools = [t for t in validator_output.tools if t.timed_out]
+    assert timeout_tools, "fixture must have a timed-out tool"
+
+    tool_names = ", ".join(t.tool for t in timeout_tools)
+    effective_timeout = config.validator_timeout or DEFAULT_TIMEOUT
+    timeout_prefix = (
+        f"Timeout: {tool_names} exceeded {effective_timeout}s limit. "
+        f"Increase with --validator-timeout <seconds>. "
+    )
+    validation_summary = timeout_prefix + (validator_output.llm_summary or "Validation failed")
+
+    assert "--validator-timeout" in validation_summary
+    assert "ruff" in validation_summary
+
+
+@pytest.mark.unit
+def test_validation_summary_no_timeout_hint_when_no_timeout(tmp_path):
+    """When no tool timed out, validation_summary must not include timeout hint."""
+    from orchestrator.schemas.validator_output import ValidatorOutput
+
+    pass_tool = ToolResult(tool="ruff", passed=True, return_code=0)
+    validator_output = ValidatorOutput(
+        overall_passed=True,
+        tools=[pass_tool],
+        run_id="test-run",
+    )
+
+    timeout_tools = [t for t in validator_output.tools if t.timed_out]
+    assert timeout_tools == []
+
+    validation_summary = "All checks passed successfully"
+    assert "--validator-timeout" not in validation_summary

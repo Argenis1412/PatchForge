@@ -16,6 +16,7 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from orchestrator.agents import executor as executor_agent
+from orchestrator.agents.validator.runners import DEFAULT_TIMEOUT
 from orchestrator.clients.bootstrap import bootstrap_environment
 from orchestrator.observability.events import log_event, log_failure
 from orchestrator.risk import check_patch_gate
@@ -293,10 +294,21 @@ def execute(
 
     # 9. Update run metadata
     patch_checksum = hashlib.sha256(patch_diff.encode("utf-8")).hexdigest()
+
+    timeout_tools = [t for t in validator_output.tools if t.timed_out]
+    timeout_prefix = ""
+    if timeout_tools:
+        tool_names = ", ".join(t.tool for t in timeout_tools)
+        effective_timeout = config.validator_timeout or DEFAULT_TIMEOUT
+        timeout_prefix = (
+            f"Timeout: {tool_names} exceeded {effective_timeout}s limit. "
+            f"Increase with --validator-timeout <seconds>. "
+        )
+
     validation_summary = (
         "All checks passed successfully"
         if validator_output.overall_passed
-        else (validator_output.llm_summary or "Validation failed")
+        else timeout_prefix + (validator_output.llm_summary or "Validation failed")
     )
     model_metadata = {
         "executor": exec_meta,
@@ -315,6 +327,14 @@ def execute(
 
     status_color = "green" if validator_output.overall_passed else "red"
     validation_label = "PASSED" if validator_output.overall_passed else "FAILED"
+    timeout_hint = ""
+    if timeout_tools:
+        tool_names = ", ".join(t.tool for t in timeout_tools)
+        effective_timeout = config.validator_timeout or DEFAULT_TIMEOUT
+        timeout_hint = (
+            f"\n[yellow]Timeout:[/yellow] {tool_names} exceeded {effective_timeout}s limit."
+            f"\n         Increase with --validator-timeout <seconds>"
+        )
     console.print(
         Panel(
             f"[bold green]✔ Preview and validation completed successfully![/bold green]\n"
@@ -322,7 +342,8 @@ def execute(
             f"Validation Status: [bold {status_color}]{validation_label}[/bold {status_color}]\n"
             f"Patch Checksum: [cyan]{patch_checksum[:12]}[/cyan]\n"
             f"Consolidated Patch: [cyan]{patch_path}[/cyan]\n"
-            f"Validation Log: [cyan]{run_dir / 'validation.json'}[/cyan]",
+            f"Validation Log: [cyan]{run_dir / 'validation.json'}[/cyan]"
+            f"{timeout_hint}",
             expand=False,
         )
     )
