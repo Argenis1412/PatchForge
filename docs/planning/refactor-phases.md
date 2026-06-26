@@ -1,5 +1,6 @@
 # Refactoring Phases
 
+> **Historical — all phases completed as of Jun 2026.**
 > Zero behavior changes. Extract only, never rewrite.
 
 ---
