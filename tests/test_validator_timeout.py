@@ -150,7 +150,7 @@ def test_runner_passes_timeout_to_subprocess(tmp_path):
 
 @pytest.mark.unit
 def test_short_circuit_on_ruff_timeout(tmp_path, monkeypatch):
-    timeout_result = ToolResult(tool="ruff", passed=False, return_code=-2, stderr="Timeout")
+    timeout_result = ToolResult(tool="ruff", passed=False, return_code=-2, timed_out=True, stderr="Timeout")
     pass_result = ToolResult(tool="pytest", passed=True, return_code=0)
 
     pytest_called = []
@@ -180,7 +180,7 @@ def test_short_circuit_on_ruff_timeout(tmp_path, monkeypatch):
 @pytest.mark.unit
 def test_short_circuit_on_pytest_timeout(tmp_path, monkeypatch):
     pass_result = ToolResult(tool="ruff", passed=True, return_code=0)
-    timeout_result = ToolResult(tool="pytest", passed=False, return_code=-2, stderr="Timeout")
+    timeout_result = ToolResult(tool="pytest", passed=False, return_code=-2, timed_out=True, stderr="Timeout")
     tsc_result = ToolResult(tool="tsc", passed=True, return_code=0)
 
     tsc_called = []
@@ -205,3 +205,129 @@ def test_short_circuit_on_pytest_timeout(tmp_path, monkeypatch):
     )
     validator_run(config=config)
     assert tsc_called == [], "tsc must not be called when pytest times out"
+
+
+# ---------------------------------------------------------------------------
+# Commit 2: timed_out field and actionable message
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_timed_out_flag_set_on_timeout(tmp_path):
+    import subprocess as _subprocess
+
+    from orchestrator.agents.validator.runners import run_ruff
+
+    with patch("subprocess.run", side_effect=_subprocess.TimeoutExpired(cmd=["ruff"], timeout=10)):
+        result = run_ruff(run_id="t", project_root=tmp_path, timeout=10)
+
+    assert result.timed_out is True
+    assert result.return_code == -2
+    assert result.passed is False
+
+
+@pytest.mark.unit
+def test_timeout_message_contains_hint(tmp_path):
+    import subprocess as _subprocess
+
+    from orchestrator.agents.validator.runners import run_ruff
+
+    with patch("subprocess.run", side_effect=_subprocess.TimeoutExpired(cmd=["ruff"], timeout=5)):
+        result = run_ruff(run_id="t", project_root=tmp_path, timeout=5)
+
+    assert "--validator-timeout" in result.stderr
+    assert "orchestrator.json" in result.stderr
+
+
+@pytest.mark.unit
+def test_timed_out_not_set_on_normal_failure(tmp_path):
+    import subprocess as _subprocess
+
+    from orchestrator.agents.validator.runners import run_ruff
+
+    with patch("subprocess.run") as mock_sub:
+        mock_sub.return_value = _subprocess.CompletedProcess(
+            args=["ruff", "check", "."], returncode=1, stdout="", stderr="lint error"
+        )
+        result = run_ruff(run_id="t", project_root=tmp_path)
+
+    assert result.timed_out is False
+    assert result.passed is False
+
+
+@pytest.mark.unit
+def test_tool_result_timed_out_roundtrip():
+    result = ToolResult(tool="pytest", passed=False, return_code=-2, timed_out=True)
+    dumped = result.model_dump_json()
+    loaded = ToolResult.model_validate_json(dumped)
+    assert loaded.timed_out is True
+
+
+@pytest.mark.unit
+def test_tool_result_timed_out_defaults_false():
+    result = ToolResult(tool="ruff", passed=True, return_code=0)
+    assert result.timed_out is False
+
+
+# ---------------------------------------------------------------------------
+# Commit 2: progress_callback receives tool names
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_progress_callback_receives_tool_names(tmp_path, monkeypatch):
+    from orchestrator.schemas.config import TargetCapabilities
+
+    pass_result = ToolResult(tool="ruff", passed=True, return_code=0)
+    pytest_result = ToolResult(tool="pytest", passed=True, return_code=0)
+
+    monkeypatch.setattr("orchestrator.agents.validator.run_ruff", lambda *a, **kw: pass_result)
+    monkeypatch.setattr(
+        "orchestrator.agents.validator.run_pytest", lambda *a, **kw: pytest_result
+    )
+    monkeypatch.setattr(
+        "orchestrator.agents.validator.run_tsc", lambda *a, **kw: pass_result
+    )
+
+    workspace = tmp_path.parent / f"{tmp_path.name}-ws"
+    config = TargetConfig(
+        target_path=tmp_path,
+        workspace_path=workspace,
+        capabilities=TargetCapabilities(
+            effective_supports_tests=True,
+            effective_supports_typecheck=False,
+        ),
+    )
+
+    messages: list[str] = []
+    validator_run(config=config, progress_callback=messages.append)
+
+    assert any("ruff" in m.lower() for m in messages)
+    assert any("pytest" in m.lower() for m in messages)
+
+
+@pytest.mark.unit
+def test_progress_callback_on_timeout_skip(tmp_path, monkeypatch):
+    from orchestrator.schemas.config import TargetCapabilities
+
+    timeout_result = ToolResult(tool="ruff", passed=False, return_code=-2, timed_out=True)
+
+    monkeypatch.setattr(
+        "orchestrator.agents.validator.run_ruff", lambda *a, **kw: timeout_result
+    )
+    monkeypatch.setattr(
+        "orchestrator.agents.validator.run_pytest",
+        lambda *a, **kw: ToolResult(tool="pytest", passed=True, return_code=0),
+    )
+
+    workspace = tmp_path.parent / f"{tmp_path.name}-ws"
+    config = TargetConfig(
+        target_path=tmp_path,
+        workspace_path=workspace,
+        capabilities=TargetCapabilities(effective_supports_tests=True),
+    )
+
+    messages: list[str] = []
+    validator_run(config=config, progress_callback=messages.append)
+
+    assert any("skip" in m.lower() for m in messages)

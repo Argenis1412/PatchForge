@@ -233,7 +233,11 @@ def execute(
     with Progress(
         SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console
     ) as progress:
-        task = progress.add_task("[green]Validating patch in isolated workspace...", total=None)
+        task = progress.add_task("[green]Preparing validation workspace...", total=None)
+
+        def _update_progress(msg: str) -> None:
+            progress.update(task, description=f"[green]{msg}")
+
         try:
             with create_validation_workspace(
                 original_root=target_path, patch_path=patch_path
@@ -249,7 +253,9 @@ def execute(
                         run_id=run_id,
                     )
                 else:
-                    validator_output = run_validation_in_copy(val_ws.temporary_root, config)
+                    validator_output = run_validation_in_copy(
+                        val_ws.temporary_root, config, progress_callback=_update_progress
+                    )
             progress.update(task, completed=100)
         except Exception as exc:
             progress.update(task, completed=100)

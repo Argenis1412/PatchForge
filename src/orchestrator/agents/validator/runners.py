@@ -59,13 +59,17 @@ def _run(
             stderr=msg,
         )
     except subprocess.TimeoutExpired:
-        msg = f"Timeout ({timeout}s) running {cmd[0]}"
+        msg = (
+            f"Timeout: {tool_name} exceeded {timeout}s limit. "
+            f"Increase with --validator-timeout or set validator_timeout in orchestrator.json."
+        )
         _get_logger().error("[%s] %s", run_id, msg)
         return ToolResult(
             tool=tool_name,
             passed=False,
             return_code=-2,
             stderr=msg,
+            timed_out=True,
         )
 
     elapsed = time.perf_counter() - t0

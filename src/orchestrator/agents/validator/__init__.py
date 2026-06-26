@@ -7,6 +7,7 @@ __all__ = [
 ]
 
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Union
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
 def run(
     config: Union[str, Path, "TargetConfig"] | None = None,
     staging_dir: Path | None = None,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> tuple[ValidatorOutput, dict]:
     from orchestrator.schemas.config import TargetConfig
 
@@ -46,25 +48,37 @@ def run(
 
     results: list[ToolResult] = []
 
+    if progress_callback:
+        progress_callback("Running ruff...")
     ruff_result = run_ruff(run_id, project_root, config.lint_command, staging_dir, timeout=timeout)
     results.append(ruff_result)
-    if ruff_result.return_code == -2:
+    if ruff_result.timed_out:
         _get_logger().warning("[%s] ruff timed out — skipping remaining tools", run_id)
+        if progress_callback:
+            progress_callback("Skipping remaining tools (prior timeout)")
     else:
         if config.capabilities.effective_supports_tests:
+            if progress_callback:
+                progress_callback("Running pytest...")
             pytest_result = run_pytest(
                 run_id, project_root, config.test_command, staging_dir, timeout=timeout
             )
             results.append(pytest_result)
-            if pytest_result.return_code == -2:
+            if pytest_result.timed_out:
                 _get_logger().warning("[%s] pytest timed out — skipping remaining tools", run_id)
+                if progress_callback:
+                    progress_callback("Skipping remaining tools (prior timeout)")
             elif config.capabilities.effective_supports_typecheck:
+                if progress_callback:
+                    progress_callback("Running tsc...")
                 results.append(
                     run_tsc(
                         run_id, project_root, config.typecheck_command, staging_dir, timeout=timeout
                     )
                 )
         elif config.capabilities.effective_supports_typecheck:
+            if progress_callback:
+                progress_callback("Running tsc...")
             tsc_result = run_tsc(
                 run_id, project_root, config.typecheck_command, staging_dir, timeout=timeout
             )
