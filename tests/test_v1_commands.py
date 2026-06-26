@@ -771,7 +771,14 @@ def test_preview_force_provider_valid_passes_to_executor(
                 task_id="T1",
                 file="README.md",
                 status="applied",
-                diff="diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-Hello\n+Hello Claude\n",
+                diff=(
+                    "diff --git a/README.md b/README.md\n"
+                    "--- a/README.md\n"
+                    "+++ b/README.md\n"
+                    "@@ -1 +1 @@\n"
+                    "-Hello\n"
+                    "+Hello Claude\n"
+                ),
             )
         ]
     )

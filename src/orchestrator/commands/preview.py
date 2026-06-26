@@ -115,7 +115,9 @@ def execute(
                 f"se limpiaron {cleaned_count} archivos previos de staging[/yellow]"
             )
         else:
-            console.print(f"[yellow]Override activo: todos los tasks usarán {force_provider}[/yellow]")
+            console.print(
+                f"[yellow]Override activo: todos los tasks usarán {force_provider}[/yellow]"
+            )
 
     with Progress(
         SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console

@@ -5,9 +5,9 @@ import pytest
 
 from orchestrator.agents.executor import run
 from orchestrator.agents.executor.providers import (
+    _PROVIDER_CHAIN,
     KNOWN_PROVIDER_NAMES,
     ProviderChainResult,
-    _PROVIDER_CHAIN,
     _call_chain,
     _provider_by_name,
 )

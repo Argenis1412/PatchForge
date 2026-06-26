@@ -109,6 +109,13 @@
 - **Why deferred:** Fix would be a behavioral change; explicitly out of scope for T-07 Part A (structural only). Deferred to T-07 Part C (#90) which explicitly preserved the bare-raise behavior as part of scout's error-surface contract. This design decision creates the debt documented above. Remains unresolved pending future issue.
 
 
+### [2026-06-25] Issue #145 — `force_provider` override not auditable via `log_event`
+
+- **File:** `src/orchestrator/agents/executor/__init__.py:69`
+- **Debt:** `--force-provider` override is logged only to `executor.log` via `_get_logger().info()`. No `log_event()` is emitted to `pipeline.jsonl` because the executor does not receive `run_id`/`logs_dir` from the pipeline caller. Any future caller (test, API, new command) that passes `force_provider` without manually logging would create an audit hole.
+- **Discovered by:** Post-implementation audit
+- **Why deferred:** Fix requires adding optional `run_id`/`logs_dir` parameters to `executor_agent.run()` — a contract change outside the hardening sprint scope.
+
 ### [2026-06-15] Phase 4 — Provider clients lack consistent timeout
 
 - **File:** `src/orchestrator/clients/gemini_client.py:11`, `anthropic_client.py:11`, `groq_client.py:16`

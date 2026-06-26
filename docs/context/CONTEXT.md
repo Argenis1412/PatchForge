@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-06-13 | Session: ISS-B --issue-file
+> Last updated: 2026-06-25 | Session: #145 hardening sprint
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -116,13 +116,14 @@ tests/                     (20 test files, 208 tests)
    | 85 | Path Traversal Hardening (T-01) | Jun 12 |
    | 87 | Circuit Breaker — LLM Provider Failure Isolation (T-07B) | Jun 13 |
    | 92 | Issue Contracts — --issue-file (ISS-B) | Jun 13 |
+   | 145 | Hardening Sprint (provider visibility, --force-provider, test fix) | Jun 25 |
    | 18 | PatchForge thesis (initial scaffold) | May 27 |
 
 ### QA Metrics
 
 | Check | Result |
 |-------|--------|
-| `pytest` | **290 collected, 288 passed, 2 skipped** |
+| `pytest` | **481 passed, 2 skipped** |
 | `ruff check .` | **0 errors** — clean across all files |
 | `ruff format --check` | **Clean** (77 files formatted) |
 
