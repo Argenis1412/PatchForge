@@ -1,6 +1,6 @@
 # Issue Registry — PatchForge Phase 2 & Beyond
 
-> **Date:** 2026-06-25
+> **Date:** 2026-06-26
 > **Source:** Roadmap decomposition (`roadmap-phase2.md`) + adversarial audit (`adversarial-audit.md`)
 > **Total:** 20 issues (16 completed, 0 specified, 4 scoped but needing detailed ACs)
 
