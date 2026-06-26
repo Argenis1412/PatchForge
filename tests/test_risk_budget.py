@@ -64,7 +64,7 @@ class TestCheckPlanGate:
                     task_id="T1",
                     title="t1",
                     description="",
-                    files_to_modify=["a.py"],
+                    files_to_modify=["README.md"],
                     priority="high",
                     effort="low",
                     risk_level="low",
@@ -138,7 +138,7 @@ class TestCheckPlanGate:
         assert result.passed is True
 
     def test_too_many_files_blocked(self):
-        meta = _run_meta(max_files=1)
+        meta = _run_meta(risk_budget="medium", max_files=1)
         arch = _arch_output(
             [
                 Task(
@@ -168,7 +168,7 @@ class TestCheckPlanGate:
         assert any("exceeding max_files" in r for r in result.reasons)
 
     def test_file_count_within_limit_passes(self):
-        meta = _run_meta(max_files=2)
+        meta = _run_meta(risk_budget="medium", max_files=2)
         arch = _arch_output(
             [
                 Task(
@@ -518,7 +518,7 @@ class TestPlanGateIntegration:
                     task_id="T1",
                     title="Task A",
                     description="",
-                    files_to_modify=["README.md", "a.py", "b.py"],
+                    files_to_modify=["README.md", "CHANGELOG.md", "CONTRIBUTING.md"],
                     priority="high",
                     effort="low",
                     risk_level="low",
@@ -683,7 +683,7 @@ class TestPatchGateIntegration:
                     task_id="T1",
                     title="Task",
                     description="",
-                    files_to_modify=["README.md", "a.py"],
+                    files_to_modify=["README.md", "CHANGELOG.md"],
                     priority="high",
                     effort="low",
                     risk_level="low",
