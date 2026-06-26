@@ -736,9 +736,7 @@ def test_preview_force_provider_invalid_exits_1():
     assert "Invalid value for --force-provider" in result.stdout
 
 
-def test_preview_force_provider_valid_passes_to_executor(
-    target_repo: Path, workspace_dir: Path
-):
+def test_preview_force_provider_valid_passes_to_executor(target_repo: Path, workspace_dir: Path):
     mock_scout_out = ScoutOutput(
         hotspots=[],
         recommended_order=[],
@@ -940,3 +938,250 @@ def test_preview_force_provider_cleans_staging(target_repo: Path, workspace_dir:
         )
         assert preview_res.exit_code == 0, preview_res.stdout
         assert "se limpiaron 1 archivos previos" in preview_res.stdout
+
+
+# ---------------------------------------------------------------------------
+# Issue #153 — force_provider_override audit event in pipeline.jsonl
+# ---------------------------------------------------------------------------
+
+
+def _read_pipeline_events(logs_dir: Path) -> list[dict]:
+    path = logs_dir / "pipeline.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def _make_force_provider_mocks():
+    mock_scout_out = ScoutOutput(
+        hotspots=[], recommended_order=[], risks=[], summary="Test Scout Summary"
+    )
+    mock_arch_out = ArchitectOutput(
+        validated_findings=[],
+        false_positives=[],
+        systemic_risks=[],
+        implementation_plan=[
+            Task(
+                task_id="T1",
+                title="Modify README",
+                description="Modify README file",
+                files_to_modify=["README.md"],
+                priority="high",
+                effort="low",
+                risk_level="low",
+            )
+        ],
+        blockers=[],
+    )
+    mock_arch_meta = {"latency_ms": 200, "cost_usd": 0.02}
+    mock_exec_out = ExecutorOutput(
+        applied=[
+            FileChange(
+                task_id="T1",
+                file="README.md",
+                status="applied",
+                diff=(
+                    "diff --git a/README.md b/README.md\n"
+                    "--- a/README.md\n"
+                    "+++ b/README.md\n"
+                    "@@ -1 +1 @@\n"
+                    "-Hello\n"
+                    "+Hello Claude\n"
+                ),
+            )
+        ]
+    )
+    mock_exec_meta = {"latency_ms": 300, "cost_usd": 0.03}
+    mock_val_out = ValidatorOutput(
+        overall_passed=True,
+        tools=[ToolResult(tool="ruff", passed=True, return_code=0)],
+        llm_summary=None,
+    )
+
+    def _mock_scan(target_path, ignore_dirs=None):
+        root = resolve_git_root(target_path)
+        head = current_head(root)
+        return ScanFindings(
+            repository_root=str(root),
+            base_commit=head,
+            branch="main",
+            v1_supported=True,
+            support_reasons=["mocked"],
+            unsupported_reasons=[],
+            pyproject=PyProjectInfo(exists=True, valid=True, build_backend="hatchling.build"),
+            ruff=ToolInfo(available=True, version="ruff 0.4.0"),
+            pytest=ToolInfo(available=True, version="pytest 8.0.0"),
+            test_suite=TestSuiteInfo(detected=True, type="tests_dir"),
+            total_python_files=0,
+            packages=[],
+            modules=[],
+            hotspots=[],
+        )
+
+    return (
+        mock_scout_out,
+        mock_arch_out,
+        mock_arch_meta,
+        mock_exec_out,
+        mock_exec_meta,
+        mock_val_out,
+        _mock_scan,
+    )
+
+
+def test_preview_force_provider_emits_pipeline_jsonl_event(target_repo: Path, workspace_dir: Path):
+    (
+        mock_scout_out,
+        mock_arch_out,
+        mock_arch_meta,
+        mock_exec_out,
+        mock_exec_meta,
+        mock_val_out,
+        _mock_scan,
+    ) = _make_force_provider_mocks()
+
+    with (
+        patch("orchestrator.commands.scan.scan", side_effect=_mock_scan),
+        patch("orchestrator.agents.architect.run", return_value=(mock_arch_out, mock_arch_meta)),
+        patch("orchestrator.agents.executor.run", return_value=(mock_exec_out, mock_exec_meta)),
+        patch(
+            "orchestrator.validation_workspace.run_validation_in_copy", return_value=mock_val_out
+        ),
+    ):
+        scan_res = runner.invoke(app, ["scan", str(target_repo), "--workspace", str(workspace_dir)])
+        assert scan_res.exit_code == 0
+
+        runs_dir = workspace_dir / "runs"
+        run_id = list(runs_dir.iterdir())[0].name
+
+        ws_mgr = WorkspaceManager(workspace_dir)
+        ws_mgr.write_artifact(run_id, "findings.json", mock_scout_out.model_dump_json(indent=2))
+
+        plan_res = runner.invoke(app, ["plan", run_id, "--workspace", str(workspace_dir)])
+        assert plan_res.exit_code == 0
+
+        preview_res = runner.invoke(
+            app,
+            ["preview", run_id, "--workspace", str(workspace_dir), "--force-provider", "claude"],
+        )
+        assert preview_res.exit_code == 0, preview_res.stdout
+
+    logs_dir = workspace_dir / "logs"
+    events = _read_pipeline_events(logs_dir)
+    override_events = [e for e in events if e.get("event") == "force_provider_override"]
+
+    assert len(override_events) == 1
+    ev = override_events[0]
+    assert ev["stage"] == "executor"
+    assert ev["level"] == "info"
+    assert ev["source"] == "pipeline"
+    assert ev["data"]["provider"] == "claude"
+    assert ev["data"]["source"] == "cli"
+    assert ev["run_id"] == run_id
+    assert ev["trace_id"] == run_id
+
+
+def test_preview_without_force_provider_does_not_emit_override_event(
+    target_repo: Path, workspace_dir: Path
+):
+    (
+        mock_scout_out,
+        mock_arch_out,
+        mock_arch_meta,
+        mock_exec_out,
+        mock_exec_meta,
+        mock_val_out,
+        _mock_scan,
+    ) = _make_force_provider_mocks()
+
+    with (
+        patch("orchestrator.commands.scan.scan", side_effect=_mock_scan),
+        patch("orchestrator.agents.architect.run", return_value=(mock_arch_out, mock_arch_meta)),
+        patch("orchestrator.agents.executor.run", return_value=(mock_exec_out, mock_exec_meta)),
+        patch(
+            "orchestrator.validation_workspace.run_validation_in_copy", return_value=mock_val_out
+        ),
+    ):
+        scan_res = runner.invoke(app, ["scan", str(target_repo), "--workspace", str(workspace_dir)])
+        assert scan_res.exit_code == 0
+
+        runs_dir = workspace_dir / "runs"
+        run_id = list(runs_dir.iterdir())[0].name
+
+        ws_mgr = WorkspaceManager(workspace_dir)
+        ws_mgr.write_artifact(run_id, "findings.json", mock_scout_out.model_dump_json(indent=2))
+
+        plan_res = runner.invoke(app, ["plan", run_id, "--workspace", str(workspace_dir)])
+        assert plan_res.exit_code == 0
+
+        preview_res = runner.invoke(
+            app,
+            ["preview", run_id, "--workspace", str(workspace_dir)],
+        )
+        assert preview_res.exit_code == 0, preview_res.stdout
+
+    logs_dir = workspace_dir / "logs"
+    events = _read_pipeline_events(logs_dir)
+    override_events = [e for e in events if e.get("event") == "force_provider_override"]
+    assert override_events == []
+
+
+def test_preview_force_provider_does_not_log_override_when_staging_cleanup_fails(
+    target_repo: Path, workspace_dir: Path
+):
+    (
+        mock_scout_out,
+        mock_arch_out,
+        mock_arch_meta,
+        mock_exec_out,
+        mock_exec_meta,
+        _mock_val_out,
+        _mock_scan,
+    ) = _make_force_provider_mocks()
+
+    with (
+        patch("orchestrator.commands.scan.scan", side_effect=_mock_scan),
+        patch("orchestrator.agents.architect.run", return_value=(mock_arch_out, mock_arch_meta)),
+        patch("orchestrator.agents.executor.run", return_value=(mock_exec_out, mock_exec_meta)),
+    ):
+        scan_res = runner.invoke(app, ["scan", str(target_repo), "--workspace", str(workspace_dir)])
+        assert scan_res.exit_code == 0
+
+        runs_dir = workspace_dir / "runs"
+        run_id = list(runs_dir.iterdir())[0].name
+
+        ws_mgr = WorkspaceManager(workspace_dir)
+        ws_mgr.write_artifact(run_id, "findings.json", mock_scout_out.model_dump_json(indent=2))
+
+        plan_res = runner.invoke(app, ["plan", run_id, "--workspace", str(workspace_dir)])
+        assert plan_res.exit_code == 0
+
+        staging_dir = runs_dir / run_id / "staging"
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        (staging_dir / "leftover.py").write_text("old content")
+
+        with patch("shutil.rmtree", side_effect=OSError("simulated")):
+            preview_res = runner.invoke(
+                app,
+                [
+                    "preview",
+                    run_id,
+                    "--workspace",
+                    str(workspace_dir),
+                    "--force-provider",
+                    "claude",
+                ],
+            )
+
+    assert preview_res.exit_code == 1
+
+    logs_dir = workspace_dir / "logs"
+    events = _read_pipeline_events(logs_dir)
+
+    override_events = [e for e in events if e.get("event") == "force_provider_override"]
+    assert override_events == []
+
+    stage_start_events = [
+        e for e in events if e.get("stage") == "executor" and e.get("event") == "stage_start"
+    ]
+    assert len(stage_start_events) == 1
