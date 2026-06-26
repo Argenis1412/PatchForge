@@ -11,6 +11,7 @@ __all__ = [
 
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 from typing import List, Optional
@@ -18,6 +19,8 @@ from typing import List, Optional
 from pydantic import BaseModel, Field, model_validator
 
 from orchestrator.git import resolve_git_root as _resolve_git_root
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = "1.0"
 
@@ -77,6 +80,7 @@ class TargetConfig(BaseModel):
     lint_command: Optional[List[str]] = None
     test_command: Optional[List[str]] = None
     typecheck_command: Optional[List[str]] = None
+    validator_timeout: Optional[int] = Field(default=None, gt=0)
 
     capabilities: TargetCapabilities = Field(default_factory=TargetCapabilities)
 
@@ -96,6 +100,7 @@ class TargetConfig(BaseModel):
         test_command: Optional[List[str]] = None,
         typecheck_command: Optional[List[str]] = None,
         capabilities_overrides: Optional[dict] = None,
+        validator_timeout: Optional[int] = None,
     ) -> "TargetConfig":
         """
         Loads configuration by merging priority levels:
@@ -134,6 +139,7 @@ class TargetConfig(BaseModel):
                     "lint_command",
                     "test_command",
                     "typecheck_command",
+                    "validator_timeout",
                 ]:
                     if key in file_data and file_data[key] is not None:
                         if key == "workspace_path":
@@ -165,6 +171,21 @@ class TargetConfig(BaseModel):
             config_data["test_command"] = test_command
         if typecheck_command is not None:
             config_data["typecheck_command"] = typecheck_command
+        if validator_timeout is not None:
+            config_data["validator_timeout"] = validator_timeout
+
+        # Env var fallback: PATCHFORGE_VALIDATOR_TIMEOUT (only if not already set)
+        if config_data.get("validator_timeout") is None:
+            env_val = os.environ.get("PATCHFORGE_VALIDATOR_TIMEOUT")
+            if env_val is not None:
+                try:
+                    parsed = int(env_val)
+                    if parsed > 0:
+                        config_data["validator_timeout"] = parsed
+                    else:
+                        logger.warning("PATCHFORGE_VALIDATOR_TIMEOUT must be > 0, ignoring")
+                except ValueError:
+                    logger.warning("PATCHFORGE_VALIDATOR_TIMEOUT is not a valid integer, ignoring")
 
         # Apply CLI capabilities overrides
         if capabilities_overrides:

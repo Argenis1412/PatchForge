@@ -16,6 +16,7 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from orchestrator.agents import executor as executor_agent
+from orchestrator.agents.validator.runners import DEFAULT_TIMEOUT
 from orchestrator.clients.bootstrap import bootstrap_environment
 from orchestrator.observability.events import log_event, log_failure
 from orchestrator.risk import check_patch_gate
@@ -37,6 +38,7 @@ def execute(
     workspace: Optional[Path] = None,
     env_file: Optional[Path] = None,
     force_provider: Optional[str] = None,
+    validator_timeout: Optional[int] = None,
 ) -> None:
     console.print(
         Panel(
@@ -84,7 +86,11 @@ def execute(
     # 3. Bootstrap target environment & load config
     bootstrap_environment(env_file=env_file, target_path=target_path)
     try:
-        config = TargetConfig.load(target_path=target_path, workspace_path=workspace_path)
+        config = TargetConfig.load(
+            target_path=target_path,
+            workspace_path=workspace_path,
+            validator_timeout=validator_timeout,
+        )
     except Exception as exc:
         console.print(f"[bold red]Error loading target config: {exc}[/bold red]")
         raise typer.Exit(code=1)
@@ -228,7 +234,11 @@ def execute(
     with Progress(
         SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console
     ) as progress:
-        task = progress.add_task("[green]Validating patch in isolated workspace...", total=None)
+        task = progress.add_task("[green]Preparing validation workspace...", total=None)
+
+        def _update_progress(msg: str) -> None:
+            progress.update(task, description=f"[green]{msg}")
+
         try:
             with create_validation_workspace(
                 original_root=target_path, patch_path=patch_path
@@ -244,7 +254,9 @@ def execute(
                         run_id=run_id,
                     )
                 else:
-                    validator_output = run_validation_in_copy(val_ws.temporary_root, config)
+                    validator_output = run_validation_in_copy(
+                        val_ws.temporary_root, config, progress_callback=_update_progress
+                    )
             progress.update(task, completed=100)
         except Exception as exc:
             progress.update(task, completed=100)
@@ -282,10 +294,21 @@ def execute(
 
     # 9. Update run metadata
     patch_checksum = hashlib.sha256(patch_diff.encode("utf-8")).hexdigest()
+
+    timeout_tools = [t for t in validator_output.tools if t.timed_out]
+    timeout_prefix = ""
+    if timeout_tools:
+        tool_names = ", ".join(t.tool for t in timeout_tools)
+        effective_timeout = config.validator_timeout or DEFAULT_TIMEOUT
+        timeout_prefix = (
+            f"Timeout: {tool_names} exceeded {effective_timeout}s limit. "
+            f"Increase with --validator-timeout <seconds>. "
+        )
+
     validation_summary = (
         "All checks passed successfully"
         if validator_output.overall_passed
-        else (validator_output.llm_summary or "Validation failed")
+        else timeout_prefix + (validator_output.llm_summary or "Validation failed")
     )
     model_metadata = {
         "executor": exec_meta,
@@ -304,6 +327,14 @@ def execute(
 
     status_color = "green" if validator_output.overall_passed else "red"
     validation_label = "PASSED" if validator_output.overall_passed else "FAILED"
+    timeout_hint = ""
+    if timeout_tools:
+        tool_names = ", ".join(t.tool for t in timeout_tools)
+        effective_timeout = config.validator_timeout or DEFAULT_TIMEOUT
+        timeout_hint = (
+            f"\n[yellow]Timeout:[/yellow] {tool_names} exceeded {effective_timeout}s limit."
+            f"\n         Increase with --validator-timeout <seconds>"
+        )
     console.print(
         Panel(
             f"[bold green]✔ Preview and validation completed successfully![/bold green]\n"
@@ -311,7 +342,8 @@ def execute(
             f"Validation Status: [bold {status_color}]{validation_label}[/bold {status_color}]\n"
             f"Patch Checksum: [cyan]{patch_checksum[:12]}[/cyan]\n"
             f"Consolidated Patch: [cyan]{patch_path}[/cyan]\n"
-            f"Validation Log: [cyan]{run_dir / 'validation.json'}[/cyan]",
+            f"Validation Log: [cyan]{run_dir / 'validation.json'}[/cyan]"
+            f"{timeout_hint}",
             expand=False,
         )
     )

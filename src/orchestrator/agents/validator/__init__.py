@@ -7,6 +7,7 @@ __all__ = [
 ]
 
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Union
@@ -17,7 +18,7 @@ from orchestrator.schemas.validator_output import ToolResult, ValidatorOutput
 
 from .logging import _get_logger
 from .logging import _logger as _logger
-from .runners import run_pytest, run_ruff, run_tsc
+from .runners import DEFAULT_TIMEOUT, run_pytest, run_ruff, run_tsc
 from .summarizer import MODEL_GEMINI, _summarize_errors
 
 _cb_validator = circuit_breaker_for("gemini")
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
 def run(
     config: Union[str, Path, "TargetConfig"] | None = None,
     staging_dir: Path | None = None,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> tuple[ValidatorOutput, dict]:
     from orchestrator.schemas.config import TargetConfig
 
@@ -39,22 +41,52 @@ def run(
 
     logs_dir = config.workspace_path / "logs"
     project_root = config.target_path.resolve()
+    timeout = config.validator_timeout or DEFAULT_TIMEOUT
 
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:6]
-    _get_logger(logs_dir).info("=== Validator run %s ===", run_id)
+    _get_logger(logs_dir).info("=== Validator run %s (timeout=%ds) ===", run_id, timeout)
 
-    results: list[ToolResult] = [
-        run_ruff(run_id, project_root, config.lint_command, staging_dir),
-    ]
+    results: list[ToolResult] = []
 
-    if config.capabilities.effective_supports_tests:
-        results.append(run_pytest(run_id, project_root, config.test_command, staging_dir))
+    if progress_callback:
+        progress_callback("Running ruff...")
+    ruff_result = run_ruff(run_id, project_root, config.lint_command, staging_dir, timeout=timeout)
+    results.append(ruff_result)
+    if ruff_result.timed_out:
+        _get_logger().warning("[%s] ruff timed out — skipping remaining tools", run_id)
+        if progress_callback:
+            progress_callback("Skipping remaining tools (prior timeout)")
     else:
+        if config.capabilities.effective_supports_tests:
+            if progress_callback:
+                progress_callback("Running pytest...")
+            pytest_result = run_pytest(
+                run_id, project_root, config.test_command, staging_dir, timeout=timeout
+            )
+            results.append(pytest_result)
+            if pytest_result.timed_out:
+                _get_logger().warning("[%s] pytest timed out — skipping remaining tools", run_id)
+                if progress_callback:
+                    progress_callback("Skipping remaining tools (prior timeout)")
+            elif config.capabilities.effective_supports_typecheck:
+                if progress_callback:
+                    progress_callback("Running tsc...")
+                results.append(
+                    run_tsc(
+                        run_id, project_root, config.typecheck_command, staging_dir, timeout=timeout
+                    )
+                )
+        elif config.capabilities.effective_supports_typecheck:
+            if progress_callback:
+                progress_callback("Running tsc...")
+            tsc_result = run_tsc(
+                run_id, project_root, config.typecheck_command, staging_dir, timeout=timeout
+            )
+            results.append(tsc_result)
+
+    if not config.capabilities.effective_supports_tests:
         _get_logger().info("[%s] Tests skip (no framework detected or disabled)", run_id)
-
-    if config.capabilities.effective_supports_typecheck:
-        results.append(run_tsc(run_id, project_root, config.typecheck_command, staging_dir))
-    else:
+    if not config.capabilities.effective_supports_typecheck:
         _get_logger().info("[%s] Typecheck skip (not detected or disabled)", run_id)
 
     failed = [r for r in results if not r.passed]

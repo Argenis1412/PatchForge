@@ -19,6 +19,7 @@ class ToolResult(BaseModel):
     stdout: str = ""
     stderr: str = ""
     error_summary: str | None = None  # Gemini fills this only if passed == False
+    timed_out: bool = False
 
 
 class ValidatorOutput(BaseModel):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
@@ -82,7 +83,11 @@ def apply_patch_to_copy(temp_root: Path, patch_path: Path) -> GitCommandResult:
     return apply_patch(temp_root, patch_path)
 
 
-def run_validation_in_copy(temp_root: Path, config: TargetConfig) -> ValidatorOutput:
+def run_validation_in_copy(
+    temp_root: Path,
+    config: TargetConfig,
+    progress_callback: Callable[[str], None] | None = None,
+) -> ValidatorOutput:
     import subprocess
 
     val_config = config.model_copy(update={"target_path": temp_root})
@@ -95,7 +100,7 @@ def run_validation_in_copy(temp_root: Path, config: TargetConfig) -> ValidatorOu
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
-    validator_output, _ = run_validator(config=val_config)
+    validator_output, _ = run_validator(config=val_config, progress_callback=progress_callback)
     return validator_output
 
 

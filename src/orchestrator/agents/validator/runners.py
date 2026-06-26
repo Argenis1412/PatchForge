@@ -10,7 +10,8 @@ from orchestrator.schemas.validator_output import ToolResult
 
 from .logging import _get_logger
 
-SUBPROCESS_TIMEOUT = 120
+DEFAULT_TIMEOUT = 120
+assert DEFAULT_TIMEOUT > 0
 
 IGNORE_DIRS = [
     "node_modules",
@@ -35,6 +36,7 @@ def _run(
     cwd: Path,
     tool_name: str,
     run_id: str,
+    timeout: int = DEFAULT_TIMEOUT,
 ) -> ToolResult:
     _get_logger().info("[%s] Running %s: %s (cwd=%s)", run_id, tool_name, " ".join(cmd), cwd)
     t0 = time.perf_counter()
@@ -45,7 +47,7 @@ def _run(
             cwd=str(cwd),
             capture_output=True,
             text=True,
-            timeout=SUBPROCESS_TIMEOUT,
+            timeout=timeout,
         )
     except FileNotFoundError:
         msg = f"Command not found: {cmd[0]} — is it installed and in PATH?"
@@ -57,13 +59,17 @@ def _run(
             stderr=msg,
         )
     except subprocess.TimeoutExpired:
-        msg = f"Timeout ({SUBPROCESS_TIMEOUT}s) running {cmd[0]}"
+        msg = (
+            f"Timeout: {tool_name} exceeded {timeout}s limit. "
+            f"Increase with --validator-timeout or set validator_timeout in orchestrator.json."
+        )
         _get_logger().error("[%s] %s", run_id, msg)
         return ToolResult(
             tool=tool_name,
             passed=False,
             return_code=-2,
             stderr=msg,
+            timed_out=True,
         )
 
     elapsed = time.perf_counter() - t0
@@ -132,15 +138,16 @@ def run_ruff(
     project_root: Path,
     cmd_override: list[str] | None = None,
     staging_dir: Path | None = None,
+    timeout: int = DEFAULT_TIMEOUT,
 ) -> ToolResult:
     if staging_dir is not None and staging_dir.is_dir():
         staged_files = _collect_staged_files(staging_dir)
         if staged_files:
             cmd = _resolve_cmd(cmd_override, ["ruff", "check"])
             cmd.extend(str(sf) for sf in staged_files)
-            return _run(cmd, project_root, "ruff", run_id)
+            return _run(cmd, project_root, "ruff", run_id, timeout=timeout)
     cmd = _resolve_cmd(cmd_override, ["ruff", "check", "."])
-    return _run(cmd, project_root, "ruff", run_id)
+    return _run(cmd, project_root, "ruff", run_id, timeout=timeout)
 
 
 def run_pytest(
@@ -148,6 +155,7 @@ def run_pytest(
     project_root: Path,
     cmd_override: list[str] | None = None,
     staging_dir: Path | None = None,
+    timeout: int = DEFAULT_TIMEOUT,
 ) -> ToolResult:
     if (
         staging_dir is not None
@@ -157,13 +165,14 @@ def run_pytest(
         with tempfile.TemporaryDirectory(prefix="val_overlay_") as tmpdir:
             overlay_root = _create_overlay(project_root, staging_dir, IGNORE_DIRS, Path(tmpdir))
             cmd = _resolve_cmd(cmd_override, ["pytest", ".", "--tb=short", "-q"])
-            return _run(cmd, overlay_root, "pytest", run_id)
+            return _run(cmd, overlay_root, "pytest", run_id, timeout=timeout)
     cmd = _resolve_cmd(cmd_override, ["pytest", ".", "--tb=short", "-q"])
     return _run(
         cmd,
         project_root,
         "pytest",
         run_id,
+        timeout=timeout,
     )
 
 
@@ -172,6 +181,7 @@ def run_tsc(
     project_root: Path,
     cmd_override: list[str] | None = None,
     staging_dir: Path | None = None,
+    timeout: int = DEFAULT_TIMEOUT,
 ) -> ToolResult:
     if (
         staging_dir is not None
@@ -190,7 +200,7 @@ def run_tsc(
                     stdout="Skipped — frontend/ not found",
                 )
             cmd = _resolve_cmd(cmd_override, ["npx", "tsc", "--noEmit"])
-            return _run(cmd, frontend, "tsc", run_id)
+            return _run(cmd, frontend, "tsc", run_id, timeout=timeout)
     frontend = _find_frontend_dir(project_root)
     if frontend is None:
         _get_logger().warning("[%s] frontend/ not found — skip tsc", run_id)
@@ -201,4 +211,4 @@ def run_tsc(
             stdout="Skipped — frontend/ not found",
         )
     cmd = list(cmd_override) if cmd_override is not None else ["npx", "tsc", "--noEmit"]
-    return _run(cmd, frontend, "tsc", run_id)
+    return _run(cmd, frontend, "tsc", run_id, timeout=timeout)
