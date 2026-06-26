@@ -119,6 +119,17 @@ def execute(
                 console.print(f"[bold red]Error clearing staging directory: {exc}[/bold red]")
                 raise typer.Exit(code=1)
         staging_dir.mkdir(parents=True, exist_ok=True)
+        log_event(
+            trace_id=run_id,
+            run_id=run_id,
+            level="info",
+            source="pipeline",
+            stage="executor",
+            event="force_provider_override",
+            data={"provider": force_provider, "source": "cli"},
+            logs_dir=logs_dir,
+            run_dir=run_dir,
+        )
         if cleaned_count > 0:
             console.print(
                 f"[yellow]Override activo ({force_provider}): "
