@@ -460,6 +460,12 @@ ADR-0004 must answer exactly five questions:
 - **Files touched:** 5 code (`providers.py`, `applier.py`, `executor/__init__.py`, `main.py`, `preview.py`) + 3 test files (11 new tests)
 - **Known gap:** `log_event` for `force_provider` not wired to `pipeline.jsonl` — executor lacks pipeline trace context. Documented in `docs/context/discoveries.md`.
 
+### ✅ Issue #149 — Workspace Hash Inconsistency (Windows)
+- **Priority:** P2 | **Status:** ✅ **Completed**
+- **Goal:** Fix `_workspace_hash()` producing different hashes for the same CWD on Windows due to inconsistent path casing normalization. Normalize with `.as_posix()` + `.lower()` on Windows before hashing.
+- **Root cause:** `Path.resolve()` on Windows with `strict=False` does not guarantee consistent casing normalization. `Path.cwd()` preserves shell-provided casing. Two invocations from the same repo could produce different workspace paths.
+- **Files:** `src/orchestrator/schemas/config.py` (normalize in `_workspace_hash`), `tests/test_workspace_safety.py` (regression test)
+
 ### ✅ Formalize Experiment Schema (debt P2→P3)
 - **Priority:** P2 | **Status:** ✅ **Completed**
 - **Goal:** Formalize "Experiment" as a schema concept carrying execution context (commit SHA, repository identity, workspace path, run ID).
