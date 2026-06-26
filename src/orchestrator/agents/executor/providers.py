@@ -213,6 +213,9 @@ _PROVIDER_CHAIN["high"] = [_call_claude]
 
 
 def _provider_by_name() -> dict[str, object]:
+    # Single source of truth: derived from _PROVIDER_CHAIN, not a manual list.
+    # Any _call_* added to _PROVIDER_CHAIN is automatically available via
+    # --force-provider.  No second registry to keep in sync.
     out: dict[str, object] = {}
     for chain in _PROVIDER_CHAIN.values():
         for fn in chain:

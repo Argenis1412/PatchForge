@@ -76,6 +76,9 @@ def _apply_task(
     input_tokens = output_tokens = 0
     cost_this_call = 0.0
 
+    # force_provider is orthogonal to risk_level: it only changes which LLM
+    # generates the patch.  risk_level still controls high-risk gating
+    # (pending_human_review) and staging writes below.
     if force_provider:
         by_name = _provider_by_name()
         chain = [by_name[force_provider]]
