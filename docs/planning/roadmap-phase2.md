@@ -36,11 +36,11 @@ These must be resolved before any self-improvement experiments begin.
 
 1. ✅ **T-02: Atomic Rollback Validation**
    - Goal: Implement a reliable rollback primitive for the Executor to ensure the repository returns to a clean state upon failure.
-2. **T-01: Path Traversal Hardening**
+2. ✅ **T-01: Path Traversal Hardening**
    - Goal: Enforce strict path construction contracts to prevent directory traversal attacks and workspace leakage.
-3. **T-07: Exception Hierarchy**
+3. ✅ **T-07: Exception Hierarchy**
    - Goal: Replace generic `RuntimeError` with typed exceptions (`PatchForgeError` base) and implement a circuit breaker for provider failures.
-4. **T-03: Structured Contract Parsing**
+4. ✅ **T-03: Structured Contract Parsing**
    - Goal: Replace fragile `_extract_json()` with a robust, schema-aware parser that converts LLM output directly into Pydantic models.
 
 ### P1 — Input Contracts
@@ -61,6 +61,12 @@ These must be resolved before any self-improvement experiments begin.
   - 288 tests passed, 0 ruff errors, 3 bugs discovered and fixed during execution.
   - Case study: `docs/case-studies/001-use-constant-for-schema-default.md`
   - Purpose: ✅ Empirical evidence generated — dogfooding pipeline works end-to-end.
+- ✅ **Experiment 002 — Move write_verdict() to workspace.py** — Resolved I/O debt in schema module.
+- ✅ **Experiment 003 — Add --risk-budget flag to scan** — Unblocked multi-file refactors.
+- ✅ **Issue #98 — Executor DAG Scheduler** — Task dependency resolution via Kahn's algorithm.
+- ✅ **Issue #140 — Core Persistence (WAL atomic writes)** — All `apply.json` writes use `_wal_write()`.
+- ✅ **Issue #142 — Post-Audit Remaining Fixes** — Branch naming, repo locks, env guards.
+- ✅ **Issue #145 — Hardening Sprint** — Provider visibility, `--force-provider`, test collection fix.
 
 ### P3 — Async Workers & CI/CD Integration (Friction Reduction)
 - **Goal:** Decouple the developer from the critical path. Transform the pipeline from synchronous CLI into an async CI/CD workflow.

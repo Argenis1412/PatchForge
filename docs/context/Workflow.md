@@ -23,7 +23,7 @@ git checkout -b <type>/issue-<N>-<slug>
 - **V1 complete:** 16/16 issues implemented
 - **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 - **Commands:** `doctor` ✅ · `scan` ✅ · `plan` ✅ · `preview` ✅ · `apply` ✅ · `run` ❌ deprecated
-- **QA:** `ruff check .` → 0 errors · `pytest` → 207 pass, 1 skip
+- **QA:** `ruff check .` → 0 errors · `pytest` → 481 pass, 2 skip
 - **Next:** Phase 2 blockers (T-01 through T-07)
 
 ---
@@ -224,10 +224,10 @@ Before each commit run:
 ```bash
 ruff check .                     # must return 0 errors
 ruff format --check .            # must return clean
-pytest -v                        # 207 passed, 1 skipped
+pytest -v                        # 481 passed, 2 skipped
 ```
 
-Current status: `ruff check .` → **0 errors** across the entire repository. Keep it that way.
+Current status: `ruff check .` → **0 errors** across the entire repository. `pytest` → **481 passed, 2 skipped**. Keep it that way.
 
 Report format:
 
