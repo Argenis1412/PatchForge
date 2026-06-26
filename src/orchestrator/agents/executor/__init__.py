@@ -23,7 +23,7 @@ from orchestrator.schemas.executor_output import ExecutorOutput, FileChange, Tas
 
 from . import applier as _applier
 from .logging import _get_logger
-from .providers import MODEL_CLAUDE, MODEL_GEMINI, MODEL_GROQ
+from .providers import KNOWN_PROVIDER_NAMES, MODEL_CLAUDE, MODEL_GEMINI, MODEL_GROQ
 from .rollback import rollback_to_commit as rollback_to_commit
 from .scheduler import _build_dag, _topological_order
 
@@ -44,6 +44,7 @@ def run(
     architect_output: ArchitectOutput,
     config: Optional[Union[str, Path, TargetConfig]] = None,
     staging_dir: Optional[Path] = None,
+    force_provider: Optional[str] = None,
 ) -> tuple[ExecutorOutput, dict]:
     if config is None:
         config = TargetConfig.load(target_path=PROJECT_ROOT)
@@ -59,6 +60,13 @@ def run(
     # Initialize logger
     _get_logger(logs_dir)
     _get_logger().info("=== Executor run %s ===", run_id)
+
+    if force_provider is not None:
+        if force_provider not in KNOWN_PROVIDER_NAMES:
+            raise ValueError(
+                f"Unknown provider: {force_provider}. Available: {KNOWN_PROVIDER_NAMES}"
+            )
+        _get_logger().info("[%s] force_provider override active: %s", run_id, force_provider)
 
     model_string = f"GM:{MODEL_GEMINI}|GQ:{MODEL_GROQ}|CL:{MODEL_CLAUDE}"
     result = ExecutorOutput(model=model_string, run_id=run_id)
@@ -116,7 +124,9 @@ def run(
         task_statuses: list[TaskStatus] = []
         for file_relative in task.files_to_modify:
             single_file_task = task.model_copy(update={"files_to_modify": [file_relative]})
-            change = _applier._apply_task(single_file_task, run_id, project_root, staging_dir)
+            change = _applier._apply_task(
+                single_file_task, run_id, project_root, staging_dir, force_provider=force_provider
+            )
 
             result.total_tokens += change.tokens_used
             result.total_cost_usd += change.cost_usd

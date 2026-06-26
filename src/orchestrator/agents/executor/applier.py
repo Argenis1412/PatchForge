@@ -9,7 +9,7 @@ from orchestrator.schemas.executor_output import FileChange, TaskStatus
 
 from .diffing import _make_diff
 from .logging import _get_logger
-from .providers import _PROVIDER_CHAIN, MAX_RETRIES, _call_chain
+from .providers import _PROVIDER_CHAIN, MAX_RETRIES, _call_chain, _provider_by_name
 
 
 def _build_prompt(task: Task, file_path: Path, file_content: str) -> str:
@@ -35,7 +35,13 @@ FILE CONTENT
 """
 
 
-def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) -> FileChange:
+def _apply_task(
+    task: Task,
+    run_id: str,
+    project_root: Path,
+    staging_dir: Path,
+    force_provider: str | None = None,
+) -> FileChange:
     if not task.files_to_modify:
         _get_logger().warning("[%s] Task %s has no files_to_modify — skip", run_id, task.task_id)
         return FileChange(
@@ -70,16 +76,22 @@ def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) 
     input_tokens = output_tokens = 0
     cost_this_call = 0.0
 
-    chain = _PROVIDER_CHAIN.get(task.risk_level)
+    if force_provider:
+        by_name = _provider_by_name()
+        chain = [by_name[force_provider]]
+    else:
+        chain = _PROVIDER_CHAIN.get(task.risk_level)
     if not chain:
         raise ValueError(f"Unknown risk level: {task.risk_level}")
 
+    last_failures: list[tuple[str, str]] = []
     for attempt in range(MAX_RETRIES + 1):
-        result = _call_chain(chain, prompt, run_id)
-        if result is not None:
-            raw, input_tokens, output_tokens, cost_this_call = result
+        chain_result = _call_chain(chain, prompt, run_id)
+        if chain_result.success is not None:
+            raw, input_tokens, output_tokens, cost_this_call = chain_result.success
             modified_content = raw
             break
+        last_failures = chain_result.failures
         _get_logger().warning(
             "[%s] Attempt %d/%d: all providers failed for %s-risk task",
             run_id,
@@ -88,11 +100,18 @@ def _apply_task(task: Task, run_id: str, project_root: Path, staging_dir: Path) 
             task.risk_level,
         )
     else:
+        failure_summary = "; ".join(f"{name}→{err}" for name, err in last_failures)
+        _get_logger().error(
+            "[%s] All providers exhausted for task %s: %s",
+            run_id,
+            task.task_id,
+            failure_summary,
+        )
         return FileChange(
             task_id=task.task_id,
             file=relative_path,
             status="error",
-            error=f"All providers failed for {task.risk_level}-risk task",
+            error=f"All providers failed for {task.risk_level}-risk task: {failure_summary}",
         )
 
     assert modified_content is not None
