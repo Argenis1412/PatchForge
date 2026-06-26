@@ -723,3 +723,220 @@ def test_plan_issue_file_overrides_findings(target_repo: Path, workspace_dir: Pa
 
         run_data = json.loads((runs_dir / run_id / "run.json").read_text())
         assert run_data["goal"] == "Override test"
+
+
+# ---------------------------------------------------------------------------
+# Fix #3 — --force-provider CLI tests
+# ---------------------------------------------------------------------------
+
+
+def test_preview_force_provider_invalid_exits_1():
+    result = runner.invoke(app, ["preview", "fake-run", "--force-provider", "pepino"])
+    assert result.exit_code == 1
+    assert "Invalid value for --force-provider" in result.stdout
+
+
+def test_preview_force_provider_valid_passes_to_executor(
+    target_repo: Path, workspace_dir: Path
+):
+    mock_scout_out = ScoutOutput(
+        hotspots=[],
+        recommended_order=[],
+        risks=[],
+        summary="Test Scout Summary",
+    )
+
+    mock_arch_out = ArchitectOutput(
+        validated_findings=[],
+        false_positives=[],
+        systemic_risks=[],
+        implementation_plan=[
+            Task(
+                task_id="T1",
+                title="Modify README",
+                description="Modify README file",
+                files_to_modify=["README.md"],
+                priority="high",
+                effort="low",
+                risk_level="low",
+            )
+        ],
+        blockers=[],
+    )
+    mock_arch_meta = {"latency_ms": 200, "cost_usd": 0.02}
+
+    mock_exec_out = ExecutorOutput(
+        applied=[
+            FileChange(
+                task_id="T1",
+                file="README.md",
+                status="applied",
+                diff=(
+                    "diff --git a/README.md b/README.md\n"
+                    "--- a/README.md\n"
+                    "+++ b/README.md\n"
+                    "@@ -1 +1 @@\n"
+                    "-Hello\n"
+                    "+Hello Claude\n"
+                ),
+            )
+        ]
+    )
+    mock_exec_meta = {"latency_ms": 300, "cost_usd": 0.03}
+
+    mock_val_out = ValidatorOutput(
+        overall_passed=True,
+        tools=[ToolResult(tool="ruff", passed=True, return_code=0)],
+        llm_summary=None,
+    )
+
+    def _mock_scan(target_path, ignore_dirs=None):
+        root = resolve_git_root(target_path)
+        head = current_head(root)
+        return ScanFindings(
+            repository_root=str(root),
+            base_commit=head,
+            branch="main",
+            v1_supported=True,
+            support_reasons=["mocked"],
+            unsupported_reasons=[],
+            pyproject=PyProjectInfo(exists=True, valid=True, build_backend="hatchling.build"),
+            ruff=ToolInfo(available=True, version="ruff 0.4.0"),
+            pytest=ToolInfo(available=True, version="pytest 8.0.0"),
+            test_suite=TestSuiteInfo(detected=True, type="tests_dir"),
+            total_python_files=0,
+            packages=[],
+            modules=[],
+            hotspots=[],
+        )
+
+    captured_kwargs = {}
+
+    def _mock_executor_run(**kwargs):
+        captured_kwargs.update(kwargs)
+        return (mock_exec_out, mock_exec_meta)
+
+    with (
+        patch("orchestrator.commands.scan.scan", side_effect=_mock_scan),
+        patch("orchestrator.agents.architect.run", return_value=(mock_arch_out, mock_arch_meta)),
+        patch("orchestrator.agents.executor.run", side_effect=_mock_executor_run),
+        patch(
+            "orchestrator.validation_workspace.run_validation_in_copy", return_value=mock_val_out
+        ),
+    ):
+        scan_res = runner.invoke(app, ["scan", str(target_repo), "--workspace", str(workspace_dir)])
+        assert scan_res.exit_code == 0
+
+        runs_dir = workspace_dir / "runs"
+        run_id = list(runs_dir.iterdir())[0].name
+
+        ws_mgr = WorkspaceManager(workspace_dir)
+        ws_mgr.write_artifact(run_id, "findings.json", mock_scout_out.model_dump_json(indent=2))
+
+        plan_res = runner.invoke(app, ["plan", run_id, "--workspace", str(workspace_dir)])
+        assert plan_res.exit_code == 0
+
+        preview_res = runner.invoke(
+            app,
+            ["preview", run_id, "--workspace", str(workspace_dir), "--force-provider", "claude"],
+        )
+        assert preview_res.exit_code == 0, preview_res.stdout
+        assert "Override activo" in preview_res.stdout
+        assert captured_kwargs.get("force_provider") == "claude"
+
+
+def test_preview_force_provider_cleans_staging(target_repo: Path, workspace_dir: Path):
+    mock_scout_out = ScoutOutput(
+        hotspots=[],
+        recommended_order=[],
+        risks=[],
+        summary="Test Scout Summary",
+    )
+
+    mock_arch_out = ArchitectOutput(
+        validated_findings=[],
+        false_positives=[],
+        systemic_risks=[],
+        implementation_plan=[
+            Task(
+                task_id="T1",
+                title="Modify README",
+                description="Modify README file",
+                files_to_modify=["README.md"],
+                priority="high",
+                effort="low",
+                risk_level="low",
+            )
+        ],
+        blockers=[],
+    )
+    mock_arch_meta = {"latency_ms": 200, "cost_usd": 0.02}
+
+    mock_exec_out = ExecutorOutput(
+        applied=[
+            FileChange(
+                task_id="T1",
+                file="README.md",
+                status="applied",
+                diff="diff --git a/README.md b/README.md\n",
+            )
+        ]
+    )
+    mock_exec_meta = {"latency_ms": 300, "cost_usd": 0.03}
+
+    mock_val_out = ValidatorOutput(
+        overall_passed=True,
+        tools=[ToolResult(tool="ruff", passed=True, return_code=0)],
+        llm_summary=None,
+    )
+
+    def _mock_scan(target_path, ignore_dirs=None):
+        root = resolve_git_root(target_path)
+        head = current_head(root)
+        return ScanFindings(
+            repository_root=str(root),
+            base_commit=head,
+            branch="main",
+            v1_supported=True,
+            support_reasons=["mocked"],
+            unsupported_reasons=[],
+            pyproject=PyProjectInfo(exists=True, valid=True, build_backend="hatchling.build"),
+            ruff=ToolInfo(available=True, version="ruff 0.4.0"),
+            pytest=ToolInfo(available=True, version="pytest 8.0.0"),
+            test_suite=TestSuiteInfo(detected=True, type="tests_dir"),
+            total_python_files=0,
+            packages=[],
+            modules=[],
+            hotspots=[],
+        )
+
+    with (
+        patch("orchestrator.commands.scan.scan", side_effect=_mock_scan),
+        patch("orchestrator.agents.architect.run", return_value=(mock_arch_out, mock_arch_meta)),
+        patch("orchestrator.agents.executor.run", return_value=(mock_exec_out, mock_exec_meta)),
+        patch(
+            "orchestrator.validation_workspace.run_validation_in_copy", return_value=mock_val_out
+        ),
+    ):
+        scan_res = runner.invoke(app, ["scan", str(target_repo), "--workspace", str(workspace_dir)])
+        assert scan_res.exit_code == 0
+
+        runs_dir = workspace_dir / "runs"
+        run_id = list(runs_dir.iterdir())[0].name
+
+        ws_mgr = WorkspaceManager(workspace_dir)
+        ws_mgr.write_artifact(run_id, "findings.json", mock_scout_out.model_dump_json(indent=2))
+
+        plan_res = runner.invoke(app, ["plan", run_id, "--workspace", str(workspace_dir)])
+        assert plan_res.exit_code == 0
+
+        staging_dir = runs_dir / run_id / "staging"
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        (staging_dir / "leftover.py").write_text("old content")
+
+        preview_res = runner.invoke(
+            app,
+            ["preview", run_id, "--workspace", str(workspace_dir), "--force-provider", "claude"],
+        )
+        assert preview_res.exit_code == 0, preview_res.stdout
+        assert "se limpiaron 1 archivos previos" in preview_res.stdout

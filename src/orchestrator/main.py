@@ -160,11 +160,27 @@ def preview(
     workspace: Optional[Path] = typer.Option(
         None, "--workspace", help="Path to the workspace directory"
     ),
+    force_provider: Optional[str] = typer.Option(
+        None,
+        "--force-provider",
+        help="Force a specific LLM ('gemini'|'groq'|'claude') for all tasks, "
+        "ignoring risk_level routing. Does not affect high-risk gating.",
+    ),
 ) -> None:
     """Generate and validate a unified patch without modifying the target repository."""
+    from orchestrator.agents.executor.providers import KNOWN_PROVIDER_NAMES
     from orchestrator.commands.preview import execute as execute_preview
 
-    execute_preview(run_id=run_id, workspace=workspace, env_file=env_file)
+    if force_provider is not None and force_provider not in KNOWN_PROVIDER_NAMES:
+        console.print(
+            f"[bold red]Error: Invalid value for --force-provider. "
+            f"Valid options are: {', '.join(KNOWN_PROVIDER_NAMES)}.[/bold red]"
+        )
+        raise typer.Exit(1)
+
+    execute_preview(
+        run_id=run_id, workspace=workspace, env_file=env_file, force_provider=force_provider
+    )
 
 
 @app.command()

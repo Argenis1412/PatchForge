@@ -5,6 +5,7 @@ __all__ = [
 ]
 
 import hashlib
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -35,6 +36,7 @@ def execute(
     run_id: str,
     workspace: Optional[Path] = None,
     env_file: Optional[Path] = None,
+    force_provider: Optional[str] = None,
 ) -> None:
     console.print(
         Panel(
@@ -100,6 +102,27 @@ def execute(
     )
 
     staging_dir = run_dir / "staging"
+
+    if force_provider is not None:
+        cleaned_count = 0
+        if staging_dir.exists():
+            cleaned_count = sum(1 for _ in staging_dir.rglob("*") if _.is_file())
+            try:
+                shutil.rmtree(staging_dir)
+            except OSError as exc:
+                console.print(f"[bold red]Error clearing staging directory: {exc}[/bold red]")
+                raise typer.Exit(code=1)
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        if cleaned_count > 0:
+            console.print(
+                f"[yellow]Override activo ({force_provider}): "
+                f"se limpiaron {cleaned_count} archivos previos de staging[/yellow]"
+            )
+        else:
+            console.print(
+                f"[yellow]Override activo: todos los tasks usarán {force_provider}[/yellow]"
+            )
+
     with Progress(
         SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console
     ) as progress:
@@ -108,7 +131,10 @@ def execute(
         )
         try:
             executor_output, exec_meta = executor_agent.run(
-                architect_output=architect_output, config=config, staging_dir=staging_dir
+                architect_output=architect_output,
+                config=config,
+                staging_dir=staging_dir,
+                force_provider=force_provider,
             )
             progress.update(task, completed=100)
         except Exception as exc:
@@ -127,6 +153,21 @@ def execute(
             workspace_mgr.write_run_json(run_id, run_metadata)
             console.print(f"[bold red]Executor failed: {exc}[/bold red]")
             raise typer.Exit(code=1)
+
+    # 4.5. Show error panel if any tasks failed
+    if executor_output.errors:
+        error_lines = []
+        for err_change in executor_output.errors:
+            error_lines.append(
+                f"[red]• {err_change.task_id}[/red] ({err_change.file}): {err_change.error}"
+            )
+        console.print(
+            Panel(
+                "\n".join(error_lines),
+                title="[bold red]Executor Errors[/bold red]",
+                expand=False,
+            )
+        )
 
     # 5. Consolidate file changes into a single patch.diff
     diffs = []

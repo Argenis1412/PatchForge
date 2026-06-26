@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from orchestrator.circuit_breaker import CircuitBreakerOpenError, circuit_breaker_for
@@ -211,6 +212,32 @@ _PROVIDER_CHAIN["medium"] = [_call_groq, _call_gemini, _call_claude]
 _PROVIDER_CHAIN["high"] = [_call_claude]
 
 
+def _provider_by_name() -> dict[str, object]:
+    # Single source of truth: derived from _PROVIDER_CHAIN, not a manual list.
+    # Any _call_* added to _PROVIDER_CHAIN is automatically available via
+    # --force-provider.  No second registry to keep in sync.
+    out: dict[str, object] = {}
+    for chain in _PROVIDER_CHAIN.values():
+        for fn in chain:
+            short = fn.__name__.removeprefix("_call_")
+            out[short] = fn
+    return out
+
+
+KNOWN_PROVIDER_NAMES: tuple[str, ...] = tuple(sorted(_provider_by_name().keys()))
+
+
+# ---------------------------------------------------------------------------
+# Provider chain result
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ProviderChainResult:
+    success: tuple[str, int, int, float] | None = None
+    failures: list[tuple[str, str]] = field(default_factory=list)
+
+
 def _recoverable_exceptions() -> tuple:
     if not hasattr(_recoverable_exceptions, "_cache"):
         import anthropic as _anthropic
@@ -226,11 +253,13 @@ def _recoverable_exceptions() -> tuple:
     return _recoverable_exceptions._cache
 
 
-def _call_chain(chain: list, prompt: str, run_id: str) -> tuple[str, int, int, float] | None:
+def _call_chain(chain: list, prompt: str, run_id: str) -> ProviderChainResult:
+    failures: list[tuple[str, str]] = []
     for provider in chain:
         try:
             raw, input_tokens, output_tokens = provider(prompt, run_id)
             if not _is_valid_provider_response(raw):
+                failures.append((provider.__name__, "invalid/empty response"))
                 _get_logger().warning(
                     "[%s] Invalid/empty response from %s, trying next",
                     run_id,
@@ -238,8 +267,12 @@ def _call_chain(chain: list, prompt: str, run_id: str) -> tuple[str, int, int, f
                 )
                 continue
             cost = _compute_cost(provider, input_tokens, output_tokens)
-            return raw, input_tokens, output_tokens, cost
+            return ProviderChainResult(
+                success=(raw, input_tokens, output_tokens, cost),
+                failures=failures,
+            )
         except _recoverable_exceptions() as exc:
+            failures.append((provider.__name__, str(exc)))
             _get_logger().info(
                 "[%s] %s unavailable: %s, trying next",
                 run_id,
@@ -247,4 +280,7 @@ def _call_chain(chain: list, prompt: str, run_id: str) -> tuple[str, int, int, f
                 exc,
             )
             continue
-    return None
+
+    summary = "; ".join(f"{name}→{err}" for name, err in failures)
+    _get_logger().warning("[%s] Provider chain exhausted: %s", run_id, summary)
+    return ProviderChainResult(success=None, failures=failures)

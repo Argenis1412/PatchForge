@@ -452,6 +452,14 @@ ADR-0004 must answer exactly five questions:
 - Changes to `ArchitectOutput` or `Task` schema (dependencies field already existed)
 - Provider fallback chain (Bug #2 from Experiment 002, deferred)
 
+### ✅ Issue #145 — Hardening Sprint: Provider visibility, --force-provider, test collection fix
+- **Priority:** P2 | **Status:** ✅ **Completed**
+- **Goal:** Three post-dogfooding fixes: (1) `pytest.importorskip` in `test_github.py`, (2) `ProviderChainResult` dataclass for provider failure tracking + Rich error panel in preview, (3) `--force-provider` CLI flag orthogonal to `risk_level` (does not mutate risk_level or affect high-risk gating).
+- **Source:** Exp 004 dogfooding
+- **Precondition:** None
+- **Files touched:** 5 code (`providers.py`, `applier.py`, `executor/__init__.py`, `main.py`, `preview.py`) + 3 test files (11 new tests)
+- **Known gap:** `log_event` for `force_provider` not wired to `pipeline.jsonl` — executor lacks pipeline trace context. Documented in `docs/context/discoveries.md`.
+
 ### ✅ Formalize Experiment Schema (debt P2→P3)
 - **Priority:** P2 | **Status:** ✅ **Completed**
 - **Goal:** Formalize "Experiment" as a schema concept carrying execution context (commit SHA, repository identity, workspace path, run ID).

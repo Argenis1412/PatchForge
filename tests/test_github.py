@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
 import pytest
+
+pytest.importorskip("github")
+
+from unittest.mock import MagicMock, patch
 
 from orchestrator.clients.github import PR, GitHubClient, Issue
 from orchestrator.integrations.webhook import handle_issue_opened

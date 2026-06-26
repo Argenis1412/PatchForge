@@ -26,6 +26,7 @@
 - **Symptom:** `applied_count=0` with no visible error message to the user.
 - **Root cause:** The provider chain (Gemini → Groq → Claude) iterates silently. When all providers fail, no information is shown about which providers were tried or why they failed.
 - **Lesson:** Log each provider failure with name + reason. Display a summary to the user.
+- **Fix (#145):** `ProviderChainResult` dataclass now accumulates per-provider failures with names and reasons. Rich error panel in `preview.py` shows failed tasks and their `change.error` directly in the terminal.
 
 ---
 
@@ -34,6 +35,7 @@
 - **Symptom:** `pytest` hangs until timeout (120s) without executing any tests.
 - **Root cause:** `tests/test_github.py` imports the `github` PyPI package. When not installed, the import raises `ModuleNotFoundError`, but pytest collection does not handle it promptly.
 - **Lesson:** Add `--ignore=tests\\test_github.py` to the `test_command` in `orchestrator.json`. Consider conditional skip with `pytest.importorskip`.
+- **Fix (#145):** `pytest.importorskip("github")` added at module level. Collection skips in <1s when `PyGithub` is absent.
 
 ---
 
