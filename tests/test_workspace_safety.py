@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from orchestrator.schemas.config import TargetConfig, default_workspace_path
+from orchestrator.schemas.config import TargetConfig, _workspace_hash, default_workspace_path
 
 
 def _init_git_repo(path: Path) -> None:
@@ -85,3 +85,17 @@ def test_symlink_workspace_resolving_inside_target_is_rejected(tmp_path):
 
     with pytest.raises(ValueError, match="outside the target repository"):
         TargetConfig.load(target_path=repo, workspace_path=link_path)
+
+
+def test_workspace_hash_deterministic_across_casing():
+    """Hash must be stable regardless of path casing on Windows."""
+    upper = Path("C:/Users/Dev/MyRepo")
+    lower = Path("c:/users/dev/myrepo")
+
+    h1 = _workspace_hash(upper)
+    h2 = _workspace_hash(lower)
+
+    if os.name == "nt":
+        assert h1 == h2, f"Hash mismatch for same directory with different casing: {h1} != {h2}"
+    else:
+        assert h1 != h2

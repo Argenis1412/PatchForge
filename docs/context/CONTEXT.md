@@ -215,6 +215,7 @@ These must not change without a new ADR in `docs/adr/`:
 - ✅ Issue #140 — Core Persistence (WAL atomic writes)
 - ✅ Issue #142 — Post-Audit Remaining Fixes
 - ✅ Issue #145 — Hardening Sprint
+- ✅ Issue #149 — Workspace Hash Inconsistency
 - ✅ Formalize Experiment Schema (debt P2→P3)
 
 ---

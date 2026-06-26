@@ -23,7 +23,10 @@ SCHEMA_VERSION = "1.0"
 
 
 def _workspace_hash(root_path: Path) -> str:
-    return hashlib.sha256(str(Path(root_path).resolve()).encode("utf-8")).hexdigest()[:12]
+    path_str = root_path.as_posix()
+    if os.name == "nt":
+        path_str = path_str.lower()
+    return hashlib.sha256(path_str.encode("utf-8")).hexdigest()[:12]
 
 
 def default_workspace_path(target_path: Path) -> Path:
