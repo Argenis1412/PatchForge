@@ -15,9 +15,13 @@ class Task(BaseModel):
     title: str = Field(..., description="Short title of the task")
     description: str = Field(..., description="Detailed description of what needs to be done")
     files_to_modify: List[str] = Field(..., description="List of files that will be affected")
-    priority: str = Field(..., description="'high', 'medium', or 'low'")
-    effort: str = Field(..., description="'high', 'medium', or 'low'")
-    risk_level: str = Field(..., description="'high', 'medium', or 'low'")
+    priority: Literal["low", "medium", "high"] = Field(
+        ..., description="'high', 'medium', or 'low'"
+    )
+    effort: Literal["low", "medium", "high"] = Field(..., description="'high', 'medium', or 'low'")
+    risk_level: Literal["low", "medium", "high"] = Field(
+        ..., description="'high', 'medium', or 'low'"
+    )
     dependencies: List[str] = Field(default=[], description="List of task_ids that block this task")
     reason: Optional[str] = Field(
         default=None, description="Why this task is necessary given the findings."
