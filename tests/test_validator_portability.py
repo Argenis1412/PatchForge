@@ -10,6 +10,7 @@ from orchestrator.agents.validator.runners import (
     _build_env_with_venv,
     run_pytest,
     run_ruff,
+    run_tsc,
 )
 
 # ---------------------------------------------------------------------------
@@ -210,5 +211,121 @@ def test_run_pytest_no_venv_injection_with_absolute_cmd(tmp_path):
 
     with patch("subprocess.run", side_effect=fake_run):
         run_pytest("r1", tmp_path, cmd_override=abs_cmd)
+
+    assert captured["env"] is None
+
+
+# ---------------------------------------------------------------------------
+# run_ruff — staging path + venv injection
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_run_ruff_staging_injects_venv_env(tmp_path):
+    venv_bin = tmp_path / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    staging_dir = tmp_path / "staging"
+    staging_dir.mkdir()
+    (staging_dir / "foo.py").write_text("x = 1\n")
+    captured = {}
+
+    def fake_run(cmd, cwd, capture_output, text, timeout, env=None):
+        captured["env"] = env
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    with patch("subprocess.run", side_effect=fake_run):
+        run_ruff("r1", tmp_path, staging_dir=staging_dir)
+
+    assert captured["env"] is not None
+    assert str(venv_bin) in captured["env"]["PATH"]
+
+
+# ---------------------------------------------------------------------------
+# run_pytest — overlay path with ignore_dirs and venv
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_run_pytest_overlay_forwards_ignore_dirs(tmp_path):
+    staging_dir = tmp_path / "staging"
+    staging_dir.mkdir()
+    (staging_dir / "foo.py").write_text("x = 1\n")
+    (tmp_path / "pyproject.toml").write_text("")
+    captured = {}
+
+    def fake_run(cmd, cwd, capture_output, text, timeout, env=None):
+        captured["cmd"] = cmd
+        captured["cwd"] = cwd
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    with patch("subprocess.run", side_effect=fake_run):
+        run_pytest("r1", tmp_path, staging_dir=staging_dir, ignore_dirs=["dist", "vendor"])
+
+    assert "--ignore=dist" in captured["cmd"]
+    assert "--ignore=vendor" in captured["cmd"]
+
+
+@pytest.mark.unit
+def test_run_pytest_overlay_injects_venv_env(tmp_path):
+    venv_bin = tmp_path / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    staging_dir = tmp_path / "staging"
+    staging_dir.mkdir()
+    (staging_dir / "foo.py").write_text("x = 1\n")
+    (tmp_path / "pyproject.toml").write_text("")
+    captured = {}
+
+    def fake_run(cmd, cwd, capture_output, text, timeout, env=None):
+        captured["env"] = env
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    with patch("subprocess.run", side_effect=fake_run):
+        run_pytest("r1", tmp_path, staging_dir=staging_dir)
+
+    assert captured["env"] is not None
+    assert str(venv_bin) in captured["env"]["PATH"]
+
+
+# ---------------------------------------------------------------------------
+# run_tsc — venv injection
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_run_tsc_injects_venv_env_bare_cmd(tmp_path):
+    venv_bin = tmp_path / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    (frontend / "package.json").write_text("{}")
+    captured = {}
+
+    def fake_run(cmd, cwd, capture_output, text, timeout, env=None):
+        captured["env"] = env
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    with patch("subprocess.run", side_effect=fake_run):
+        run_tsc("r1", tmp_path)
+
+    assert captured["env"] is not None
+    assert str(venv_bin) in captured["env"]["PATH"]
+
+
+@pytest.mark.unit
+def test_run_tsc_no_venv_injection_with_absolute_cmd(tmp_path):
+    venv_bin = tmp_path / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    (frontend / "package.json").write_text("{}")
+    abs_cmd = [str(tmp_path / "bin" / "tsc"), "--noEmit"]
+    captured = {}
+
+    def fake_run(cmd, cwd, capture_output, text, timeout, env=None):
+        captured["env"] = env
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    with patch("subprocess.run", side_effect=fake_run):
+        run_tsc("r1", tmp_path, cmd_override=abs_cmd)
 
     assert captured["env"] is None
