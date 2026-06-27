@@ -93,8 +93,13 @@ def _seed_job(qdb_path: Path, payload: dict, *, retries: int = 0, run_id: str = 
     conn.execute(
         "INSERT INTO work_queue (issue_number, repo, run_id, status, created_at, "
         "payload, retries) VALUES (?, ?, ?, 'pending', datetime('now'), ?, ?)",
-        (payload.get("issue_number", 1), payload.get("repo", "o/r"), run_id,
-         json.dumps(payload), retries),
+        (
+            payload.get("issue_number", 1),
+            payload.get("repo", "o/r"),
+            run_id,
+            json.dumps(payload),
+            retries,
+        ),
     )
     conn.commit()
     conn.close()
@@ -178,7 +183,9 @@ def test_hydrate_stage_inline_json_writes_local(workspace, fake_store):
 # ---------------------------------------------------------------------------
 
 
-def test_worker_loop_branch_idempotency_skips_pipeline(qdb_path, cdb_path, workspace, fake_store, fake_github):
+def test_worker_loop_branch_idempotency_skips_pipeline(
+    qdb_path, cdb_path, workspace, fake_store, fake_github
+):
     """When github.get_pr_for_branch returns an open PR, the pipeline must not run."""
     run_id = _seed_job(qdb_path, {"issue_number": 5, "clone_url": "https://example/x.git"})
     fake_github.get_pr_for_branch.return_value = MagicMock(number=42)
@@ -191,7 +198,9 @@ def test_worker_loop_branch_idempotency_skips_pipeline(qdb_path, cdb_path, works
     fake_github.create_pr.assert_not_called()
 
 
-def test_worker_loop_cb_open_yields_without_burning_retry(qdb_path, cdb_path, workspace, fake_store, fake_github, monkeypatch):
+def test_worker_loop_cb_open_yields_without_burning_retry(
+    qdb_path, cdb_path, workspace, fake_store, fake_github, monkeypatch
+):
     """If a provider is OPEN, the loop sleeps and does NOT dequeue."""
     _seed_job(qdb_path, {"issue_number": 6, "clone_url": "x"})
     conn_coord = _sqlite_connect(cdb_path)
@@ -202,9 +211,7 @@ def test_worker_loop_cb_open_yields_without_burning_retry(qdb_path, cdb_path, wo
     conn_coord.close()
 
     slept: list[float] = []
-    monkeypatch.setattr(
-        "orchestrator.storage.work_queue.time.sleep", lambda s: slept.append(s)
-    )
+    monkeypatch.setattr("orchestrator.storage.work_queue.time.sleep", lambda s: slept.append(s))
     worker_loop(qdb_path, cdb_path, workspace, fake_store, fake_github, iterations=1)
 
     conn = _sqlite_connect(qdb_path)
@@ -214,26 +221,29 @@ def test_worker_loop_cb_open_yields_without_burning_retry(qdb_path, cdb_path, wo
     assert slept and slept[0] <= 30
 
 
-def test_worker_loop_cb_open_raised_mid_pipeline(qdb_path, cdb_path, workspace, fake_store, fake_github, monkeypatch):
+def test_worker_loop_cb_open_raised_mid_pipeline(
+    qdb_path, cdb_path, workspace, fake_store, fake_github, monkeypatch
+):
     """CircuitBreakerOpenError mid-pipeline yields to pending without burning a retry."""
     run_id = _seed_job(qdb_path, {"issue_number": 7, "clone_url": "x"})
 
     def raise_cb(*args, **kwargs):
         raise CircuitBreakerOpenError(provider="gemini", state="open", retry_after=0)
 
-    monkeypatch.setattr(
-        "orchestrator.storage.work_queue._execute_pipeline_with_resume", raise_cb
-    )
+    monkeypatch.setattr("orchestrator.storage.work_queue._execute_pipeline_with_resume", raise_cb)
     worker_loop(qdb_path, cdb_path, workspace, fake_store, fake_github, iterations=1)
 
     conn = _sqlite_connect(qdb_path)
-    row = conn.execute("SELECT status, retries FROM work_queue WHERE run_id=?",
-                       (run_id,)).fetchone()
+    row = conn.execute(
+        "SELECT status, retries FROM work_queue WHERE run_id=?", (run_id,)
+    ).fetchone()
     assert row["status"] == "pending"
     assert row["retries"] == 0
 
 
-def test_worker_loop_deterministic_error_to_dead_letter(qdb_path, cdb_path, workspace, fake_store, fake_github, monkeypatch):
+def test_worker_loop_deterministic_error_to_dead_letter(
+    qdb_path, cdb_path, workspace, fake_store, fake_github, monkeypatch
+):
     """A deterministic exception (ValueError) goes directly to dead_letter on first failure."""
     run_id = _seed_job(qdb_path, {"issue_number": 8, "clone_url": "x"})
 
@@ -246,40 +256,40 @@ def test_worker_loop_deterministic_error_to_dead_letter(qdb_path, cdb_path, work
     worker_loop(qdb_path, cdb_path, workspace, fake_store, fake_github, iterations=1)
 
     conn = _sqlite_connect(qdb_path)
-    row = conn.execute("SELECT status, error FROM work_queue WHERE run_id=?",
-                       (run_id,)).fetchone()
+    row = conn.execute("SELECT status, error FROM work_queue WHERE run_id=?", (run_id,)).fetchone()
     assert row["status"] == "dead_letter"
     assert "bad payload" in row["error"]
 
 
-def test_worker_loop_transient_error_backoff_then_dead_letter(qdb_path, cdb_path, workspace, fake_store, fake_github, monkeypatch):
+def test_worker_loop_transient_error_backoff_then_dead_letter(
+    qdb_path, cdb_path, workspace, fake_store, fake_github, monkeypatch
+):
     """Three transient failures → dead_letter. retries increments exactly once per attempt."""
     run_id = _seed_job(qdb_path, {"issue_number": 9, "clone_url": "x"})
 
     def raise_conn(*args, **kwargs):
         raise ConnectionError("net")
 
-    monkeypatch.setattr(
-        "orchestrator.storage.work_queue._execute_pipeline_with_resume", raise_conn
-    )
+    monkeypatch.setattr("orchestrator.storage.work_queue._execute_pipeline_with_resume", raise_conn)
     # Lease expiry path is not tested here; we drive iterations directly and
     # reset status to pending between iterations is done by the loop itself.
     for _ in range(3):
         # Make the job dequeueable again by clearing scheduled_after.
         conn = _sqlite_connect(qdb_path)
-        conn.execute(
-            "UPDATE work_queue SET scheduled_after=NULL WHERE run_id=?", (run_id,)
-        )
+        conn.execute("UPDATE work_queue SET scheduled_after=NULL WHERE run_id=?", (run_id,))
         conn.close()
         worker_loop(qdb_path, cdb_path, workspace, fake_store, fake_github, iterations=1)
 
     conn = _sqlite_connect(qdb_path)
-    row = conn.execute("SELECT status, retries FROM work_queue WHERE run_id=?",
-                       (run_id,)).fetchone()
+    row = conn.execute(
+        "SELECT status, retries FROM work_queue WHERE run_id=?", (run_id,)
+    ).fetchone()
     assert row["status"] == "dead_letter"
 
 
-def test_risk_gate_blocks_executor_patch(qdb_path, cdb_path, workspace, fake_store, fake_github, monkeypatch, tmp_path):
+def test_risk_gate_blocks_executor_patch(
+    qdb_path, cdb_path, workspace, fake_store, fake_github, monkeypatch, tmp_path
+):
     """Executor whose patch trips the risk gate → PatchApplyError → dead_letter."""
     run_id = _seed_job(qdb_path, {"issue_number": 10, "clone_url": "x"})
 
@@ -291,47 +301,43 @@ def test_risk_gate_blocks_executor_patch(qdb_path, cdb_path, workspace, fake_sto
     qconn = _sqlite_connect(qdb_path)
     qconn.execute(
         "INSERT INTO pipeline_checkpoint (run_id, stage, output) VALUES (?, 'scout', ?)",
-        (run_id,
-         '{"hotspots": [], "recommended_order": [], "risks": [], "summary": "s"}'),
+        (run_id, '{"hotspots": [], "recommended_order": [], "risks": [], "summary": "s"}'),
     )
     qconn.execute(
         "INSERT INTO pipeline_checkpoint (run_id, stage, output) VALUES (?, 'architect', ?)",
-        (run_id, '{"validated_findings": [], "false_positives": [], "systemic_risks": [], "implementation_plan": [], "blockers": []}'),
+        (
+            run_id,
+            '{"validated_findings": [], "false_positives": [], "systemic_risks": [], "implementation_plan": [], "blockers": []}',
+        ),
     )
     qconn.commit()
     qconn.close()
 
     diff = "\n".join(
-        f"diff --git a/f{i}.py b/f{i}.py\n+++ b/f{i}.py\n@@ +1 @@\n+x"
-        for i in range(50)
+        f"diff --git a/f{i}.py b/f{i}.py\n+++ b/f{i}.py\n@@ +1 @@\n+x" for i in range(50)
     )
     fake_executor_out = ExecutorOutput(
-        applied=[FileChange(task_id="t1", file="f.py", status=TaskStatus.APPLIED,
-                            diff=diff)],
+        applied=[FileChange(task_id="t1", file="f.py", status=TaskStatus.APPLIED, diff=diff)],
     )
 
     def fake_run_llm_stage(stage, *a, **kw):
         if stage == "validator":
             from orchestrator.schemas.validator_output import ValidatorOutput
+
             return ValidatorOutput(overall_passed=True, tools=[])
         return fake_executor_out
 
-    monkeypatch.setattr(
-        "orchestrator.storage.work_queue._run_llm_stage", fake_run_llm_stage
-    )
+    monkeypatch.setattr("orchestrator.storage.work_queue._run_llm_stage", fake_run_llm_stage)
     # Force risk gate to block.
     monkeypatch.setattr(
         "orchestrator.risk.check_patch_gate",
-        lambda meta, diff, workspace_mgr=None: MagicMock(
-            passed=False, reasons=["too big"]
-        ),
+        lambda meta, diff, workspace_mgr=None: MagicMock(passed=False, reasons=["too big"]),
     )
 
     worker_loop(qdb_path, cdb_path, workspace, fake_store, fake_github, iterations=1)
 
     conn = _sqlite_connect(qdb_path)
-    row = conn.execute("SELECT status, error FROM work_queue WHERE run_id=?",
-                       (run_id,)).fetchone()
+    row = conn.execute("SELECT status, error FROM work_queue WHERE run_id=?", (run_id,)).fetchone()
     assert row["status"] == "dead_letter"
     assert "Risk gate" in row["error"]
     # No executor checkpoint written.
@@ -342,7 +348,9 @@ def test_risk_gate_blocks_executor_patch(qdb_path, cdb_path, workspace, fake_sto
     assert cp is None
 
 
-def test_worker_loop_resumes_from_checkpoint(qdb_path, cdb_path, workspace, fake_store, fake_github, monkeypatch):
+def test_worker_loop_resumes_from_checkpoint(
+    qdb_path, cdb_path, workspace, fake_store, fake_github, monkeypatch
+):
     """Seeded checkpoints for scout/architect/executor → loop must skip them and only run validator+apply."""
     run_id = _seed_job(qdb_path, {"issue_number": 11, "clone_url": "x"})
     repo_path = workspace.run_dir(run_id) / "repo"
@@ -352,12 +360,14 @@ def test_worker_loop_resumes_from_checkpoint(qdb_path, cdb_path, workspace, fake
     qconn = _sqlite_connect(qdb_path)
     qconn.execute(
         "INSERT INTO pipeline_checkpoint (run_id, stage, output) VALUES (?, 'scout', ?)",
-        (run_id,
-         '{"hotspots": [], "recommended_order": [], "risks": [], "summary": "s"}'),
+        (run_id, '{"hotspots": [], "recommended_order": [], "risks": [], "summary": "s"}'),
     )
     qconn.execute(
         "INSERT INTO pipeline_checkpoint (run_id, stage, output) VALUES (?, 'architect', ?)",
-        (run_id, '{"validated_findings": [], "false_positives": [], "systemic_risks": [], "implementation_plan": [], "blockers": []}'),
+        (
+            run_id,
+            '{"validated_findings": [], "false_positives": [], "systemic_risks": [], "implementation_plan": [], "blockers": []}',
+        ),
     )
     patch_text = "diff --git a/x b/x\n+++ b/x\n@@ +1 @@\n+y"
     checksum = hashlib.sha256(patch_text.encode()).hexdigest()
@@ -381,12 +391,11 @@ def test_worker_loop_resumes_from_checkpoint(qdb_path, cdb_path, workspace, fake
         called_stages.append(stage)
         if stage == "validator":
             from orchestrator.schemas.validator_output import ValidatorOutput
+
             return ValidatorOutput(overall_passed=True, tools=[])
         raise AssertionError(f"checkpointed stage {stage} should NOT run")
 
-    monkeypatch.setattr(
-        "orchestrator.storage.work_queue._run_llm_stage", fake_run_llm
-    )
+    monkeypatch.setattr("orchestrator.storage.work_queue._run_llm_stage", fake_run_llm)
     monkeypatch.setattr(
         "orchestrator.storage.work_queue._execute_apply_with_checkpoints",
         lambda *a, **kw: None,
@@ -396,8 +405,7 @@ def test_worker_loop_resumes_from_checkpoint(qdb_path, cdb_path, workspace, fake
 
     assert called_stages == ["validator"]
     conn = _sqlite_connect(qdb_path)
-    row = conn.execute("SELECT status FROM work_queue WHERE run_id=?",
-                       (run_id,)).fetchone()
+    row = conn.execute("SELECT status FROM work_queue WHERE run_id=?", (run_id,)).fetchone()
     assert row["status"] == "completed"
 
 
@@ -431,20 +439,26 @@ def test_apply_wal_recovery_from_pushed_remote(workspace, fake_github, fake_stor
     (repo_path / "patch.diff").write_text("", encoding="utf-8")
 
     calls: list[str] = []
-    monkeypatch.setattr("orchestrator.git.push_delete_remote",
-                        lambda *a, **kw: calls.append("push_delete") or MagicMock(return_code=0))
-    monkeypatch.setattr("orchestrator.git.force_reset_apply",
-                        lambda *a, **kw: calls.append("reset") or MagicMock(return_code=0))
-    monkeypatch.setattr("orchestrator.git.delete_local_branch",
-                        lambda *a, **kw: calls.append("delete_branch") or MagicMock(return_code=0))
+    monkeypatch.setattr(
+        "orchestrator.git.push_delete_remote",
+        lambda *a, **kw: calls.append("push_delete") or MagicMock(return_code=0),
+    )
+    monkeypatch.setattr(
+        "orchestrator.git.force_reset_apply",
+        lambda *a, **kw: calls.append("reset") or MagicMock(return_code=0),
+    )
+    monkeypatch.setattr(
+        "orchestrator.git.delete_local_branch",
+        lambda *a, **kw: calls.append("delete_branch") or MagicMock(return_code=0),
+    )
     # Make phase 0 fail fast after recovery so we only test the recovery sequence.
-    monkeypatch.setattr("orchestrator.git.current_head",
-                        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("stop here")))
+    monkeypatch.setattr(
+        "orchestrator.git.current_head",
+        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("stop here")),
+    )
 
     with pytest.raises(RuntimeError, match="stop here"):
-        _execute_apply_with_checkpoints(
-            run_id, 1, repo_path, workspace, fake_github, fake_store
-        )
+        _execute_apply_with_checkpoints(run_id, 1, repo_path, workspace, fake_github, fake_store)
 
     assert "push_delete" in calls
     assert "reset" in calls
@@ -458,18 +472,21 @@ def test_apply_wal_recovery_from_pr_created(workspace, fake_github, fake_store, 
     repo_path = workspace.run_dir(run_id) / "repo"
     repo_path.mkdir(parents=True)
 
-    monkeypatch.setattr("orchestrator.git.push_delete_remote",
-                        lambda *a, **kw: MagicMock(return_code=0))
-    monkeypatch.setattr("orchestrator.git.force_reset_apply",
-                        lambda *a, **kw: MagicMock(return_code=0))
-    monkeypatch.setattr("orchestrator.git.delete_local_branch",
-                        lambda *a, **kw: MagicMock(return_code=0))
-    monkeypatch.setattr("orchestrator.git.current_head",
-                        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("stop here")))
+    monkeypatch.setattr(
+        "orchestrator.git.push_delete_remote", lambda *a, **kw: MagicMock(return_code=0)
+    )
+    monkeypatch.setattr(
+        "orchestrator.git.force_reset_apply", lambda *a, **kw: MagicMock(return_code=0)
+    )
+    monkeypatch.setattr(
+        "orchestrator.git.delete_local_branch", lambda *a, **kw: MagicMock(return_code=0)
+    )
+    monkeypatch.setattr(
+        "orchestrator.git.current_head",
+        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("stop here")),
+    )
 
     with pytest.raises(RuntimeError, match="stop here"):
-        _execute_apply_with_checkpoints(
-            run_id, 1, repo_path, workspace, fake_github, fake_store
-        )
+        _execute_apply_with_checkpoints(run_id, 1, repo_path, workspace, fake_github, fake_store)
 
     fake_github.close_pr.assert_called_once_with(42)

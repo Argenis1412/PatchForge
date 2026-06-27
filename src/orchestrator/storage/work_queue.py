@@ -280,8 +280,7 @@ def _checkpoint_write(
     conn_queue: sqlite3.Connection, run_id: str, stage: str, output_blob: str
 ) -> None:
     conn_queue.execute(
-        "INSERT OR REPLACE INTO pipeline_checkpoint (run_id, stage, output) "
-        "VALUES (?, ?, ?)",
+        "INSERT OR REPLACE INTO pipeline_checkpoint (run_id, stage, output) VALUES (?, ?, ?)",
         (run_id, stage, output_blob),
     )
     conn_queue.commit()
@@ -479,7 +478,12 @@ def _execute_pipeline_with_resume(
     for stage in STAGES:
         if stage == "apply":
             _execute_apply_with_checkpoints(
-                run_id, issue_number, repo_path, workspace, github, store,
+                run_id,
+                issue_number,
+                repo_path,
+                workspace,
+                github,
+                store,
                 base_branch=run_metadata.branch,
             )
             continue
@@ -505,9 +509,7 @@ def _execute_pipeline_with_resume(
             patch_text = "\n".join(diffs)
             risk_result = check_patch_gate(run_metadata, patch_text, workspace_mgr=workspace)
             if not risk_result.passed:
-                raise PatchApplyError(
-                    f"Risk gate blocked: {'; '.join(risk_result.reasons)}"
-                )
+                raise PatchApplyError(f"Risk gate blocked: {'; '.join(risk_result.reasons)}")
             ref = store.write(f"{run_id}/patch.diff", patch_text).ref
             workspace.write_artifact(run_id, "patch.diff", patch_text)
             checksum = hashlib.sha256(patch_text.encode("utf-8")).hexdigest()
@@ -620,8 +622,7 @@ def worker_loop(
             except Exception as e:
                 if _is_deterministic(e) or row["retries"] >= 2:
                     conn_queue.execute(
-                        "UPDATE work_queue SET status='dead_letter', "
-                        "error=? WHERE run_id=?",
+                        "UPDATE work_queue SET status='dead_letter', error=? WHERE run_id=?",
                         (repr(e), run_id),
                     )
                 else:

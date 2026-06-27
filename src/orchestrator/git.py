@@ -274,9 +274,7 @@ def git_push(repo_root: Path, branch: str, remote: str = "origin") -> GitCommand
         return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {e}")
 
 
-def push_delete_remote(
-    repo_root: Path, branch: str, remote: str = "origin"
-) -> GitCommandResult:
+def push_delete_remote(repo_root: Path, branch: str, remote: str = "origin") -> GitCommandResult:
     try:
         res = subprocess.run(
             ["git", "-C", str(repo_root), "push", remote, "--delete", branch],
@@ -289,9 +287,7 @@ def push_delete_remote(
         return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {e}")
 
 
-def delete_local_branch(
-    repo_root: Path, branch: str, force: bool = True
-) -> GitCommandResult:
+def delete_local_branch(repo_root: Path, branch: str, force: bool = True) -> GitCommandResult:
     flag = "-D" if force else "-d"
     try:
         res = subprocess.run(
