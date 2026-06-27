@@ -1175,8 +1175,19 @@ def test_preview_force_provider_does_not_log_override_when_staging_cleanup_fails
 
     assert preview_res.exit_code == 1
 
+    run_meta = ws_mgr.read_run_json(run_id)
+    assert run_meta.status == "failed"
+
     logs_dir = workspace_dir / "logs"
     events = _read_pipeline_events(logs_dir)
+
+    cleanup_failure_events = [
+        e
+        for e in events
+        if e.get("event") == "failure"
+        and e.get("data", {}).get("error_type") == "staging_cleanup_failed"
+    ]
+    assert len(cleanup_failure_events) == 1
 
     override_events = [e for e in events if e.get("event") == "force_provider_override"]
     assert override_events == []
@@ -1291,6 +1302,11 @@ def test_preview_empty_patch_fails_fast(target_repo: Path, workspace_dir: Path):
         plan_res = runner.invoke(app, ["plan", run_id, "--workspace", str(workspace_dir)])
         assert plan_res.exit_code == 0
 
+        # Pre-seed stale artifacts to verify they are removed on empty-patch exit.
+        run_dir = runs_dir / run_id
+        stale_patch = run_dir / "patch.diff"
+        stale_patch.write_text("stale content")
+
         preview_res = runner.invoke(
             app,
             ["preview", run_id, "--workspace", str(workspace_dir)],
@@ -1302,5 +1318,6 @@ def test_preview_empty_patch_fails_fast(target_repo: Path, workspace_dir: Path):
     run_meta = ws_mgr.read_run_json(run_id)
     assert run_meta.status == "failed"
 
+    assert not stale_patch.exists()
     validation_path = runs_dir / run_id / "validation.json"
     assert not validation_path.exists()

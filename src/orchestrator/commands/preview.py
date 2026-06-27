@@ -112,10 +112,22 @@ def execute(
     # Always clean staging to ensure a fresh execution cycle.
     cleaned_count = 0
     if staging_dir.exists():
-        cleaned_count = sum(1 for _ in staging_dir.rglob("*") if _.is_file())
         try:
+            cleaned_count = sum(1 for _ in staging_dir.rglob("*") if _.is_file())
             shutil.rmtree(staging_dir)
         except OSError as exc:
+            log_failure(
+                trace_id=run_id,
+                run_id=run_id,
+                stage="executor",
+                error_type="staging_cleanup_failed",
+                message=str(exc),
+                logs_dir=logs_dir,
+                run_dir=run_dir,
+            )
+            run_metadata.status = "failed"
+            run_metadata.updated_at = datetime.now(timezone.utc)
+            workspace_mgr.write_run_json(run_id, run_metadata)
             console.print(f"[bold red]Error clearing staging directory: {exc}[/bold red]")
             raise typer.Exit(code=1)
     staging_dir.mkdir(parents=True, exist_ok=True)
@@ -205,6 +217,10 @@ def execute(
     patch_diff = "\n".join(diffs)
 
     if not patch_diff:
+        for stale_artifact in ("patch.diff", "validation.json"):
+            stale_path = run_dir / stale_artifact
+            if stale_path.exists():
+                stale_path.unlink()
         log_failure(
             trace_id=run_id,
             run_id=run_id,
