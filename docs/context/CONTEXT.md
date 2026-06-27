@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-06-26 | Session: fix/issue-155-validator-portability
+> Last updated: 2026-06-27 | Session: feat/exp-006-safety-docstrings
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 541 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 548 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant until P3).
 
@@ -41,12 +41,19 @@
 ## Repository Structure
 
 ```
-src/orchestrator/          (41 Python files)
+src/orchestrator/
 ├── agents/
-│   ├── architect.py       # Claude Sonnet 4.6 — generates task plan
-│   ├── executor.py        # Multi-LLM routing — applies changes
-│   ├── scout.py           # Gemini — repository analysis (legacy, AI)
-│   └── validator.py       # subprocess — ruff + pytest
+│   ├── architect/         # Claude Sonnet 4.6 — generates task plan
+│   ├── executor/          # Multi-LLM routing — applies changes
+│   │   ├── __init__.py    # run() entrypoint + DAG scheduler
+│   │   ├── applier.py     # Task prompt builder + file staging
+│   │   ├── providers.py   # LLM provider chain (Gemini, Groq, Claude)
+│   │   └── diffing.py     # Unified diff generation
+│   ├── scout/             # Gemini — repository analysis (legacy)
+│   └── validator/         # ruff + pytest subprocess runners
+│       ├── __init__.py    # run() entrypoint
+│       ├── runners.py     # subprocess wrappers
+│       └── summarizer.py  # LLM error summarization
 ├── circuit_breaker.py       # Per-provider circuit breaker (T-07B)
 ├── clients/
 │   ├── anthropic_client.py
@@ -56,7 +63,8 @@ src/orchestrator/          (41 Python files)
 ├── commands/
 │   ├── scan.py            # V1 deterministic scan (non-AI)
 │   ├── plan.py            # V1 AI-assisted planning (+ --issue-file)
-│   └── preview.py         # Patch preview + validation
+│   ├── preview.py         # Patch preview + validation (staging cleanup)
+│   └── apply.py           # Patch application to target
 ├── observability/
 │   ├── events.py
 │   └── logging.py
@@ -77,13 +85,14 @@ src/orchestrator/          (41 Python files)
 ├── doctor.py              # V1 readiness check
 ├── git.py                 # Pure git wrappers (no domain logic)
 ├── lifecycle.py           # Patch lifecycle state machine
-├── main.py                # CLI surface (551 lines, known god object)
+├── main.py                # CLI surface
 ├── pipeline.py            # Central orchestrator (Pipeline class)
 ├── risk.py                # Plan gate + patch gate logic
+├── safety.py              # Path-safety validation utilities
 ├── validation_workspace.py
 └── workspace.py           # WorkspaceManager — disk layout
 
-tests/                     (21 test files, 541 tests)
+tests/                     (21 test files, 548 tests)
 ```
 
 ---
@@ -151,6 +160,8 @@ tests/                     (21 test files, 541 tests)
 | 142 | Post-Audit Remaining Fixes | Branch naming, repo locks, env guards |
 | 145 | Hardening Sprint | Provider visibility, `--force-provider`, test fix |
 | 151 | Validator timeout config + feedback | CLI `--validator-timeout`, env var, per-tool spinner, `timed_out` field |
+| 159 | Fix empty `patch.diff` on re-execution of `preview` | Staging cleanup + empty-patch guard (#160) |
+| 006 | `safety.py` docstrings | Module + private helper docstrings (#161) |
 
 ---
 
@@ -221,6 +232,8 @@ These must not change without a new ADR in `docs/adr/`:
 - ✅ Issue #153 — Force provider override observability (#154)
 - ✅ Issue #156 — Literal validation + code-gen risk floor (#157)
 - ✅ Issue #155 — Validator portability: venv PATH + ignore_dirs forwarding (#158)
+- ✅ Issue #159 — Fix empty `patch.diff` on re-execution of `preview` (#160)
+- ✅ Exp 006 — `safety.py` docstrings (#161)
 - ✅ Formalize Experiment Schema (debt P2→P3)
 
 ---
