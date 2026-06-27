@@ -36,7 +36,7 @@ Risk level criteria:
 - "high": infrastructure files (Dockerfile, CI configs, pyproject.toml),
   security-sensitive code, or changes with broad blast radius
 - "medium": any source-code modification (default for code-generation tasks)
-- "low": documentation-only changes, comment updates, or trivial renames
+- "low": documentation-only changes, comment updates, or trivial non-code renames
 
 All fields are required. Do not omit any field.
 
