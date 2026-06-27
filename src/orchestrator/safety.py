@@ -1,13 +1,55 @@
+"""Path-safety utilities for preventing directory traversal and unsafe file access.
+
+This module provides helper functions to validate and sanitise file paths before
+they are used by the orchestrator, ensuring that no path can escape a designated
+base directory or reference absolute locations on the filesystem.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 
 def _is_absolute_any(p: str) -> bool:
+    """Check whether a path string is absolute on any supported platform.
+
+    Evaluates the given path against both POSIX and Windows path conventions,
+    returning True if the path is considered absolute under either interpretation.
+    This guards against platform-specific absolute path formats being smuggled
+    through on systems that use the other convention.
+
+    Parameters
+    ----------
+    p:
+        The path string to evaluate.
+
+    Returns
+    -------
+    bool
+        True if ``p`` is absolute according to POSIX or Windows path rules,
+        False otherwise.
+    """
     return PurePosixPath(p).is_absolute() or PureWindowsPath(p).is_absolute()
 
 
 def _has_parent_segment(p: str) -> bool:
+    """Check whether any path component is a parent-directory traversal segment.
+
+    Normalises the path string to use forward slashes and then inspects each
+    component returned by :class:`pathlib.PurePosixPath`.  If any component is
+    the special ``'..'`` segment the function returns True, indicating that the
+    path attempts to traverse above its current directory.
+
+    Parameters
+    ----------
+    p:
+        The path string to evaluate.
+
+    Returns
+    -------
+    bool
+        True if ``p`` contains at least one ``'..'`` component, False otherwise.
+    """
     norm = p.replace("\\", "/")
     return ".." in PurePosixPath(norm).parts
 
