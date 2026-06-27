@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-06-26 | Session: fix/issue-156-risk-level-literal-floor
+> Last updated: 2026-06-26 | Session: fix/issue-155-validator-portability
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 528 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 541 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant until P3).
 
@@ -83,7 +83,7 @@ src/orchestrator/          (41 Python files)
 ├── validation_workspace.py
 └── workspace.py           # WorkspaceManager — disk layout
 
-tests/                     (20 test files, 530 tests)
+tests/                     (21 test files, 541 tests)
 ```
 
 ---
@@ -220,6 +220,7 @@ These must not change without a new ADR in `docs/adr/`:
 - ✅ Issue #151 — Validator timeout config + feedback (#151)
 - ✅ Issue #153 — Force provider override observability (#154)
 - ✅ Issue #156 — Literal validation + code-gen risk floor (#157)
+- ✅ Issue #155 — Validator portability: venv PATH + ignore_dirs forwarding (#158)
 - ✅ Formalize Experiment Schema (debt P2→P3)
 
 ---

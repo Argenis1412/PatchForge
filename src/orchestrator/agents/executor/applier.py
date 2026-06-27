@@ -84,8 +84,7 @@ def _apply_task(
         provider = by_name.get(force_provider)
         if provider is None:
             raise ValueError(
-                f"Unknown provider: {force_provider}. "
-                f"Available: {tuple(sorted(by_name))}"
+                f"Unknown provider: {force_provider}. Available: {tuple(sorted(by_name))}"
             )
         chain = [provider]
     else:

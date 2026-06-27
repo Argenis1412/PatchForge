@@ -1,5 +1,6 @@
 """Subprocess runners for ruff, pytest, and tsc with overlay workspace support."""
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -31,12 +32,23 @@ def _resolve_cmd(cmd_override: list[str] | None, default: list[str]) -> list[str
     return cmd
 
 
+def _build_env_with_venv(project_root: Path) -> dict[str, str] | None:
+    for subdir in ("bin", "Scripts"):
+        venv_bin = project_root / ".venv" / subdir
+        if venv_bin.is_dir():
+            env = os.environ.copy()
+            env["PATH"] = str(venv_bin) + os.pathsep + env.get("PATH", "")
+            return env
+    return None
+
+
 def _run(
     cmd: list[str],
     cwd: Path,
     tool_name: str,
     run_id: str,
     timeout: int = DEFAULT_TIMEOUT,
+    env: dict[str, str] | None = None,
 ) -> ToolResult:
     _get_logger().info("[%s] Running %s: %s (cwd=%s)", run_id, tool_name, " ".join(cmd), cwd)
     t0 = time.perf_counter()
@@ -48,6 +60,7 @@ def _run(
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=env,
         )
     except FileNotFoundError:
         msg = f"Command not found: {cmd[0]} — is it installed and in PATH?"
@@ -139,15 +152,21 @@ def run_ruff(
     cmd_override: list[str] | None = None,
     staging_dir: Path | None = None,
     timeout: int = DEFAULT_TIMEOUT,
+    ignore_dirs: list[str] | None = None,
 ) -> ToolResult:
     if staging_dir is not None and staging_dir.is_dir():
         staged_files = _collect_staged_files(staging_dir)
         if staged_files:
             cmd = _resolve_cmd(cmd_override, ["ruff", "check"])
             cmd.extend(str(sf) for sf in staged_files)
-            return _run(cmd, project_root, "ruff", run_id, timeout=timeout)
+            env = _build_env_with_venv(project_root) if not Path(cmd[0]).is_absolute() else None
+            return _run(cmd, project_root, "ruff", run_id, timeout=timeout, env=env)
     cmd = _resolve_cmd(cmd_override, ["ruff", "check", "."])
-    return _run(cmd, project_root, "ruff", run_id, timeout=timeout)
+    if ignore_dirs:
+        for d in ignore_dirs:
+            cmd.append(f"--extend-exclude={d}")
+    env = _build_env_with_venv(project_root) if not Path(cmd[0]).is_absolute() else None
+    return _run(cmd, project_root, "ruff", run_id, timeout=timeout, env=env)
 
 
 def run_pytest(
@@ -156,23 +175,36 @@ def run_pytest(
     cmd_override: list[str] | None = None,
     staging_dir: Path | None = None,
     timeout: int = DEFAULT_TIMEOUT,
+    ignore_dirs: list[str] | None = None,
 ) -> ToolResult:
+    effective_ignore = ignore_dirs if ignore_dirs is not None else IGNORE_DIRS
     if (
         staging_dir is not None
         and staging_dir.is_dir()
         and bool(_collect_staged_files(staging_dir))
     ):
         with tempfile.TemporaryDirectory(prefix="val_overlay_") as tmpdir:
-            overlay_root = _create_overlay(project_root, staging_dir, IGNORE_DIRS, Path(tmpdir))
+            overlay_root = _create_overlay(
+                project_root, staging_dir, effective_ignore, Path(tmpdir)
+            )
             cmd = _resolve_cmd(cmd_override, ["pytest", ".", "--tb=short", "-q"])
-            return _run(cmd, overlay_root, "pytest", run_id, timeout=timeout)
+            if ignore_dirs:
+                for d in ignore_dirs:
+                    cmd.append(f"--ignore={d}")
+            env = _build_env_with_venv(project_root) if not Path(cmd[0]).is_absolute() else None
+            return _run(cmd, overlay_root, "pytest", run_id, timeout=timeout, env=env)
     cmd = _resolve_cmd(cmd_override, ["pytest", ".", "--tb=short", "-q"])
+    if ignore_dirs:
+        for d in ignore_dirs:
+            cmd.append(f"--ignore={d}")
+    env = _build_env_with_venv(project_root) if not Path(cmd[0]).is_absolute() else None
     return _run(
         cmd,
         project_root,
         "pytest",
         run_id,
         timeout=timeout,
+        env=env,
     )
 
 
@@ -200,7 +232,8 @@ def run_tsc(
                     stdout="Skipped — frontend/ not found",
                 )
             cmd = _resolve_cmd(cmd_override, ["npx", "tsc", "--noEmit"])
-            return _run(cmd, frontend, "tsc", run_id, timeout=timeout)
+            env = _build_env_with_venv(project_root) if not Path(cmd[0]).is_absolute() else None
+            return _run(cmd, frontend, "tsc", run_id, timeout=timeout, env=env)
     frontend = _find_frontend_dir(project_root)
     if frontend is None:
         _get_logger().warning("[%s] frontend/ not found — skip tsc", run_id)
@@ -211,4 +244,5 @@ def run_tsc(
             stdout="Skipped — frontend/ not found",
         )
     cmd = list(cmd_override) if cmd_override is not None else ["npx", "tsc", "--noEmit"]
-    return _run(cmd, frontend, "tsc", run_id, timeout=timeout)
+    env = _build_env_with_venv(project_root) if not Path(cmd[0]).is_absolute() else None
+    return _run(cmd, frontend, "tsc", run_id, timeout=timeout, env=env)

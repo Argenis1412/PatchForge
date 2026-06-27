@@ -286,12 +286,8 @@ def test_progress_callback_receives_tool_names(tmp_path, monkeypatch):
     pytest_result = ToolResult(tool="pytest", passed=True, return_code=0)
 
     monkeypatch.setattr("orchestrator.agents.validator.run_ruff", lambda *a, **kw: pass_result)
-    monkeypatch.setattr(
-        "orchestrator.agents.validator.run_pytest", lambda *a, **kw: pytest_result
-    )
-    monkeypatch.setattr(
-        "orchestrator.agents.validator.run_tsc", lambda *a, **kw: pass_result
-    )
+    monkeypatch.setattr("orchestrator.agents.validator.run_pytest", lambda *a, **kw: pytest_result)
+    monkeypatch.setattr("orchestrator.agents.validator.run_tsc", lambda *a, **kw: pass_result)
 
     workspace = tmp_path.parent / f"{tmp_path.name}-ws"
     config = TargetConfig(
@@ -316,9 +312,7 @@ def test_progress_callback_on_timeout_skip(tmp_path, monkeypatch):
 
     timeout_result = ToolResult(tool="ruff", passed=False, return_code=-2, timed_out=True)
 
-    monkeypatch.setattr(
-        "orchestrator.agents.validator.run_ruff", lambda *a, **kw: timeout_result
-    )
+    monkeypatch.setattr("orchestrator.agents.validator.run_ruff", lambda *a, **kw: timeout_result)
     monkeypatch.setattr(
         "orchestrator.agents.validator.run_pytest",
         lambda *a, **kw: ToolResult(tool="pytest", passed=True, return_code=0),
@@ -348,8 +342,11 @@ def test_validation_summary_contains_timeout_info(tmp_path, monkeypatch):
     from orchestrator.schemas.config import TargetCapabilities
 
     timeout_tool = ToolResult(
-        tool="ruff", passed=False, return_code=-2, timed_out=True,
-        stderr="Timeout: ruff exceeded 5s limit. Increase with --validator-timeout"
+        tool="ruff",
+        passed=False,
+        return_code=-2,
+        timed_out=True,
+        stderr="Timeout: ruff exceeded 5s limit. Increase with --validator-timeout",
     )
     validator_output = __import__(
         "orchestrator.schemas.validator_output", fromlist=["ValidatorOutput"]
