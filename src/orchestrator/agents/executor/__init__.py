@@ -42,6 +42,7 @@ PROJECT_ROOT = Path(
 
 def run(
     architect_output: ArchitectOutput,
+    run_id: Optional[str] = None,
     config: Optional[Union[str, Path, TargetConfig]] = None,
     staging_dir: Optional[Path] = None,
     force_provider: Optional[str] = None,
@@ -51,7 +52,8 @@ def run(
     elif isinstance(config, (str, Path)):
         config = TargetConfig.load(target_path=Path(config))
 
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:6]
+    if run_id is None:
+        run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:6]
     logs_dir = config.workspace_path / "logs"
     project_root = config.target_path.resolve()
     if staging_dir is None:
