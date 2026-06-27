@@ -50,7 +50,14 @@ def run(
 
     if progress_callback:
         progress_callback("Running ruff...")
-    ruff_result = run_ruff(run_id, project_root, config.lint_command, staging_dir, timeout=timeout)
+    ruff_result = run_ruff(
+        run_id,
+        project_root,
+        config.lint_command,
+        staging_dir,
+        timeout=timeout,
+        ignore_dirs=config.ignore_dirs,
+    )
     results.append(ruff_result)
     if ruff_result.timed_out:
         _get_logger().warning("[%s] ruff timed out — skipping remaining tools", run_id)
@@ -61,7 +68,12 @@ def run(
             if progress_callback:
                 progress_callback("Running pytest...")
             pytest_result = run_pytest(
-                run_id, project_root, config.test_command, staging_dir, timeout=timeout
+                run_id,
+                project_root,
+                config.test_command,
+                staging_dir,
+                timeout=timeout,
+                ignore_dirs=config.ignore_dirs,
             )
             results.append(pytest_result)
             if pytest_result.timed_out:
