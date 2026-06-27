@@ -2,12 +2,21 @@ import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from orchestrator.schemas.architect_output import ArchitectOutput
+from orchestrator.schemas.architect_output import ArchitectOutput, Task
 from orchestrator.schemas.artifacts import RunMetadata
 from orchestrator.schemas.risk import RISK_GATE_JSON, RiskGateResult
 
 if TYPE_CHECKING:
     from orchestrator.workspace import WorkspaceManager
+
+# ── Source-code extension heuristic ──────────────────────────────────────────
+
+_SOURCE_EXTENSIONS: frozenset[str] = frozenset({".py", ".ts", ".tsx", ".js", ".jsx"})
+
+
+def _is_code_gen(task: Task) -> bool:
+    return any(Path(f).suffix in _SOURCE_EXTENSIONS for f in task.files_to_modify)
+
 
 # ── Infrastructure file heuristic ────────────────────────────────────────────
 
@@ -64,6 +73,11 @@ def check_plan_gate(
             if _is_dangerous(f):
                 task.risk_level = "high"
                 reasons.append(f"File {f} is infrastructure — escalated to high risk")
+
+    # Code-gen floor — low-risk code tasks escalate to medium
+    for task in architect_output.implementation_plan:
+        if task.risk_level == "low" and _is_code_gen(task):
+            task.risk_level = "medium"
 
     for task in architect_output.implementation_plan:
         if task.risk_level == "high":

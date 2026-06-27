@@ -13,9 +13,11 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from orchestrator.risk import (
     DANGEROUS_PATTERNS,
+    _is_code_gen,
     _is_dangerous,
     check_patch_gate,
     check_plan_gate,
@@ -173,11 +175,14 @@ class TestPlanGateDangerousFile:
         assert result.passed is False
         assert any(".github/workflows/deploy.yml" in r for r in result.reasons)
 
-    def test_safe_file_not_escalated(self):
+    def test_safe_file_not_escalated_to_high(self):
         meta = _run_meta(risk_budget="medium")
         arch = _arch_output([_task(files=["src/orchestrator/risk.py"], risk_level="low")])
         result = check_plan_gate(meta, arch)
+        # Code-gen floor escalates .py to medium, but not to high
         assert result.passed is True
+        task = arch.implementation_plan[0]
+        assert task.risk_level == "medium"
 
     def test_task_risk_level_mutated_to_high(self):
         meta = _run_meta(risk_budget="medium")
@@ -351,3 +356,149 @@ class TestBackwardCompat:
         diff = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-old\n+new\n"
         result = check_patch_gate(meta, diff)
         assert isinstance(result, RiskGateResult)
+
+
+# ── Task Literal validation (issue #156) ─────────────────────────────────────
+
+
+class TestTaskLiteralValidation:
+    def test_valid_risk_level_accepted(self):
+        for level in ("low", "medium", "high"):
+            t = Task(
+                task_id="T1",
+                title="t",
+                description="",
+                files_to_modify=["a.py"],
+                priority="low",
+                effort="low",
+                risk_level=level,
+                dependencies=[],
+            )
+            assert t.risk_level == level
+
+    def test_invalid_risk_level_rejected(self):
+        with pytest.raises(ValidationError):
+            Task(
+                task_id="T1",
+                title="t",
+                description="",
+                files_to_modify=["a.py"],
+                priority="low",
+                effort="low",
+                risk_level="invalid",
+                dependencies=[],
+            )
+
+    def test_uppercase_risk_level_rejected(self):
+        with pytest.raises(ValidationError):
+            Task(
+                task_id="T1",
+                title="t",
+                description="",
+                files_to_modify=["a.py"],
+                priority="low",
+                effort="low",
+                risk_level="MEDIUM",
+                dependencies=[],
+            )
+
+    def test_invalid_priority_rejected(self):
+        with pytest.raises(ValidationError):
+            Task(
+                task_id="T1",
+                title="t",
+                description="",
+                files_to_modify=["a.py"],
+                priority="critical",
+                effort="low",
+                risk_level="low",
+                dependencies=[],
+            )
+
+    def test_invalid_effort_rejected(self):
+        with pytest.raises(ValidationError):
+            Task(
+                task_id="T1",
+                title="t",
+                description="",
+                files_to_modify=["a.py"],
+                priority="low",
+                effort="trivial",
+                risk_level="low",
+                dependencies=[],
+            )
+
+
+# ── Code-gen risk floor (issue #156) ─────────────────────────────────────────
+
+
+class TestCodeGenRiskFloor:
+    def test_is_code_gen_with_py_file(self):
+        t = _task(files=["src/main.py"])
+        assert _is_code_gen(t) is True
+
+    def test_is_code_gen_with_ts_file(self):
+        t = _task(files=["app/index.ts"])
+        assert _is_code_gen(t) is True
+
+    def test_is_code_gen_with_tsx_file(self):
+        t = _task(files=["components/App.tsx"])
+        assert _is_code_gen(t) is True
+
+    def test_is_code_gen_with_js_file(self):
+        t = _task(files=["lib/utils.js"])
+        assert _is_code_gen(t) is True
+
+    def test_is_code_gen_with_jsx_file(self):
+        t = _task(files=["components/Button.jsx"])
+        assert _is_code_gen(t) is True
+
+    def test_not_code_gen_doc_only(self):
+        t = _task(files=["README.md"])
+        assert _is_code_gen(t) is False
+
+    def test_not_code_gen_changelog(self):
+        t = _task(files=["CHANGELOG.md", "docs/guide.rst"])
+        assert _is_code_gen(t) is False
+
+    def test_mixed_files_is_code_gen(self):
+        t = _task(files=["README.md", "src/main.py"])
+        assert _is_code_gen(t) is True
+
+    def test_low_risk_code_gen_escalated_to_medium(self):
+        meta = _run_meta(risk_budget="medium")
+        task = _task(files=["src/foo.py"], risk_level="low")
+        arch = _arch_output([task])
+        check_plan_gate(meta, arch)
+        assert task.risk_level == "medium"
+
+    def test_low_risk_doc_task_not_escalated(self):
+        meta = _run_meta(risk_budget="medium")
+        task = _task(files=["README.md"], risk_level="low")
+        arch = _arch_output([task])
+        result = check_plan_gate(meta, arch)
+        assert task.risk_level == "low"
+        assert result.passed is True
+
+    def test_high_risk_not_downgraded(self):
+        meta = _run_meta(risk_budget="medium")
+        task = _task(files=["src/foo.py"], risk_level="high")
+        arch = _arch_output([task])
+        check_plan_gate(meta, arch)
+        assert task.risk_level == "high"
+
+    def test_medium_risk_not_changed(self):
+        meta = _run_meta(risk_budget="medium")
+        task = _task(files=["src/foo.py"], risk_level="medium")
+        arch = _arch_output([task])
+        check_plan_gate(meta, arch)
+        assert task.risk_level == "medium"
+
+    def test_escalated_medium_blocked_by_low_budget(self):
+        meta = _run_meta(risk_budget="low")
+        task = _task(files=["src/foo.py"], risk_level="low")
+        arch = _arch_output([task])
+        result = check_plan_gate(meta, arch)
+        assert task.risk_level == "medium"
+        assert result.passed is False
+        assert any("medium-risk" in r for r in result.reasons)
