@@ -1175,8 +1175,19 @@ def test_preview_force_provider_does_not_log_override_when_staging_cleanup_fails
 
     assert preview_res.exit_code == 1
 
+    run_meta = ws_mgr.read_run_json(run_id)
+    assert run_meta.status == "failed"
+
     logs_dir = workspace_dir / "logs"
     events = _read_pipeline_events(logs_dir)
+
+    cleanup_failure_events = [
+        e
+        for e in events
+        if e.get("event") == "failure"
+        and e.get("data", {}).get("error_type") == "staging_cleanup_failed"
+    ]
+    assert len(cleanup_failure_events) == 1
 
     override_events = [e for e in events if e.get("event") == "force_provider_override"]
     assert override_events == []
@@ -1185,3 +1196,128 @@ def test_preview_force_provider_does_not_log_override_when_staging_cleanup_fails
         e for e in events if e.get("stage") == "executor" and e.get("event") == "stage_start"
     ]
     assert len(stage_start_events) == 1
+
+
+# ---------------------------------------------------------------------------
+# Issue #159 — staging cleanup without --force-provider
+# ---------------------------------------------------------------------------
+
+
+def test_preview_cleans_staging_without_force_provider(target_repo: Path, workspace_dir: Path):
+    (
+        mock_scout_out,
+        mock_arch_out,
+        mock_arch_meta,
+        mock_exec_out,
+        mock_exec_meta,
+        mock_val_out,
+        _mock_scan,
+    ) = _make_force_provider_mocks()
+
+    with (
+        patch("orchestrator.commands.scan.scan", side_effect=_mock_scan),
+        patch("orchestrator.agents.architect.run", return_value=(mock_arch_out, mock_arch_meta)),
+        patch("orchestrator.agents.executor.run", return_value=(mock_exec_out, mock_exec_meta)),
+        patch(
+            "orchestrator.validation_workspace.run_validation_in_copy", return_value=mock_val_out
+        ),
+    ):
+        scan_res = runner.invoke(app, ["scan", str(target_repo), "--workspace", str(workspace_dir)])
+        assert scan_res.exit_code == 0
+
+        runs_dir = workspace_dir / "runs"
+        run_id = list(runs_dir.iterdir())[0].name
+
+        ws_mgr = WorkspaceManager(workspace_dir)
+        ws_mgr.write_artifact(run_id, "findings.json", mock_scout_out.model_dump_json(indent=2))
+
+        plan_res = runner.invoke(app, ["plan", run_id, "--workspace", str(workspace_dir)])
+        assert plan_res.exit_code == 0
+
+        staging_dir = runs_dir / run_id / "staging"
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        (staging_dir / "leftover.py").write_text("old content")
+
+        preview_res = runner.invoke(
+            app,
+            ["preview", run_id, "--workspace", str(workspace_dir)],
+        )
+        assert preview_res.exit_code == 0, preview_res.stdout
+        assert "se limpiaron 1 archivos previos" in preview_res.stdout
+
+    logs_dir = workspace_dir / "logs"
+    events = _read_pipeline_events(logs_dir)
+    cleaned_events = [e for e in events if e.get("event") == "staging_cleaned"]
+    assert len(cleaned_events) == 1
+    assert cleaned_events[0]["data"]["files_removed"] == 1
+
+    override_events = [e for e in events if e.get("event") == "force_provider_override"]
+    assert override_events == []
+
+
+def test_preview_empty_patch_fails_fast(target_repo: Path, workspace_dir: Path):
+    (
+        mock_scout_out,
+        mock_arch_out,
+        mock_arch_meta,
+        _mock_exec_out,
+        _mock_exec_meta,
+        _mock_val_out,
+        _mock_scan,
+    ) = _make_force_provider_mocks()
+
+    empty_exec_out = ExecutorOutput(
+        applied=[
+            FileChange(
+                task_id="T1",
+                file="README.md",
+                status="noop",
+                diff=None,
+                original_content="content",
+                modified_content="content",
+                tokens_used=100,
+                cost_usd=0.001,
+            )
+        ]
+    )
+    empty_exec_meta = {"latency_ms": 100, "cost_usd": 0.001}
+
+    with (
+        patch("orchestrator.commands.scan.scan", side_effect=_mock_scan),
+        patch("orchestrator.agents.architect.run", return_value=(mock_arch_out, mock_arch_meta)),
+        patch(
+            "orchestrator.agents.executor.run",
+            return_value=(empty_exec_out, empty_exec_meta),
+        ),
+    ):
+        scan_res = runner.invoke(app, ["scan", str(target_repo), "--workspace", str(workspace_dir)])
+        assert scan_res.exit_code == 0
+
+        runs_dir = workspace_dir / "runs"
+        run_id = list(runs_dir.iterdir())[0].name
+
+        ws_mgr = WorkspaceManager(workspace_dir)
+        ws_mgr.write_artifact(run_id, "findings.json", mock_scout_out.model_dump_json(indent=2))
+
+        plan_res = runner.invoke(app, ["plan", run_id, "--workspace", str(workspace_dir)])
+        assert plan_res.exit_code == 0
+
+        # Pre-seed stale artifacts to verify they are removed on empty-patch exit.
+        run_dir = runs_dir / run_id
+        stale_patch = run_dir / "patch.diff"
+        stale_patch.write_text("stale content")
+
+        preview_res = runner.invoke(
+            app,
+            ["preview", run_id, "--workspace", str(workspace_dir)],
+        )
+
+    assert preview_res.exit_code == 1
+    assert "empty patch" in preview_res.stdout.lower()
+
+    run_meta = ws_mgr.read_run_json(run_id)
+    assert run_meta.status == "failed"
+
+    assert not stale_patch.exists()
+    validation_path = runs_dir / run_id / "validation.json"
+    assert not validation_path.exists()
