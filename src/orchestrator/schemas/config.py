@@ -73,7 +73,15 @@ class TargetConfig(BaseModel):
     schema_version: str = SCHEMA_VERSION
     target_path: Path
     workspace_path: Path
-    ignore_dirs: List[str] = ["node_modules", ".venv", "__pycache__", ".git", "workspace"]
+    ignore_dirs: List[str] = [
+        "node_modules",
+        ".venv",
+        "__pycache__",
+        ".git",
+        "workspace",
+        ".ruff_cache",
+        ".pytest_cache",
+    ]
     extensions: List[str] = [".py", ".ts", ".tsx", ".js"]
 
     # Custom commands overrides
@@ -113,7 +121,16 @@ class TargetConfig(BaseModel):
         # 1. Start with defaults & auto-detect capabilities
         detected_caps = detect_capabilities(
             target_path,
-            ignore_dirs or ["node_modules", ".venv", "__pycache__", ".git", "workspace"],
+            ignore_dirs
+            or [
+                "node_modules",
+                ".venv",
+                "__pycache__",
+                ".git",
+                "workspace",
+                ".ruff_cache",
+                ".pytest_cache",
+            ],
         )
 
         default_workspace = default_workspace_path(target_path)
