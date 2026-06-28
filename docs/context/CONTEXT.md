@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-06-27 | Session: feat/exp-006-safety-docstrings
+> Last updated: 2026-06-28 | Session: feat/docs-p3-status-update
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -9,15 +9,15 @@
 
 **What:** PatchForge — AI-powered, safety-first code modification tool. Generates, validates, and applies patches through a deterministic Plan → Preview → Validate → Apply pipeline.
 
-**Phase:** P2 — Dogfooding & Hardening (V1 complete, P0/P1/P2 entry complete)
+**Phase:** P3 — Async Workers & CI/CD Integration (P0/P1/P2 complete, all P3 blockers done)
 
-**Stack:** Python 3.10+ | Pydantic schemas | Typer CLI | ruff + pytest QA
+**Stack:** Python 3.12+ | Pydantic schemas | Typer CLI | ruff + pytest QA
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 548 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 550+ passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
-**Key constraint:** Single-threaded, synchronous pipeline (invariant until P3).
+**Key constraint:** Single-threaded, synchronous pipeline (invariant until Docker/CI-CD lands in P3 closure).
 
 ---
 
@@ -92,7 +92,7 @@ src/orchestrator/
 ├── validation_workspace.py
 └── workspace.py           # WorkspaceManager — disk layout
 
-tests/                     (21 test files, 548 tests)
+tests/                     (21 test files, 550+ tests)
 ```
 
 ---
@@ -235,6 +235,19 @@ These must not change without a new ADR in `docs/adr/`:
 - ✅ Issue #159 — Fix empty `patch.diff` on re-execution of `preview` (#160)
 - ✅ Exp 006 — `safety.py` docstrings (#161)
 - ✅ Formalize Experiment Schema (debt P2→P3)
+
+### P3 — Async Workers & CI/CD Integration
+- ✅ B6 — Risk Gate Audit Trail (#118)
+- ✅ B1 — WAL Atomic Apply (#121)
+- ✅ B2 — RunMetadata SSoT (#123)
+- ✅ B4 — CB Externalized (SQLite) (#126)
+- ✅ B7 — Workspace Isolation + Repo Lock (#128)
+- ✅ B8a — Work Queue Schema (#132)
+- ✅ B5 — Artifact Store (#134)
+- ✅ B3 — GitHub Client (#136)
+- ✅ B8b — Worker Loop (#138)
+- ✅ Post-Audit Fixes — Path traversal validation, atomic artifact writes, lock failure logging (#164/#166/#167)
+- ✅ Issue #162 — Replace Groq with OpenRouter (provider hardening)
 
 ---
 
