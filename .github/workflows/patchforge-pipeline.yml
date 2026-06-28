@@ -31,6 +31,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -48,14 +50,14 @@ jobs:
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
           python << 'PYEOF'
+          import json
           import os
           title = os.environ["ISSUE_TITLE"]
           number = os.environ["ISSUE_NUMBER"]
           body = os.environ["ISSUE_BODY"]
-          safe_title = title.replace('"', '\\"')
           with open("issue.md", "w") as f:
               f.write("---\n")
-              f.write(f'title: "{safe_title}"\n')
+              f.write(f"title: {json.dumps(title)}\n")
               f.write(f"number: {number}\n")
               f.write("---\n\n")
               f.write(body)
