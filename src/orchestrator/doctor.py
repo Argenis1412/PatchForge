@@ -360,7 +360,7 @@ def check_api_keys() -> list[CheckResult]:
     """Check which API keys are set in the environment; return warnings.
 
     Checks three environment variables: ANTHROPIC_API_KEY, GOOGLE_API_KEY,
-    and GROQ_API_KEY. Returns one WARN-level CheckResult per missing key.
+    and OPENROUTER_API_KEY. Returns one WARN-level CheckResult per missing key.
     These checks are not required for V1 support.
     """
     keys = [
