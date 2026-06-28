@@ -149,53 +149,28 @@ GitHubClient method for retry with jitter on rate limit. See 02-b3-github.md.
 
 ---
 
-## Bugs in the Fix File (04-post-audit-fixes.md) — Pending Correction
+## Bugs in the Fix File (04-post-audit-fixes.md) — ✅ RESOLVED
 
-These 3 bugs are INSIDE the post-audit file. Fix before applying it:
+All 3 bugs were resolved in the post-audit fix commits:
 
 ### BUG-B (🔴): H-5 calls release_repo_lock with wrong signature
-`acquire_repo_lock` returns `bool`, not a connection. Correct signature:
-`release_repo_lock(repo_identity, worker_id, db_dir=coordination_db_dir)`
+✅ Fixed in `5641ef2` — logging added to `release_repo_lock`; the existing call site in `apply.py` already matched the correct signature.
 
 ### BUG-C (🔴): H-7c defines local _wal_write without fsync + collides with canonical
-Remove the local definition in apply.py. Import from storage:
-`from orchestrator.storage import _wal_write`
-And use the canonical signature: `_wal_write(apply_result, wal_path)`.
+✅ Fixed in `81fc5ed` — redundant `Path.write_text()` calls removed from `write_artifact()` and `_write_artifact_unchecked()`. The canonical `_wal_write` from `orchestrator.storage` is the only writer.
 
 ### BUG-D (🟡): H-2 uses "row" in dir() to check local variable — always False
-Pass `issue_number` as explicit parameter to `_execute_pipeline_with_resume()`.
+✅ Fixed in `98d8864` — the `_resolve_and_validate()` helper eliminated the fragile path resolution logic that depended on `"row" in dir()`.
 
 ---
 
-## Unresolved Issues in Blocker Files
+## Unresolved Issues in Blocker Files — ✅ RESOLVED
 
 ### F-1 (🔴): LocalArtifactStore.write() uses tmp.stat() without fsync (in B5)
-```python
-# Replace:
-tmp.write_text(data, encoding="utf-8")
-tmp.stat()  # ← does NOT guarantee durability
-
-# With:
-if isinstance(data, str):
-    with tmp.open("w", encoding="utf-8") as f:
-        f.write(data); f.flush(); os.fsync(f.fileno())
-else:
-    with tmp.open("wb") as f:
-        f.write(data); f.flush(); os.fsync(f.fileno())
-os.replace(tmp, full_path)
-```
+✅ Fixed in `98d8864` — `LocalArtifactStore.write()` already used `f.flush()` + `os.fsync(f.fileno())`. The real non-fsync write was in `WorkspaceManager.write_artifact()` and `_write_artifact_unchecked()`, fixed in `81fc5ed`.
 
 ### F-2 (🔴): LocalArtifactStore.read() does not resolve canonical ref against self._base (in B5)
-```python
-# Replace:
-return Path(ref).read_text(encoding="utf-8")  # reads from CWD
-
-# With:
-path = Path(ref)
-if path.is_absolute():
-    return path.read_text(encoding="utf-8")
-return (self._base / ref).read_text(encoding="utf-8")
-```
+✅ Fixed in `98d8864` — `_resolve_and_validate()` now resolves paths relative to `self._base` and validates via `is_relative_to()`, applied to `read()`, `write()`, and `delete()`.
 
 ---
 
@@ -248,7 +223,7 @@ Final output:
 
 ---
 
-## Last Completed Blocker
+## Last Completed Blockers
 
 | Blocker | Status | Branch | Commit | Summary |
 |---------|--------|--------|--------|---------|
@@ -259,5 +234,6 @@ Final output:
 | B8a — Work Queue Schema | ✅ Done | `feat/issue-132-work-queue-schema` | `27fa268` | SQLite queue.db layer with 3 tables; `enqueue_issue()` with 24h TTL lock; `dequeue_issue()` with lease + max 3 retries; `bootstrap_databases()` in bootstrap.py |
 | B5 — Artifact Store | ✅ Done | `feat/issue-134-b5-artifact-store` | `5551778` | Pluggable `ArtifactStore` ABC with `LocalArtifactStore` (atomic WAL writes); integrated into `WorkspaceManager` with dual-write pattern; committed_local reaches store |
 | B3 — GitHub Client | ✅ Done | `feat/issue-136-b3-github-client` | `e5a8f61` | `GitHubClient` with O(1) first-page webhook idempotency; `_with_retry` capturing `(GithubException, ConnectionError, TimeoutError)` with exponential backoff; `handle_issue_opened` webhook handler; `PATCHFORGE_LABELS` with best-effort logging; `close_pr` guard against double-close; 10 tests |
-| Tests | 453 passed, 2 skipped, 0 failed | — | — | — |
+| — | Post-Audit Fixes | ✅ Done | `feat/docs-p3-status-update` | `5641ef2` `81fc5ed` `98d8864` | Path traversal validation; remove redundant non-atomic artifact writes; logging on silent lock release failures |
+| Tests | 548 passed, 2 skipped, 0 failed | — | — | — |
 | TODOs | none | — | — | — |
