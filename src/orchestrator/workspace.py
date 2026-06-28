@@ -136,8 +136,6 @@ class WorkspaceManager:
         """
         self.ensure_run_exists(run_id)
         safe_name = validate_filename(name)
-        local = self.run_dir(run_id) / safe_name
-        local.write_text(data, encoding="utf-8")
         ref = self.store.write(f"{run_id}/{safe_name}", data).ref
         return ref
 
@@ -148,8 +146,6 @@ class WorkspaceManager:
         inside scan (after create_run_directory but before the first run.json exists).
         """
         safe_name = validate_filename(name)
-        local = self.run_dir(run_id) / safe_name
-        local.write_text(data, encoding="utf-8")
         ref = self.store.write(f"{run_id}/{safe_name}", data).ref
         return ref
 
