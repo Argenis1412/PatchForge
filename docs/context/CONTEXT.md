@@ -248,6 +248,33 @@ These must not change without a new ADR in `docs/adr/`:
 - ✅ B8b — Worker Loop (#138)
 - ✅ Post-Audit Fixes — Path traversal validation, atomic artifact writes, lock failure logging (#164/#166/#167)
 - ✅ Issue #162 — Replace Groq with OpenRouter (provider hardening)
+- ✅ Issue #171 — GitHub Actions pipeline workflow (CI/CD integration)
+
+**P3 closure items remaining:**
+- Dockerfile — deferred until self-hosted runners or external deployment needed (follow-up issue)
+- Asymmetric risk gates — deferred to P4
+
+---
+
+## CI/CD Pipeline (P3)
+
+PatchForge can run as a GitHub Actions workflow triggered by issue labels.
+
+**Trigger:** Label an issue with `patchforge/process`. The workflow executes `scan → plan → preview → apply`, commits the result, pushes a branch, and opens a PR.
+
+**Required repository secrets:**
+- `ANTHROPIC_API_KEY` (required — architect agent has no fallback)
+- `GOOGLE_API_KEY` (recommended — Gemini fallback for low/medium risk)
+- `OPENROUTER_API_KEY` (recommended — OpenRouter fallback)
+
+**Workflow file:** `.github/workflows/patchforge-pipeline.yml`
+
+**Artifacts:** Each run uploads `pf-workspace/runs/<run_id>/` as workflow artifacts (30-day retention). Contains `run.json`, `findings.json`, `plan.json`, `patch.diff`, `validation.json`, `apply.json`.
+
+**Labels:**
+- `patchforge/process` — triggers pipeline execution
+- `patchforge/completed` — set on success (replaces `patchforge/process`)
+- `patchforge/failed` — set on failure (replaces `patchforge/process`); a comment with the failure link is posted
 
 ---
 
