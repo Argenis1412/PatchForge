@@ -121,6 +121,7 @@ def scan(
         "--risk-budget",
         help="Risk budget: 'low', 'medium', or 'high'",
     ),
+    json_output: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
 ) -> None:
     """Scan a target project using deterministic analysis (no AI)."""
     from orchestrator.commands.scan import execute as execute_scan
@@ -133,7 +134,7 @@ def scan(
         raise typer.Exit(1)
 
     config = _load_target_config(path=path, workspace=workspace, env_file=env_file)
-    execute_scan(config=config, risk_budget=risk_budget)
+    execute_scan(config=config, risk_budget=risk_budget, json_output=json_output)
 
 
 @app.command()
@@ -208,8 +209,15 @@ def apply(
     workspace: Optional[Path] = typer.Option(
         None, "--workspace", help="Path to the workspace directory"
     ),
+    issue_number: Optional[int] = typer.Option(
+        None, "--issue-number", help="GitHub issue number for branch naming"
+    ),
 ) -> None:
     """Apply the validated patch to the target repository."""
+    if issue_number is not None and issue_number < 1:
+        console.print("[bold red]Error: --issue-number must be a positive integer.[/bold red]")
+        raise typer.Exit(code=1)
+
     from orchestrator.commands.apply import execute as execute_apply
 
     execute_apply(
@@ -217,6 +225,7 @@ def apply(
         allow_dirty=allow_dirty,
         env_file=env_file,
         workspace=workspace,
+        issue_number=issue_number,
     )
 
 

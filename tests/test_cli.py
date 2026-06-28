@@ -223,3 +223,158 @@ def test_apply_rollback_block2_success(tmp_path, monkeypatch):
 
     assert result.exit_code == 1
     assert "FATAL" not in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# --issue-number tests
+# ---------------------------------------------------------------------------
+
+
+def test_apply_issue_number_passed(tmp_path, monkeypatch):
+    """--issue-number propagates to execute_apply."""
+    captured = {}
+
+    def _mock_execute(**kwargs):
+        captured.update(kwargs)
+
+    with patch("orchestrator.commands.apply.execute", _mock_execute):
+        result = runner.invoke(
+            app,
+            ["apply", "test-run", "--issue-number", "42", "--workspace", str(tmp_path)],
+        )
+
+    assert result.exit_code == 0
+    assert captured["issue_number"] == 42
+
+
+def test_apply_issue_number_zero_rejected():
+    """--issue-number 0 is rejected."""
+    result = runner.invoke(app, ["apply", "test-run", "--issue-number", "0"])
+    assert result.exit_code == 1
+    assert "positive integer" in _strip(result.stdout)
+
+
+def test_apply_issue_number_negative_rejected():
+    """--issue-number -1 is rejected."""
+    result = runner.invoke(app, ["apply", "test-run", "--issue-number", "-1"])
+    assert result.exit_code == 1
+    assert "positive integer" in _strip(result.stdout)
+
+
+# ---------------------------------------------------------------------------
+# --json on scan tests
+# ---------------------------------------------------------------------------
+
+
+def _mock_scan_findings(repo, *, v1_supported=True):
+    """Build a minimal ScanFindings for testing."""
+    from orchestrator.schemas.findings import (
+        PyProjectInfo,
+        ScanFindings,
+        TestSuiteInfo,
+        ToolInfo,
+    )
+
+    return ScanFindings(
+        repository_root=str(repo),
+        base_commit="abc123",
+        branch="main",
+        hotspots=[],
+        v1_supported=v1_supported,
+        support_reasons=["test"],
+        unsupported_reasons=[] if v1_supported else ["no Python files"],
+        pyproject=PyProjectInfo(exists=False, valid=False),
+        ruff=ToolInfo(available=False),
+        pytest=ToolInfo(available=False),
+        test_suite=TestSuiteInfo(detected=False),
+        total_python_files=0,
+        packages=[],
+        modules=[],
+    )
+
+
+def _init_git_repo(path):
+    """Create a git repo with an initial commit."""
+    subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git", "config", "user.name", "T"], cwd=path, check=True, capture_output=True, text=True
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "t@t"], cwd=path, check=True, capture_output=True, text=True
+    )
+    (path / "f.txt").write_text("hello\n")
+    subprocess.run(["git", "add", "."], cwd=path, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"], cwd=path, check=True, capture_output=True, text=True
+    )
+
+
+def _extract_json(output: str) -> dict:
+    """Extract the JSON object from mixed stdout+stderr output."""
+    start = output.index("{")
+    return json.loads(output[start:])
+
+
+def test_scan_json_output(tmp_path):
+    """scan --json emits parseable JSON with run_id."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+
+    findings = _mock_scan_findings(repo)
+
+    with (
+        patch("orchestrator.main.bootstrap_environment"),
+        patch("orchestrator.commands.scan.scan", return_value=findings),
+    ):
+        result = runner.invoke(
+            app,
+            ["scan", str(repo), "--json", "--workspace", str(tmp_path / "ws")],
+        )
+
+    data = _extract_json(result.output)
+    assert "run_id" in data
+    assert data["status"] == "scanned"
+
+
+def test_scan_json_v1_not_supported(tmp_path):
+    """scan --json with v1 not supported emits JSON with v1_supported=false."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+
+    findings = _mock_scan_findings(repo, v1_supported=False)
+
+    with (
+        patch("orchestrator.main.bootstrap_environment"),
+        patch("orchestrator.commands.scan.scan", return_value=findings),
+    ):
+        result = runner.invoke(
+            app,
+            ["scan", str(repo), "--json", "--workspace", str(tmp_path / "ws")],
+        )
+
+    assert result.exit_code == 1
+    data = _extract_json(result.output)
+    assert data["v1_supported"] is False
+
+
+def test_scan_no_json_keeps_rich(tmp_path):
+    """scan without --json still shows Rich Panel."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+
+    findings = _mock_scan_findings(repo)
+
+    with (
+        patch("orchestrator.main.bootstrap_environment"),
+        patch("orchestrator.commands.scan.scan", return_value=findings),
+    ):
+        result = runner.invoke(
+            app,
+            ["scan", str(repo), "--workspace", str(tmp_path / "ws")],
+        )
+
+    clean = _strip(result.output)
+    assert "Scanner completed successfully" in clean
