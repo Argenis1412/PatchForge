@@ -249,3 +249,55 @@ def test_stale_lock_ttl_cleanup(tmp_path: Path):
     assert w2_ok
 
     release_repo_lock(repo_id, "worker-2", db_dir=tmp_path)
+
+
+def test_release_repo_lock_connect_failure_logs_warning(tmp_path: Path, caplog):
+    """release_repo_lock emits a warning when the DB connection fails."""
+    import logging
+
+    from orchestrator.storage.lock import release_repo_lock
+
+    bad_dir = tmp_path / "nonexistent" / "subdir"
+    with caplog.at_level(logging.WARNING, logger="orchestrator.storage.lock"):
+        release_repo_lock("repo", "worker-1", db_dir=bad_dir)
+
+    assert any("release_repo_lock" in r.message for r in caplog.records)
+
+
+def test_release_repo_lock_execute_failure_logs_warning(tmp_path: Path, caplog, monkeypatch):
+    """release_repo_lock emits a warning when the DELETE fails."""
+    import logging
+
+    from orchestrator.storage import _sqlite_connect
+    from orchestrator.storage.lock import release_repo_lock
+
+    real_connect = _sqlite_connect
+
+    def patched_connect(path):
+        conn = real_connect(path)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS repo_lock ("
+            "repo TEXT PRIMARY KEY,"
+            "worker_id TEXT NOT NULL,"
+            "expires_at REAL NOT NULL)"
+        )
+        original_execute = conn.execute
+
+        def bad_execute(sql, *args, **kwargs):
+            if "DELETE" in sql:
+                import sqlite3 as _sqlite3
+
+                raise _sqlite3.OperationalError("injected failure")
+            return original_execute(sql, *args, **kwargs)
+
+        conn.execute = bad_execute
+        return conn
+
+    import orchestrator.storage.lock as lock_mod
+
+    monkeypatch.setattr(lock_mod, "_sqlite_connect", patched_connect)
+
+    with caplog.at_level(logging.WARNING, logger="orchestrator.storage.lock"):
+        release_repo_lock("repo", "worker-1", db_dir=tmp_path)
+
+    assert any("release_repo_lock" in r.message for r in caplog.records)
