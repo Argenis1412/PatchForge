@@ -62,6 +62,49 @@ def test_local_store_absolute_ref(tmp_path: Path):
     assert data == "legacy"
 
 
+def test_local_store_write_path_traversal(tmp_path: Path):
+    store = LocalArtifactStore(tmp_path)
+    with pytest.raises(ValueError, match="resolves outside store base"):
+        store.write("../../evil.txt", "payload")
+    escaped = tmp_path.parent.parent / "evil.txt"
+    assert not escaped.exists()
+
+
+def test_local_store_read_path_traversal(tmp_path: Path):
+    store = LocalArtifactStore(tmp_path)
+    with pytest.raises(ValueError, match="resolves outside store base"):
+        store.read("../../etc/passwd")
+
+
+def test_local_store_delete_path_traversal(tmp_path: Path):
+    store = LocalArtifactStore(tmp_path)
+    with pytest.raises(ValueError, match="resolves outside store base"):
+        store.delete("../../important.txt")
+
+
+def test_local_store_read_absolute_outside_base(tmp_path: Path):
+    outside = tmp_path.parent / "outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+    store = LocalArtifactStore(tmp_path)
+    try:
+        with pytest.raises(ValueError, match="resolves outside store base"):
+            store.read(str(outside))
+    finally:
+        outside.unlink(missing_ok=True)
+
+
+def test_local_store_delete_absolute_outside_base(tmp_path: Path):
+    outside = tmp_path.parent / "outside.txt"
+    outside.write_text("do not delete", encoding="utf-8")
+    store = LocalArtifactStore(tmp_path)
+    try:
+        with pytest.raises(ValueError, match="resolves outside store base"):
+            store.delete(str(outside))
+        assert outside.exists()
+    finally:
+        outside.unlink(missing_ok=True)
+
+
 def test_local_store_write_result(tmp_path: Path):
     store = LocalArtifactStore(tmp_path)
     result = store.write("test/meta.txt", "data")
