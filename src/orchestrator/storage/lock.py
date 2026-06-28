@@ -6,6 +6,7 @@ B4: CircuitBreakerStore ABC + SqliteCircuitBreakerStore (coordination.db).
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import time
@@ -14,6 +15,8 @@ from pathlib import Path
 from typing import Callable
 
 from orchestrator.storage import _sqlite_connect
+
+_logger = logging.getLogger(__name__)
 
 _REPO_LOCK_ENABLED = os.environ.get("REPO_LOCK_ENABLED", "1") == "1"
 _WORKER_ID: str = os.environ.get("WORKER_ID", "unknown")
@@ -164,6 +167,12 @@ def release_repo_lock(repo_identity: str, worker_id: str, db_dir: Path) -> None:
     try:
         conn = _sqlite_connect(db_dir / "coordination.db")
     except Exception:
+        _logger.warning(
+            "release_repo_lock: failed to connect for repo %r worker %r",
+            repo_identity,
+            worker_id,
+            exc_info=True,
+        )
         return
     try:
         conn.execute("BEGIN IMMEDIATE")
@@ -174,5 +183,11 @@ def release_repo_lock(repo_identity: str, worker_id: str, db_dir: Path) -> None:
         conn.commit()
     except Exception:
         conn.rollback()
+        _logger.warning(
+            "release_repo_lock: failed to delete lock for repo %r worker %r",
+            repo_identity,
+            worker_id,
+            exc_info=True,
+        )
     finally:
         conn.close()
