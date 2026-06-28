@@ -11,7 +11,7 @@ We establish four binding rules for all present and future agent code:
 
 ### 1. Imports MUST be side-effect free
 Importing any module under `agents/` or `schemas/` MUST NOT:
-- Initialize SDK clients (Anthropic, Gemini, Groq, etc.)
+- Initialize SDK clients (Anthropic, Gemini, OpenRouter, etc.)
 - Call `load_dotenv()` or any IO operation
 - Read files or environment variables
 - Create directories (`mkdir`)
@@ -23,7 +23,7 @@ All modules must be importable in a clean Python process without network, filesy
 The `clients/` package provides singleton-lazy factory functions:
 - `clients.gemini_client.get_gemini_client()`
 - `clients.anthropic_client.get_anthropic_client()`
-- `clients.groq_client.get_groq_client()`
+- `clients.openrouter_client.get_openrouter_client()`
 
 Each factory:
 - Caches the client in a module-level `_client` variable

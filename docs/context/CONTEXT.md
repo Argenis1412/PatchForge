@@ -47,7 +47,7 @@ src/orchestrator/
 │   ├── executor/          # Multi-LLM routing — applies changes
 │   │   ├── __init__.py    # run() entrypoint + DAG scheduler
 │   │   ├── applier.py     # Task prompt builder + file staging
-│   │   ├── providers.py   # LLM provider chain (Gemini, Groq, Claude)
+│   │   ├── providers.py   # LLM provider chain (Gemini, OpenRouter, Claude)
 │   │   └── diffing.py     # Unified diff generation
 │   ├── scout/             # Gemini — repository analysis (legacy)
 │   └── validator/         # ruff + pytest subprocess runners
@@ -58,7 +58,7 @@ src/orchestrator/
 ├── clients/
 │   ├── anthropic_client.py
 │   ├── gemini_client.py
-│   ├── groq_client.py
+│   ├── openrouter_client.py
 │   └── bootstrap.py
 ├── commands/
 │   ├── scan.py            # V1 deterministic scan (non-AI)

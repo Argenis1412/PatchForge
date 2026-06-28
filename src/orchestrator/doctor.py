@@ -366,7 +366,7 @@ def check_api_keys() -> list[CheckResult]:
     keys = [
         ("anthropic_api_key", "ANTHROPIC_API_KEY", "Claude"),
         ("google_api_key", "GOOGLE_API_KEY", "Gemini"),
-        ("groq_api_key", "GROQ_API_KEY", "Groq"),
+        ("openrouter_api_key", "OPENROUTER_API_KEY", "OpenRouter"),
     ]
     results = []
     for name, env_var, provider in keys:

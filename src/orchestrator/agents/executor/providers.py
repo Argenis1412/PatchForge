@@ -1,4 +1,4 @@
-"""Multi-provider LLM chain (Gemini, Groq, Claude) with circuit breakers and fallback."""
+"""Multi-provider LLM chain (Gemini, OpenRouter, Claude) with circuit breakers and fallback."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 from orchestrator.circuit_breaker import CircuitBreakerOpenError, circuit_breaker_for
 from orchestrator.clients.anthropic_client import get_anthropic_client
 from orchestrator.clients.gemini_client import get_gemini_client
-from orchestrator.clients.groq_client import get_groq_client
+from orchestrator.clients.openrouter_client import get_openrouter_client
 from orchestrator.storage.lock import SqliteCircuitBreakerStore
 
 from .logging import _get_logger
@@ -20,7 +20,7 @@ from .logging import _get_logger
 # ---------------------------------------------------------------------------
 
 MODEL_GEMINI = "gemini-2.5-flash"
-MODEL_GROQ = "llama-3.3-70b-versatile"
+MODEL_OPENROUTER = "deepseek/deepseek-v4-flash:free"
 MODEL_CLAUDE = "claude-sonnet-4-6"
 
 COST_PER_1M_INPUT_CLAUDE = 3.00
@@ -53,7 +53,7 @@ _coord_db_dir = Path(_db_dir_env) if _db_dir_env is not None else Path.home() / 
 _coord_store = SqliteCircuitBreakerStore(_coord_db_dir)
 
 _cb_gemini = circuit_breaker_for("gemini", store=_coord_store)
-_cb_groq = circuit_breaker_for("groq", store=_coord_store)
+_cb_openrouter = circuit_breaker_for("openrouter", store=_coord_store)
 _cb_claude = circuit_breaker_for("claude", store=_coord_store)
 
 # ---------------------------------------------------------------------------
@@ -122,20 +122,25 @@ def _call_gemini(prompt: str, run_id: str) -> tuple[str, int, int]:
     return _cb_gemini.call(lambda: _do_gemini_call(prompt, run_id))
 
 
-def _do_groq_call(prompt: str, run_id: str) -> tuple[str, int, int]:
+def _do_openrouter_call(prompt: str, run_id: str) -> tuple[str, int, int]:
     log = _get_logger()
-    client = get_groq_client()
+    client = get_openrouter_client()
     headers = {
-        "Authorization": f"Bearer {os.getenv('GROQ_API_KEY')}",
+        "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
         "Content-Type": "application/json",
     }
     payload = {
-        "model": MODEL_GROQ,
+        "model": MODEL_OPENROUTER,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.0,
     }
 
-    log.debug("[%s] Groq request | model=%s | prompt_chars=%d", run_id, MODEL_GROQ, len(prompt))
+    log.debug(
+        "[%s] OpenRouter request | model=%s | prompt_chars=%d",
+        run_id,
+        MODEL_OPENROUTER,
+        len(prompt),
+    )
 
     t0 = time.perf_counter()
     response = client.post(
@@ -155,7 +160,7 @@ def _do_groq_call(prompt: str, run_id: str) -> tuple[str, int, int]:
     output_tokens = usage.get("completion_tokens", 0)
 
     log.info(
-        "[%s] Groq OK | latency=%.2fs | in=%d | out=%d",
+        "[%s] OpenRouter OK | latency=%.2fs | in=%d | out=%d",
         run_id,
         elapsed,
         input_tokens,
@@ -165,8 +170,8 @@ def _do_groq_call(prompt: str, run_id: str) -> tuple[str, int, int]:
     return content, input_tokens, output_tokens
 
 
-def _call_groq(prompt: str, run_id: str) -> tuple[str, int, int]:
-    return _cb_groq.call(lambda: _do_groq_call(prompt, run_id))
+def _call_openrouter(prompt: str, run_id: str) -> tuple[str, int, int]:
+    return _cb_openrouter.call(lambda: _do_openrouter_call(prompt, run_id))
 
 
 def _do_claude_call(prompt: str, run_id: str) -> tuple[str, int, int]:
@@ -207,8 +212,8 @@ def _call_claude(prompt: str, run_id: str) -> tuple[str, int, int]:
 # Provider fallback chain (populated after all _call_* defs)
 # ---------------------------------------------------------------------------
 
-_PROVIDER_CHAIN["low"] = [_call_gemini, _call_groq, _call_claude]
-_PROVIDER_CHAIN["medium"] = [_call_groq, _call_gemini, _call_claude]
+_PROVIDER_CHAIN["low"] = [_call_gemini, _call_openrouter, _call_claude]
+_PROVIDER_CHAIN["medium"] = [_call_openrouter, _call_gemini, _call_claude]
 _PROVIDER_CHAIN["high"] = [_call_claude]
 
 

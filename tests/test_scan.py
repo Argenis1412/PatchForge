@@ -386,7 +386,7 @@ def test_typescript_no_effect_on_v1(valid_repo: Path):
 
 def test_deterministic_scanner_no_api_keys(valid_repo: Path):
     """scan must work even when all AI API key env vars are absent."""
-    env_keys = ["GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY"]
+    env_keys = ["GOOGLE_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"]
     cleaned_env = {k: v for k, v in os.environ.items() if k not in env_keys}
 
     with (

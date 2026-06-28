@@ -23,7 +23,7 @@ from orchestrator.schemas.executor_output import ExecutorOutput, FileChange, Tas
 
 from . import applier as _applier
 from .logging import _get_logger
-from .providers import KNOWN_PROVIDER_NAMES, MODEL_CLAUDE, MODEL_GEMINI, MODEL_GROQ
+from .providers import KNOWN_PROVIDER_NAMES, MODEL_CLAUDE, MODEL_GEMINI, MODEL_OPENROUTER
 from .rollback import rollback_to_commit as rollback_to_commit
 from .scheduler import _build_dag, _topological_order
 
@@ -70,7 +70,7 @@ def run(
             )
         _get_logger().info("[%s] force_provider override active: %s", run_id, force_provider)
 
-    model_string = f"GM:{MODEL_GEMINI}|GQ:{MODEL_GROQ}|CL:{MODEL_CLAUDE}"
+    model_string = f"GM:{MODEL_GEMINI}|OR:{MODEL_OPENROUTER}|CL:{MODEL_CLAUDE}"
     result = ExecutorOutput(model=model_string, run_id=run_id)
 
     total_tokens_input = 0

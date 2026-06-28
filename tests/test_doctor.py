@@ -290,28 +290,28 @@ class TestCheckApiKeys:
     def test_all_missing(self, monkeypatch):
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-        monkeypatch.delenv("GROQ_API_KEY", raising=False)
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
         results = check_api_keys()
         assert len(results) == 3
         for r in results:
             assert r.status == CheckStatus.WARN
             assert r.required is False
         names = {r.name for r in results}
-        assert names == {"anthropic_api_key", "google_api_key", "groq_api_key"}
+        assert names == {"anthropic_api_key", "google_api_key", "openrouter_api_key"}
         assert all("not configured" in r.message for r in results)
         assert all("Set" in r.fix_hint for r in results)
 
     def test_all_present(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-xxx")
         monkeypatch.setenv("GOOGLE_API_KEY", "AIza-xxx")
-        monkeypatch.setenv("GROQ_API_KEY", "gsk-xxx")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "gsk-xxx")
         results = check_api_keys()
         assert len(results) == 0
 
     def test_partial_presence(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-xxx")
         monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-        monkeypatch.setenv("GROQ_API_KEY", "gsk-xxx")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "gsk-xxx")
         results = check_api_keys()
         assert len(results) == 1
         assert results[0].name == "google_api_key"
@@ -334,7 +334,7 @@ class TestCheckApiKeys:
 
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-        monkeypatch.delenv("GROQ_API_KEY", raising=False)
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
 
         def fake_check(cmd):
             return (True, "ok")
@@ -345,7 +345,7 @@ class TestCheckApiKeys:
             result = check(repo)
 
         assert result.v1_supported is True
-        api_names = {"anthropic_api_key", "google_api_key", "groq_api_key"}
+        api_names = {"anthropic_api_key", "google_api_key", "openrouter_api_key"}
         api_warns = [c for c in result.checks if c.name in api_names]
         assert len(api_warns) == 3
         for w in api_warns:

@@ -551,7 +551,7 @@ def worker_loop(
     conn_coord = _sqlite_connect(coord_db)
 
     cb_store = SqliteCircuitBreakerStore(coord_db.parent)
-    for provider in ("gemini", "claude", "groq"):
+    for provider in ("gemini", "claude", "openrouter"):
         circuit_breaker_for(provider, store=cb_store)
 
     completed_iters = 0

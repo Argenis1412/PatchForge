@@ -53,13 +53,13 @@ def _run(tmp_path, arch_out, staging_dir=None):
 
 
 # ---------------------------------------------------------------------------
-# Test 1 — Low risk: Gemini CB open → Groq succeeds (1 hop)
+# Test 1 — Low risk: Gemini CB open → OpenRouter succeeds (1 hop)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
-def test_low_fallback_to_groq(monkeypatch, tmp_path):
-    """Gemini CB open → Groq succeeds."""
+def test_low_fallback_to_openrouter(monkeypatch, tmp_path):
+    """Gemini CB open → OpenRouter succeeds."""
     (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
     arch_out = _make_arch_out([_make_task("low")])
 
@@ -71,30 +71,30 @@ def test_low_fallback_to_groq(monkeypatch, tmp_path):
     )
     monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini)
 
-    cb_groq = MagicMock()
-    cb_groq.call.return_value = ("x = 2\n", 10, 20)
-    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_groq", cb_groq)
+    cb_openrouter = MagicMock()
+    cb_openrouter.call.return_value = ("x = 2\n", 10, 20)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_openrouter", cb_openrouter)
 
     output, _ = _run(tmp_path, arch_out)
 
     cb_gemini.call.assert_called_once()
-    cb_groq.call.assert_called_once()
+    cb_openrouter.call.assert_called_once()
     assert len(output.applied) == 1, f"errors={output.errors}"
     assert output.applied[0].task_id == "t-cb-01"
 
 
 # ---------------------------------------------------------------------------
-# Test 2 — Low risk: Gemini CB open → Groq CB open → Claude succeeds (2 hops)
+# Test 2 — Low risk: Gemini CB open → OpenRouter CB open → Claude succeeds (2 hops)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
-def test_low_fallback_groq_then_claude(monkeypatch, tmp_path):
-    """Gemini CB open → Groq CB open → Claude succeeds."""
+def test_low_fallback_openrouter_then_claude(monkeypatch, tmp_path):
+    """Gemini CB open → OpenRouter CB open → Claude succeeds."""
     (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
     arch_out = _make_arch_out([_make_task("low")])
 
-    for provider in ("gemini", "groq"):
+    for provider in ("gemini", "openrouter"):
         cb = MagicMock()
         cb.call.side_effect = CircuitBreakerOpenError(
             provider=provider,
@@ -114,7 +114,7 @@ def test_low_fallback_groq_then_claude(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Test 3 — Low risk: Gemini ClientError(403) → Groq HTTPStatusError(403) →
+# Test 3 — Low risk: Gemini ClientError(403) → OpenRouter HTTPStatusError(403) →
 #           Claude succeeds (non-CB exceptions trigger fallback)
 # ---------------------------------------------------------------------------
 
@@ -136,14 +136,14 @@ def test_low_recoverable_sdk_exception(monkeypatch, tmp_path):
     cb_gemini.call.side_effect = gemini_errors.APIError(403, response_json={})
     monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini)
 
-    # Mock _call_groq to raise httpx HTTPStatusError (403)
-    cb_groq = MagicMock()
-    cb_groq.call.side_effect = httpx.HTTPStatusError(
+    # Mock _call_openrouter to raise httpx HTTPStatusError (403)
+    cb_openrouter = MagicMock()
+    cb_openrouter.call.side_effect = httpx.HTTPStatusError(
         "403 Forbidden",
         request=MagicMock(),
         response=MagicMock(status_code=403),
     )
-    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_groq", cb_groq)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_openrouter", cb_openrouter)
 
     # Mock _call_claude succeeds
     cb_claude = MagicMock()
@@ -157,23 +157,23 @@ def test_low_recoverable_sdk_exception(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Test 4 — Medium risk: Groq CB open → Gemini succeeds (1 hop)
+# Test 4 — Medium risk: OpenRouter CB open → Gemini succeeds (1 hop)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
 def test_medium_fallback_to_gemini(monkeypatch, tmp_path):
-    """Groq CB open → Gemini succeeds."""
+    """OpenRouter CB open → Gemini succeeds."""
     (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
     arch_out = _make_arch_out([_make_task("medium")])
 
-    cb_groq = MagicMock()
-    cb_groq.call.side_effect = CircuitBreakerOpenError(
-        provider="groq",
+    cb_openrouter = MagicMock()
+    cb_openrouter.call.side_effect = CircuitBreakerOpenError(
+        provider="openrouter",
         state=CircuitBreakerState.OPEN,
         retry_after=999_999.0,
     )
-    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_groq", cb_groq)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_openrouter", cb_openrouter)
 
     cb_gemini = MagicMock()
     cb_gemini.call.return_value = ("x = 2\n", 10, 20)
@@ -181,25 +181,25 @@ def test_medium_fallback_to_gemini(monkeypatch, tmp_path):
 
     output, _ = _run(tmp_path, arch_out)
 
-    cb_groq.call.assert_called_once()
+    cb_openrouter.call.assert_called_once()
     cb_gemini.call.assert_called_once()
     assert len(output.applied) == 1, f"errors={output.errors}"
 
 
 # ---------------------------------------------------------------------------
-# Test 5 — Medium risk: Groq returns empty → Gemini succeeds
+# Test 5 — Medium risk: OpenRouter returns empty → Gemini succeeds
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
 def test_medium_empty_then_gemini(monkeypatch, tmp_path):
-    """Groq returns empty string → chain continues to Gemini."""
+    """OpenRouter returns empty string → chain continues to Gemini."""
     (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
     arch_out = _make_arch_out([_make_task("medium")])
 
-    cb_groq = MagicMock()
-    cb_groq.call.return_value = ("", 0, 0)
-    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_groq", cb_groq)
+    cb_openrouter = MagicMock()
+    cb_openrouter.call.return_value = ("", 0, 0)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_openrouter", cb_openrouter)
 
     cb_gemini = MagicMock()
     cb_gemini.call.return_value = ("x = 2\n", 10, 20)
@@ -247,7 +247,7 @@ def test_all_providers_exhausted(monkeypatch, tmp_path):
     (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
     arch_out = _make_arch_out([_make_task("low")])
 
-    for provider in ("gemini", "groq", "claude"):
+    for provider in ("gemini", "openrouter", "claude"):
         cb = MagicMock()
         cb.call.side_effect = CircuitBreakerOpenError(
             provider=provider,
