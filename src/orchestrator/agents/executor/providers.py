@@ -20,7 +20,7 @@ from .logging import _get_logger
 # ---------------------------------------------------------------------------
 
 MODEL_GEMINI = "gemini-2.5-flash"
-MODEL_OPENROUTER = "deepseek/deepseek-v4-flash:free"
+MODEL_OPENROUTER = "openrouter/free"
 MODEL_CLAUDE = "claude-sonnet-4-6"
 
 COST_PER_1M_INPUT_CLAUDE = 3.00
