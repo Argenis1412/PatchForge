@@ -8,8 +8,18 @@ class LocalArtifactStore(ArtifactStore):
     def __init__(self, base_path: Path):
         self._base = Path(base_path).resolve()
 
+    def _resolve_and_validate(self, path: str) -> Path:
+        candidate = Path(path)
+        if candidate.is_absolute():
+            resolved = candidate.resolve()
+        else:
+            resolved = (self._base / path).resolve()
+        if not resolved.is_relative_to(self._base):
+            raise ValueError(f"Path {path!r} resolves outside store base {self._base}")
+        return resolved
+
     def write(self, path: str, data: str) -> WriteResult:
-        full_path = self._base / path
+        full_path = self._resolve_and_validate(path)
         full_path.parent.mkdir(parents=True, exist_ok=True)
 
         tmp = full_path.with_suffix(full_path.suffix + ".tmp")
@@ -31,13 +41,9 @@ class LocalArtifactStore(ArtifactStore):
         )
 
     def read(self, ref: str) -> str:
-        path = Path(ref)
-        if path.is_absolute():
-            return path.read_text(encoding="utf-8")
-        return (self._base / ref).read_text(encoding="utf-8")
+        path = self._resolve_and_validate(ref)
+        return path.read_text(encoding="utf-8")
 
     def delete(self, ref: str) -> None:
-        path = Path(ref)
-        if not path.is_absolute():
-            path = self._base / ref
+        path = self._resolve_and_validate(ref)
         path.unlink(missing_ok=True)
