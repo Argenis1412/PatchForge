@@ -163,7 +163,7 @@ def preview(
     force_provider: Optional[str] = typer.Option(
         None,
         "--force-provider",
-        help="Force a specific LLM ('gemini'|'groq'|'claude') for all tasks, "
+        help="Force a specific LLM ('gemini'|'openrouter'|'claude') for all tasks, "
         "ignoring risk_level routing. Does not affect high-risk gating.",
     ),
     validator_timeout: Optional[int] = typer.Option(

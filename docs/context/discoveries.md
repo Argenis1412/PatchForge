@@ -118,11 +118,11 @@
 
 ### [2026-06-15] Phase 4 — Provider clients lack consistent timeout
 
-- **File:** `src/orchestrator/clients/gemini_client.py:11`, `anthropic_client.py:11`, `groq_client.py:16`
+- **File:** `src/orchestrator/clients/gemini_client.py:11`, `anthropic_client.py:11`, `openrouter_client.py:16`
 - **Debt:** All three provider clients have inconsistent or missing timeouts:
   - Gemini: `genai.Client()` has no timeout — requests can hang indefinitely.
   - Anthropic: uses SDK default (10 min) instead of `TIMEOUT_SECONDS` (60s).
-  - Groq: hardcodes 30s instead of `TIMEOUT_SECONDS` (60s).
+  - OpenRouter: hardcodes 30s instead of `TIMEOUT_SECONDS` (60s).
   The `TIMEOUT_SECONDS` constant exists in `providers.py` but no client consumes it.
 - **Discovered by:** CodeRabbit AI review during Phase 4
 - **Why deferred:** Clients live in `clients/*.py`, outside the executor extraction scope. Fixing requires deciding between per-request timeout (less invasive) or refactoring `get_*_client()` to accept a timeout parameter.
@@ -134,10 +134,10 @@
 - **Discovered by:** Phase 4 execution (8 tests failed due to ineffective monkeypatch)
 - **Resolution:** Phase 4.5 — `docs/import-convention.md` documents the lazy import pattern inside function bodies, with GOOD/BAD examples and a monkeypatch rationale.
 
-### [2026-06-15] Phase 4 — Dead `mock_groq` fixture in conftest.py
+### [2026-06-15] Phase 4 — Dead `mock_openrouter` fixture in conftest.py
 
 - **File:** `tests/conftest.py:30-37`
-- **Debt:** The `mock_groq` fixture patches `orchestrator.agents.executor._call_groq` but no test in the suite uses it. Dead code. Furthermore, even if a test did use it, it would not work — `_PROVIDER_CHAIN` stores references to `_call_groq` at import time, so the monkeypatch would have no effect.
+- **Debt:** The `mock_openrouter` fixture patches `orchestrator.agents.executor.providers._call_openrouter` but no test in the suite uses it. Dead code. Furthermore, even if a test did use it, it would not work — `_PROVIDER_CHAIN` stores references to `_call_openrouter` at import time, so the monkeypatch would have no effect.
 - **Discovered by:** Phase 4 dependency audit
 - **Why deferred:** Outside refactor scope. Clean up in a housekeeping issue.
 

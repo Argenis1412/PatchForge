@@ -260,9 +260,11 @@ def test_apply_task_error_contains_provider_names(tmp_path, monkeypatch):
     cb_mock.call.side_effect = lambda fn: (_ for _ in ()).throw(Exception("gemini boom"))
     monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_mock)
 
-    cb_groq_mock = MagicMock()
-    cb_groq_mock.call.side_effect = lambda fn: (_ for _ in ()).throw(Exception("groq boom"))
-    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_groq", cb_groq_mock)
+    cb_openrouter_mock = MagicMock()
+    cb_openrouter_mock.call.side_effect = lambda fn: (_ for _ in ()).throw(
+        Exception("openrouter boom")
+    )
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_openrouter", cb_openrouter_mock)
 
     cb_claude_mock = MagicMock()
     cb_claude_mock.call.side_effect = lambda fn: (_ for _ in ()).throw(Exception("claude boom"))
@@ -271,7 +273,7 @@ def test_apply_task_error_contains_provider_names(tmp_path, monkeypatch):
     change = _apply_task(task, "run_003", tmp_path, staging)
     assert change.status == "error"
     assert "_call_gemini" in change.error
-    assert "_call_groq" in change.error
+    assert "_call_openrouter" in change.error
     assert "_call_claude" in change.error
 
 

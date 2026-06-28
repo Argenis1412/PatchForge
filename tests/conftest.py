@@ -27,9 +27,9 @@ def mock_claude(monkeypatch):
 
 
 @pytest.fixture
-def mock_groq(monkeypatch):
+def mock_openrouter(monkeypatch):
     mock = MagicMock()
-    for path in ["orchestrator.agents.executor.providers._call_groq"]:
+    for path in ["orchestrator.agents.executor.providers._call_openrouter"]:
         try:
             monkeypatch.setattr(path, mock)
         except (AttributeError, ModuleNotFoundError):
