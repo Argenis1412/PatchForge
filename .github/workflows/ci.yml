@@ -36,9 +36,13 @@ jobs:
         ruff format --check src/ tests/
       continue-on-error: true
 
-    - name: Run tests
+    - name: Run tests (parallel)
       run: |
-        pytest -v --tb=short -n auto --dist loadfile
+        pytest -v --tb=short -n auto --dist loadfile -m "not serial"
+
+    - name: Run tests (serial)
+      run: |
+        pytest -v --tb=short -m serial || [ $? -eq 5 ]
 
     - name: Upload coverage reports
       uses: codecov/codecov-action@v3
