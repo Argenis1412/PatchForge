@@ -4,6 +4,7 @@ __all__ = [
     "app",
 ]
 
+import json
 import sys
 from pathlib import Path
 from typing import Optional
@@ -127,10 +128,11 @@ def scan(
     from orchestrator.commands.scan import execute as execute_scan
 
     if risk_budget is not None and risk_budget not in ("low", "medium", "high"):
-        console.print(
-            "[bold red]Error: Invalid value for --risk-budget. "
-            "Valid options are 'low', 'medium', or 'high'.[/bold red]"
-        )
+        message = "Invalid value for --risk-budget. Valid options are 'low', 'medium', or 'high'."
+        if json_output:
+            print(json.dumps({"error": message}))
+        else:
+            console.print(f"[bold red]Error: {message}[/bold red]")
         raise typer.Exit(1)
 
     config = _load_target_config(path=path, workspace=workspace, env_file=env_file)

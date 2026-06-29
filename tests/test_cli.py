@@ -310,9 +310,8 @@ def _init_git_repo(path):
 
 
 def _extract_json(output: str) -> dict:
-    """Extract the JSON object from mixed stdout+stderr output."""
-    start = output.index("{")
-    return json.loads(output[start:])
+    """Parse JSON from stdout (clean, no stderr mixing)."""
+    return json.loads(output)
 
 
 def test_scan_json_output(tmp_path):
@@ -332,7 +331,7 @@ def test_scan_json_output(tmp_path):
             ["scan", str(repo), "--json", "--workspace", str(tmp_path / "ws")],
         )
 
-    data = _extract_json(result.output)
+    data = _extract_json(result.stdout)
     assert "run_id" in data
     assert data["status"] == "scanned"
 
@@ -355,7 +354,7 @@ def test_scan_json_v1_not_supported(tmp_path):
         )
 
     assert result.exit_code == 1
-    data = _extract_json(result.output)
+    data = _extract_json(result.stdout)
     assert data["v1_supported"] is False
 
 
@@ -376,5 +375,5 @@ def test_scan_no_json_keeps_rich(tmp_path):
             ["scan", str(repo), "--workspace", str(tmp_path / "ws")],
         )
 
-    clean = _strip(result.output)
+    clean = _strip(result.stdout)
     assert "Scanner completed successfully" in clean
