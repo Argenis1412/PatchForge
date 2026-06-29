@@ -6,6 +6,8 @@ import os
 
 import httpx
 
+from orchestrator.clients import TIMEOUT_SECONDS
+
 _client = None
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -17,6 +19,6 @@ def get_openrouter_client() -> httpx.Client:
         _client = httpx.Client(
             base_url=OPENROUTER_BASE_URL,
             headers={"Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}"},
-            timeout=30.0,
+            timeout=TIMEOUT_SECONDS,
         )
     return _client

@@ -82,12 +82,12 @@
 - **Discovered by:** Implementation
 - **Why deferred:** Outside issue scope; auto-fix via `ruff format` is needed for pre-commit compliance.
 
-### [2026-06-11] Issue #77 — RunMetadata.schema_version default duplicado
+### ✅ [2026-06-11] Issue #77 — RunMetadata.schema_version default duplicado (RESOLVED)
 
 - **File:** `src/orchestrator/schemas/artifacts.py:47`
 - **Debt:** `schema_version: int = 1` hardcodes the value instead of using `schema_version: int = CURRENT_SCHEMA_VERSION`. If someone increments the constant but omits the field default, `RunMetadata` would produce artifacts with the wrong version.
 - **Discovered by:** AI review bot (CodeRabbit)
-- **Why deferred:** Modifying `RunMetadata` field defaults is outside the scope of ADR-01/3. Fixable in any future issue that touches `artifacts.py`.
+- **Resolution:** Field default now uses `CURRENT_SCHEMA_VERSION` directly.
 
 ### [2026-06-13] Issue #87 — Circuit Breaker (T-07 Part B)
 
@@ -116,7 +116,7 @@
 - **Discovered by:** Post-implementation audit
 - **Why deferred:** Fix requires adding optional `run_id`/`logs_dir` parameters to `executor_agent.run()` — a contract change outside the hardening sprint scope.
 
-### [2026-06-15] Phase 4 — Provider clients lack consistent timeout
+### ✅ [2026-06-15] Phase 4 — Provider clients lack consistent timeout (RESOLVED)
 
 - **File:** `src/orchestrator/clients/gemini_client.py:11`, `anthropic_client.py:11`, `openrouter_client.py:16`
 - **Debt:** All three provider clients have inconsistent or missing timeouts:
@@ -125,7 +125,9 @@
   - OpenRouter: hardcodes 30s instead of `TIMEOUT_SECONDS` (60s).
   The `TIMEOUT_SECONDS` constant exists in `providers.py` but no client consumes it.
 - **Discovered by:** CodeRabbit AI review during Phase 4
-- **Why deferred:** Clients live in `clients/*.py`, outside the executor extraction scope. Fixing requires deciding between per-request timeout (less invasive) or refactoring `get_*_client()` to accept a timeout parameter.
+- **Resolution:** `TIMEOUT_SECONDS` moved to `clients/__init__.py`. All three clients
+  now consume it: Gemini via `HttpOptions(timeout=60000)` (ms), Anthropic via
+  constructor `timeout=60`, OpenRouter via `httpx.Client(timeout=60)`.
 
 ### ✅ [2026-06-15] Phase 4 — `__init__.py` import binding prevents submodule monkeypatch (RESOLVED)
 
@@ -134,12 +136,12 @@
 - **Discovered by:** Phase 4 execution (8 tests failed due to ineffective monkeypatch)
 - **Resolution:** Phase 4.5 — `docs/import-convention.md` documents the lazy import pattern inside function bodies, with GOOD/BAD examples and a monkeypatch rationale.
 
-### [2026-06-15] Phase 4 — Dead `mock_openrouter` fixture in conftest.py
+### ✅ [2026-06-15] Phase 4 — Dead `mock_openrouter` fixture in conftest.py (RESOLVED)
 
 - **File:** `tests/conftest.py:30-37`
 - **Debt:** The `mock_openrouter` fixture patches `orchestrator.agents.executor.providers._call_openrouter` but no test in the suite uses it. Dead code. Furthermore, even if a test did use it, it would not work — `_PROVIDER_CHAIN` stores references to `_call_openrouter` at import time, so the monkeypatch would have no effect.
 - **Discovered by:** Phase 4 dependency audit
-- **Why deferred:** Outside refactor scope. Clean up in a housekeeping issue.
+- **Resolution:** Removed `mock_openrouter` and `mock_subprocess` dead fixtures from conftest.py.
 
 ### [2026-06-15] Phase 4 — `PROJECT_ROOT` depends on `__file__` — brittle on relocation
 
