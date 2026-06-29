@@ -1,18 +1,35 @@
-"""Claude (Anthropic) provider wrapper with retry, cost tracking, and observability."""
+"""Architect provider with fallback chain: Claude → Gemini → OpenRouter."""
 
 import time
 from pathlib import Path
 from typing import Optional
 
-from orchestrator.clients.anthropic_client import get_anthropic_client
+from orchestrator.agents.executor.providers import (
+    ProviderChainResult,
+    _call_chain,
+    _call_claude,
+    _call_gemini,
+    _call_openrouter,
+)
 from orchestrator.exceptions import ProviderError
 from orchestrator.observability.events import FailureType, log_failure
 from orchestrator.observability.logger import log_call
 
 MODEL = "claude-sonnet-4-6"
 
-COST_PER_1M_INPUT = 3.00
-COST_PER_1M_OUTPUT = 15.00
+_MODEL_MAP = {
+    "claude": "claude-sonnet-4-6",
+    "gemini": "gemini-2.5-flash",
+    "openrouter": "openrouter/free",
+}
+
+_COST_RATES = {
+    "claude": (3.00, 15.00),
+    "gemini": (0.075, 0.30),
+    "openrouter": (0.0, 0.0),
+}
+
+_ARCHITECT_CHAIN = [_call_claude, _call_gemini, _call_openrouter]
 
 
 def call_claude(
@@ -24,108 +41,52 @@ def call_claude(
     run_id: str | None = None,
     stage: str | None = None,
     span_id: str | None = None,
-) -> tuple[str, dict, float]:
-    """Wrapper with retry and logging for Claude."""
-    client = get_anthropic_client()
-    from anthropic import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
+) -> tuple[str, dict, float, str]:
+    """Call the architect provider chain. Returns (raw, tokens, cost, model_used)."""
+    call_started = time.monotonic()
 
-    for attempt in range(2):
-        call_started = time.monotonic()
-        try:
-            response = client.messages.create(
-                model=MODEL, max_tokens=4096, messages=[{"role": "user", "content": prompt}]
-            )
-            latency_ms = int((time.monotonic() - call_started) * 1000)
-            raw = response.content[0].text.strip()
+    chain_result: ProviderChainResult = _call_chain(_ARCHITECT_CHAIN, prompt, run_id or "")
 
-            tokens = {
-                "input": response.usage.input_tokens,
-                "output": response.usage.output_tokens,
-            }
-            cost = (
-                tokens["input"] / 1_000_000 * COST_PER_1M_INPUT
-                + tokens["output"] / 1_000_000 * COST_PER_1M_OUTPUT
-            )
+    if chain_result.success is None:
+        latency_ms = int((time.monotonic() - call_started) * 1000)
+        failures = "; ".join(f"{n}→{e}" for n, e in chain_result.failures)
+        log_failure(
+            trace_id=trace_id or "",
+            run_id=run_id or "",
+            stage=stage,
+            error_type=FailureType.LLM_ERROR,
+            message=f"Architect provider chain exhausted: {failures}",
+            source="agent",
+            duration_ms=latency_ms,
+            logs_dir=logs_dir,
+        )
+        raise ProviderError(
+            "provider_chain", f"[{orchestratorel}] All providers failed: {failures}"
+        )
 
-            log_call(
-                agent=orchestratorel,
-                prompt=prompt[:500],
-                response=raw[:500],
-                tokens=tokens,
-                cost_usd=cost,
-                logs_dir=logs_dir,
-                trace_id=trace_id,
-                run_id=run_id,
-                stage=stage,
-                span_id=span_id,
-                model=MODEL,
-                latency_ms=latency_ms,
-            )
+    raw, input_tokens, output_tokens, _ = chain_result.success
+    provider_name = chain_result.provider_name or "claude"
+    model_used = _MODEL_MAP.get(provider_name, MODEL)
 
-            return raw, tokens, cost
+    cost_in, cost_out = _COST_RATES.get(provider_name, (0.0, 0.0))
+    cost = (input_tokens / 1_000_000) * cost_in + (output_tokens / 1_000_000) * cost_out
 
-        except RateLimitError as e:
-            latency_ms = int((time.monotonic() - call_started) * 1000)
-            if attempt == 0:
-                # attempt 0: retry without logging — not a terminal failure
-                print(f"[{orchestratorel}] Rate limit. Waiting 60s...")
-                time.sleep(60)
-                continue
+    tokens = {"input": input_tokens, "output": output_tokens}
+    latency_ms = int((time.monotonic() - call_started) * 1000)
 
-            log_call(
-                agent=orchestratorel,
-                prompt=prompt[:500],
-                response="",
-                tokens={"input": 0, "output": 0},
-                cost_usd=0.0,
-                logs_dir=logs_dir,
-                trace_id=trace_id,
-                run_id=run_id,
-                stage=stage,
-                span_id=span_id,
-                model=MODEL,
-                latency_ms=latency_ms,
-                error=str(e),
-            )
-            log_failure(
-                trace_id=trace_id or "",
-                run_id=run_id or "",
-                stage=stage,
-                error_type=FailureType.LLM_ERROR,
-                message=f"Claude call {orchestratorel} failed: {e}",
-                source="agent",
-                duration_ms=latency_ms,
-                logs_dir=logs_dir,
-            )
-            raise ProviderError("anthropic", f"[{orchestratorel}] Failed: {e}")
+    log_call(
+        agent=orchestratorel,
+        prompt=prompt[:500],
+        response=raw[:500],
+        tokens=tokens,
+        cost_usd=cost,
+        logs_dir=logs_dir,
+        trace_id=trace_id,
+        run_id=run_id,
+        stage=stage,
+        span_id=span_id,
+        model=model_used,
+        latency_ms=latency_ms,
+    )
 
-        except (APIConnectionError, APITimeoutError, APIStatusError) as e:
-            latency_ms = int((time.monotonic() - call_started) * 1000)
-            log_call(
-                agent=orchestratorel,
-                prompt=prompt[:500],
-                response="",
-                tokens={"input": 0, "output": 0},
-                cost_usd=0.0,
-                logs_dir=logs_dir,
-                trace_id=trace_id,
-                run_id=run_id,
-                stage=stage,
-                span_id=span_id,
-                model=MODEL,
-                latency_ms=latency_ms,
-                error=str(e),
-            )
-            log_failure(
-                trace_id=trace_id or "",
-                run_id=run_id or "",
-                stage=stage,
-                error_type=FailureType.LLM_ERROR,
-                message=f"Claude call {orchestratorel} failed: {e}",
-                source="agent",
-                duration_ms=latency_ms,
-                logs_dir=logs_dir,
-            )
-            raise ProviderError("anthropic", f"[{orchestratorel}] Failed: {e}")
-
-    raise ProviderError("anthropic", f"[{orchestratorel}] Failed after retry.")
+    return raw, tokens, cost, model_used

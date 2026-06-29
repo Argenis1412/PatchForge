@@ -241,6 +241,7 @@ KNOWN_PROVIDER_NAMES: tuple[str, ...] = tuple(sorted(_provider_by_name().keys())
 class ProviderChainResult:
     success: tuple[str, int, int, float] | None = None
     failures: list[tuple[str, str]] = field(default_factory=list)
+    provider_name: str | None = None
 
 
 def _recoverable_exceptions() -> tuple:
@@ -275,6 +276,7 @@ def _call_chain(chain: list, prompt: str, run_id: str) -> ProviderChainResult:
             return ProviderChainResult(
                 success=(raw, input_tokens, output_tokens, cost),
                 failures=failures,
+                provider_name=provider.__name__.removeprefix("_call_"),
             )
         except _recoverable_exceptions() as exc:
             failures.append((provider.__name__, str(exc)))

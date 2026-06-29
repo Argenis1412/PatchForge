@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from typing import Union
 
-from orchestrator.agents.scout.provider import MODEL, call_gemini
+from orchestrator.agents.scout.provider import call_gemini
 from orchestrator.observability.events import FailureType, log_failure
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.scout_output import ScoutOutput
@@ -110,7 +110,7 @@ def run(
     tree = read_file_tree(root, config.ignore_dirs, config.extensions)
     print(f"[Scout] {len(tree.splitlines())} files found. Asking Gemini to select...")
 
-    raw1, tokens1, cost1 = call_gemini(
+    raw1, tokens1, cost1, model1 = call_gemini(
         PASS1_PROMPT.format(file_tree=tree),
         orchestratorel="scout_pass1",
         logs_dir=logs_dir,
@@ -119,7 +119,7 @@ def run(
         stage="scout",
         span_id="scout_pass1",
     )
-    print(f"[Scout] Pass 1 done | tokens: {tokens1} | cost: ${cost1:.5f}")
+    print(f"[Scout] Pass 1 done | model={model1} | tokens: {tokens1} | cost: ${cost1:.5f}")
 
     try:
         selected_raw = json.loads(raw1)
@@ -168,7 +168,7 @@ def run(
     contents = read_selected_files(root, selected)
     print("[Scout] Reading selected files. Running analysis...")
 
-    raw2, tokens2, cost2 = call_gemini(
+    raw2, tokens2, cost2, model2 = call_gemini(
         PASS2_PROMPT.format(file_contents=contents),
         orchestratorel="scout_pass2",
         logs_dir=logs_dir,
@@ -179,7 +179,7 @@ def run(
     )
 
     total_cost = cost1 + cost2
-    print(f"[Scout] Pass 2 done | tokens: {tokens2} | cost: ${cost2:.5f}")
+    print(f"[Scout] Pass 2 done | model={model2} | tokens: {tokens2} | cost: ${cost2:.5f}")
     print(f"[Scout] Total cost: ${total_cost:.5f}")
 
     try:
@@ -218,7 +218,7 @@ def run(
         "tokens_input": tokens1["input"] + tokens2["input"],
         "tokens_output": tokens1["output"] + tokens2["output"],
         "cost_usd": total_cost,
-        "model_used": MODEL,
+        "model_used": model2,
     }
 
     return output, meta

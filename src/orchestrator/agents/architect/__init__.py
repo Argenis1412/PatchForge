@@ -37,7 +37,7 @@ def run(
     scout_data = scout_output.model_dump_json()
     print(f"[Architect] Asking {MODEL} to structure the implementation plan...")
 
-    raw_response, tokens, cost = call_claude(
+    raw_response, tokens, cost, model_used = call_claude(
         ARCHITECT_PROMPT.format(scout_data=scout_data),
         orchestratorel="architect",
         logs_dir=logs_dir,
@@ -47,7 +47,7 @@ def run(
         span_id="architect",
     )
 
-    print(f"[Architect] Done | tokens: {tokens} | cost: ${cost:.5f}")
+    print(f"[Architect] Done | model={model_used} | tokens: {tokens} | cost: ${cost:.5f}")
 
     # Validate JSON via canonical parser
     try:
@@ -82,7 +82,7 @@ def run(
         "tokens_input": tokens["input"],
         "tokens_output": tokens["output"],
         "cost_usd": cost,
-        "model_used": MODEL,
+        "model_used": model_used,
     }
 
     return output, meta
@@ -119,7 +119,7 @@ def run_from_issue(
     )
     print(f"[Architect] Asking {MODEL} to structure the implementation plan...")
 
-    raw_response, tokens, cost = call_claude(
+    raw_response, tokens, cost, model_used = call_claude(
         issue_data,
         orchestratorel="architect",
         logs_dir=logs_dir,
@@ -129,7 +129,7 @@ def run_from_issue(
         span_id="architect-issue",
     )
 
-    print(f"[Architect] Done | tokens: {tokens} | cost: ${cost:.5f}")
+    print(f"[Architect] Done | model={model_used} | tokens: {tokens} | cost: ${cost:.5f}")
 
     # Validate JSON via canonical parser
     try:
@@ -164,7 +164,7 @@ def run_from_issue(
         "tokens_input": tokens["input"],
         "tokens_output": tokens["output"],
         "cost_usd": cost,
-        "model_used": MODEL,
+        "model_used": model_used,
     }
 
     return output, meta

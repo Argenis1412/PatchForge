@@ -294,8 +294,15 @@ def test_validator_uses_raw_stderr_when_cb_open(monkeypatch):
         stdout="",
     )
 
-    result = _summarize_errors([failed_tool], run_id="test-run-id")
+    # Also mock _call_chain to fail so we reach raw stderr fallback
+    monkeypatch.setattr(
+        "orchestrator.agents.executor.providers._call_chain",
+        MagicMock(side_effect=Exception("OpenRouter unavailable")),
+    )
+
+    summary, model_used = _summarize_errors([failed_tool], run_id="test-run-id")
 
     cb_mock.call.assert_called_once()
-    assert "ruff" in result
-    assert "E501" in result
+    assert "ruff" in summary
+    assert "E501" in summary
+    assert model_used == ""
