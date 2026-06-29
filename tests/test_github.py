@@ -80,7 +80,7 @@ class TestCreatePR:
         result = client.create_pr(title="Test", body="body", head="branch")
         assert result.number == 1
         assert mock_sleep.call_count == 2
-        mock_sleep.assert_any_call(0)
+        assert [c.args[0] for c in mock_sleep.call_args_list] == [0, 0]
 
     @patch("orchestrator.clients.github.random.uniform", return_value=0)
     @patch("orchestrator.clients.github.time.sleep")
@@ -92,7 +92,7 @@ class TestCreatePR:
         with pytest.raises(RuntimeError, match="Max retries"):
             client.create_pr(title="Test", body="body", head="branch")
         assert mock_sleep.call_count == 3
-        mock_sleep.assert_any_call(0)
+        assert [c.args[0] for c in mock_sleep.call_args_list] == [0, 0, 0]
 
     @patch("orchestrator.clients.github.random.uniform", return_value=0)
     @patch("orchestrator.clients.github.time.sleep")
@@ -102,7 +102,7 @@ class TestCreatePR:
         result = client.create_pr(title="Test", body="body", head="branch")
         assert result.number == 1
         assert mock_sleep.call_count == 1
-        mock_sleep.assert_any_call(1)
+        assert [c.args[0] for c in mock_sleep.call_args_list] == [1]
 
 
 class TestExistingPrForWebhook:
