@@ -118,3 +118,52 @@ def test_summarizer_all_fail_returns_raw(monkeypatch):
     summary, model = _summarize_errors(failed, "test-run")
     assert model == ""
     assert "[ruff]" in summary
+
+
+@pytest.mark.unit
+def test_summarizer_generic_exception_openrouter_fallback(monkeypatch):
+    """A non-CB exception from Gemini still falls through to OpenRouter."""
+    from orchestrator.agents.executor.providers import ProviderChainResult
+    from orchestrator.agents.validator.summarizer import _summarize_errors
+
+    monkeypatch.setenv("GOOGLE_API_KEY", "fake")
+
+    mock_cb = MagicMock()
+    mock_cb.call.side_effect = RuntimeError("gemini transport error")
+    monkeypatch.setattr("orchestrator.agents.validator._cb_validator", mock_cb)
+
+    chain_result = ProviderChainResult(
+        success=("- openrouter summary", 10, 5, 0.0),
+        provider_name="openrouter",
+    )
+    monkeypatch.setattr(
+        "orchestrator.agents.executor.providers._call_chain",
+        lambda chain, prompt, run_id: chain_result,
+    )
+
+    failed = [ToolResult(tool="ruff", passed=False, return_code=1, stderr="error")]
+    summary, model = _summarize_errors(failed, "test-run")
+    assert model == "openrouter/free"
+    assert "openrouter summary" in summary
+
+
+@pytest.mark.unit
+def test_summarizer_generic_exception_all_fail_returns_raw(monkeypatch):
+    """Non-CB Gemini failure + OpenRouter failure degrades to raw stderr."""
+    from orchestrator.agents.validator.summarizer import _summarize_errors
+
+    monkeypatch.setenv("GOOGLE_API_KEY", "fake")
+
+    mock_cb = MagicMock()
+    mock_cb.call.side_effect = RuntimeError("gemini transport error")
+    monkeypatch.setattr("orchestrator.agents.validator._cb_validator", mock_cb)
+
+    monkeypatch.setattr(
+        "orchestrator.agents.executor.providers._call_chain",
+        MagicMock(side_effect=Exception("OpenRouter down")),
+    )
+
+    failed = [ToolResult(tool="ruff", passed=False, return_code=1, stderr="some error")]
+    summary, model = _summarize_errors(failed, "test-run")
+    assert model == ""
+    assert "[ruff]" in summary

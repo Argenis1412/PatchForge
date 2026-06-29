@@ -204,3 +204,64 @@ class TestArchitectFallback:
         mock_claude.side_effect = ProviderError("provider_chain", "All providers failed")
         with pytest.raises(ProviderError):
             run(_make_scout())
+
+
+# ---------------------------------------------------------------------------
+# Provider chain unit tests — exercise architect/provider.py:call_claude directly
+# ---------------------------------------------------------------------------
+
+
+class TestArchitectProviderChain:
+    @pytest.mark.unit
+    def test_gemini_fallback_uses_gemini_cost_rates(self, monkeypatch):
+        from orchestrator.agents.architect import provider as arch_provider
+        from orchestrator.agents.executor.providers import ProviderChainResult
+
+        chain_result = ProviderChainResult(
+            success=(_CLEAN_JSON, 1_000_000, 1_000_000, 0.0),
+            provider_name="gemini",
+        )
+        monkeypatch.setattr(arch_provider, "_call_chain", lambda *a, **kw: chain_result)
+        monkeypatch.setattr(arch_provider, "log_call", lambda *a, **kw: None)
+
+        raw, tokens, cost, model_used = arch_provider.call_claude("prompt", "architect")
+
+        assert raw == _CLEAN_JSON
+        assert model_used == "gemini-2.5-flash"
+        # Gemini rates: 0.075 in + 0.30 out per 1M tokens
+        assert cost == pytest.approx(0.075 + 0.30)
+        assert tokens == {"input": 1_000_000, "output": 1_000_000}
+
+    @pytest.mark.unit
+    def test_claude_default_cost_rates(self, monkeypatch):
+        from orchestrator.agents.architect import provider as arch_provider
+        from orchestrator.agents.executor.providers import ProviderChainResult
+
+        chain_result = ProviderChainResult(
+            success=(_CLEAN_JSON, 1_000_000, 1_000_000, 0.0),
+            provider_name="claude",
+        )
+        monkeypatch.setattr(arch_provider, "_call_chain", lambda *a, **kw: chain_result)
+        monkeypatch.setattr(arch_provider, "log_call", lambda *a, **kw: None)
+
+        _, _, cost, model_used = arch_provider.call_claude("prompt", "architect")
+
+        assert model_used == "claude-sonnet-4-6"
+        # Claude rates: 3.00 in + 15.00 out per 1M tokens
+        assert cost == pytest.approx(3.00 + 15.00)
+
+    @pytest.mark.unit
+    def test_chain_exhausted_raises_provider_error(self, monkeypatch):
+        from orchestrator.agents.architect import provider as arch_provider
+        from orchestrator.agents.executor.providers import ProviderChainResult
+        from orchestrator.exceptions import ProviderError
+
+        chain_result = ProviderChainResult(
+            success=None,
+            failures=[("_call_claude", "down"), ("_call_gemini", "down")],
+        )
+        monkeypatch.setattr(arch_provider, "_call_chain", lambda *a, **kw: chain_result)
+        monkeypatch.setattr(arch_provider, "log_failure", lambda *a, **kw: None)
+
+        with pytest.raises(ProviderError):
+            arch_provider.call_claude("prompt", "architect")
