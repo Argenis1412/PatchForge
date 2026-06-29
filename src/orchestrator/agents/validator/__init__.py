@@ -19,7 +19,7 @@ from orchestrator.schemas.validator_output import ToolResult, ValidatorOutput
 from .logging import _get_logger
 from .logging import _logger as _logger
 from .runners import DEFAULT_TIMEOUT, run_pytest, run_ruff, run_tsc
-from .summarizer import MODEL_GEMINI, _summarize_errors
+from .summarizer import _summarize_errors
 
 _cb_validator = circuit_breaker_for("gemini")
 
@@ -111,12 +111,11 @@ def run(
     tokens_output = 0
 
     if failed:
-        model_used = MODEL_GEMINI
-
         for tool_result in failed:
-            tool_result.error_summary = _summarize_errors([tool_result], run_id)
+            summary, _ = _summarize_errors([tool_result], run_id)
+            tool_result.error_summary = summary
 
-        llm_summary = _summarize_errors(failed, run_id)
+        llm_summary, model_used = _summarize_errors(failed, run_id)
 
     output = ValidatorOutput(
         overall_passed=overall_passed,
