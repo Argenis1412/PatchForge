@@ -11,6 +11,7 @@ __all__ = [
     "execute",
 ]
 
+import json
 from datetime import datetime, timezone
 
 import typer
@@ -28,7 +29,11 @@ from orchestrator.workspace import WorkspaceManager
 console = Console()
 
 
-def execute(config: TargetConfig, risk_budget: str | None = None) -> None:
+def execute(
+    config: TargetConfig,
+    risk_budget: str | None = None,
+    json_output: bool = False,
+) -> None:
     """Run the deterministic V1 scanner for *config* and persist findings.
 
     Writes ``findings.json`` and ``run.json`` unconditionally before any
@@ -40,20 +45,28 @@ def execute(config: TargetConfig, risk_budget: str | None = None) -> None:
             validated as external to the target repo).
         risk_budget: Optional risk budget ('low', 'medium', 'high').
             Defaults to 'low'.
+        json_output: When ``True``, emit machine-readable JSON to stdout
+            and redirect progress/spinner output to stderr.
     """
-    console.print(
-        Panel(
-            f"[bold magenta]PatchForge Scanner (V1)[/bold magenta]\n"
-            f"Target: [yellow]{config.target_path}[/yellow]",
-            expand=False,
+    ui = Console(stderr=True) if json_output else console
+
+    if not json_output:
+        console.print(
+            Panel(
+                f"[bold magenta]PatchForge Scanner (V1)[/bold magenta]\n"
+                f"Target: [yellow]{config.target_path}[/yellow]",
+                expand=False,
+            )
         )
-    )
 
     # 1. Validate Git repository state
     try:
         repository_state(config.target_path)
     except ValueError as exc:
-        console.print(f"[bold red]Error: {exc}[/bold red]")
+        if json_output:
+            print(json.dumps({"error": str(exc)}))
+        else:
+            console.print(f"[bold red]Error: {exc}[/bold red]")
         raise typer.Exit(code=1)
 
     # 2. Setup workspace directories
@@ -92,7 +105,7 @@ def execute(config: TargetConfig, risk_budget: str | None = None) -> None:
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
-        console=console,
+        console=ui,
     ) as progress:
         task = progress.add_task(f"[green]Scanning {config.target_path}...", total=None)
         try:
@@ -125,7 +138,10 @@ def execute(config: TargetConfig, risk_budget: str | None = None) -> None:
                     v1_supported=False,
                 ),
             )
-            console.print(f"[bold red]Scanner failed: {exc}[/bold red]")
+            if json_output:
+                print(json.dumps({"error": f"Scanner failed: {exc}"}))
+            else:
+                console.print(f"[bold red]Scanner failed: {exc}[/bold red]")
             raise typer.Exit(code=1)
 
     # 6. Build run metadata from scanner results
@@ -193,21 +209,25 @@ def execute(config: TargetConfig, risk_budget: str | None = None) -> None:
     )
 
     # 9. Print summary
-    console.print(
-        Panel(
-            f"[bold green]✔ Scanner completed successfully![/bold green]\n"
-            f"Run ID: [yellow]{run_id}[/yellow]\n"
-            f"Discovered [bold cyan]{len(findings.hotspots)}[/bold cyan] hotspots.\n"
-            f"V1 supported: "
-            f"{'yes' if findings.v1_supported else 'no'}\n"
-            f"Artifacts stored in [cyan]{run_dir}[/cyan]",
-            expand=False,
+    if json_output:
+        print(run_metadata.model_dump_json(indent=2))
+    else:
+        console.print(
+            Panel(
+                f"[bold green]✔ Scanner completed successfully![/bold green]\n"
+                f"Run ID: [yellow]{run_id}[/yellow]\n"
+                f"Discovered [bold cyan]{len(findings.hotspots)}[/bold cyan] hotspots.\n"
+                f"V1 supported: "
+                f"{'yes' if findings.v1_supported else 'no'}\n"
+                f"Artifacts stored in [cyan]{run_dir}[/cyan]",
+                expand=False,
+            )
         )
-    )
 
     # 10. Exit with code 1 AFTER writing findings for unsupported repos — AC4 / AC8
     if not findings.v1_supported:
-        console.print("[bold red]V1 not supported. Reasons:[/bold red]")
-        for reason in findings.unsupported_reasons:
-            console.print(f"  [red]• {reason}[/red]")
+        if not json_output:
+            console.print("[bold red]V1 not supported. Reasons:[/bold red]")
+            for reason in findings.unsupported_reasons:
+                console.print(f"  [red]• {reason}[/red]")
         raise typer.Exit(code=1)
