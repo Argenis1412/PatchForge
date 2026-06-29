@@ -47,21 +47,3 @@ def mock_claude(monkeypatch):
         except (AttributeError, ModuleNotFoundError):
             pass
     return mock
-
-
-@pytest.fixture
-def mock_openrouter(monkeypatch):
-    mock = MagicMock()
-    for path in ["orchestrator.agents.executor.providers._call_openrouter"]:
-        try:
-            monkeypatch.setattr(path, mock)
-        except (AttributeError, ModuleNotFoundError):
-            pass
-    return mock
-
-
-@pytest.fixture
-def mock_subprocess(monkeypatch):
-    mock = MagicMock()
-    monkeypatch.setattr("subprocess.run", mock)
-    return mock

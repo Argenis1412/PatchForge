@@ -26,7 +26,6 @@ MODEL_CLAUDE = "claude-sonnet-4-6"
 COST_PER_1M_INPUT_CLAUDE = 3.00
 COST_PER_1M_OUTPUT_CLAUDE = 15.00
 
-TIMEOUT_SECONDS = 60
 MAX_RETRIES = 1
 
 # Provider fallback chain per risk level.

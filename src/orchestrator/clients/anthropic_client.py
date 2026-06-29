@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
+from orchestrator.clients import TIMEOUT_SECONDS
+
 if TYPE_CHECKING:
     import anthropic
 
@@ -16,5 +18,8 @@ def get_anthropic_client() -> anthropic.Anthropic:
     if _client is None:
         import anthropic
 
-        _client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        _client = anthropic.Anthropic(
+            api_key=os.getenv("ANTHROPIC_API_KEY"),
+            timeout=TIMEOUT_SECONDS,
+        )
     return _client
