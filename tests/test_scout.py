@@ -80,20 +80,52 @@ _VALID_JSON = '{"hotspots": [], "summary": "s", "risks": [], "recommended_order"
 
 @pytest.mark.unit
 def test_scout_provider_non_json_raises(monkeypatch):
-    """A fallback provider returning non-JSON text must raise ProviderError."""
+    """All providers returning non-JSON must raise ProviderError."""
     from orchestrator.agents.executor.providers import ProviderChainResult
     from orchestrator.agents.scout import provider as scout_provider
     from orchestrator.exceptions import ProviderError
 
-    chain_result = ProviderChainResult(
+    non_json = ProviderChainResult(
         success=("Here is some explanatory text, not JSON.", 10, 5, 0.0),
         provider_name="openrouter",
     )
-    monkeypatch.setattr(scout_provider, "_call_chain", lambda *a, **kw: chain_result)
+    monkeypatch.setattr(scout_provider, "_call_chain", lambda *a, **kw: non_json)
     monkeypatch.setattr(scout_provider, "log_failure", lambda *a, **kw: None)
 
     with pytest.raises(ProviderError):
         scout_provider.call_gemini("prompt", "scout")
+
+
+@pytest.mark.unit
+def test_scout_provider_non_json_falls_back(monkeypatch):
+    """Non-JSON from first provider causes the chain to try the next provider."""
+    from orchestrator.agents.executor.providers import ProviderChainResult
+    from orchestrator.agents.scout import provider as scout_provider
+
+    calls = []
+
+    def fake_call_chain(chain, prompt, run_id):
+        calls.append(chain[0].__name__)
+        if chain[0].__name__ == "_call_gemini":
+            return ProviderChainResult(
+                success=("not valid json at all", 10, 5, 0.0),
+                provider_name="gemini",
+            )
+        return ProviderChainResult(
+            success=(_VALID_JSON, 10, 5, 0.0),
+            provider_name="openrouter",
+        )
+
+    monkeypatch.setattr(scout_provider, "_call_chain", fake_call_chain)
+    monkeypatch.setattr(scout_provider, "log_failure", lambda *a, **kw: None)
+    monkeypatch.setattr(scout_provider, "log_call", lambda *a, **kw: None)
+
+    raw, tokens, cost, model_used = scout_provider.call_gemini("prompt", "scout")
+
+    assert "_call_gemini" in calls
+    assert "_call_openrouter" in calls
+    assert raw == _VALID_JSON
+    assert model_used == "openrouter/free"
 
 
 @pytest.mark.unit

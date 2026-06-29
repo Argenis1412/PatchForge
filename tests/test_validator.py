@@ -167,3 +167,26 @@ def test_summarizer_generic_exception_all_fail_returns_raw(monkeypatch):
     summary, model = _summarize_errors(failed, "test-run")
     assert model == ""
     assert "[ruff]" in summary
+
+
+@pytest.mark.unit
+def test_summarizer_no_google_key_uses_openrouter(monkeypatch):
+    """When GOOGLE_API_KEY is absent, OpenRouter is tried instead of returning a placeholder."""
+    from orchestrator.agents.executor.providers import ProviderChainResult
+    from orchestrator.agents.validator.summarizer import _summarize_errors
+
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+    chain_result = ProviderChainResult(
+        success=("- openrouter summary", 10, 5, 0.0),
+        provider_name="openrouter",
+    )
+    monkeypatch.setattr(
+        "orchestrator.agents.executor.providers._call_chain",
+        lambda chain, prompt, run_id: chain_result,
+    )
+
+    failed = [ToolResult(tool="ruff", passed=False, return_code=1, stderr="error")]
+    summary, model = _summarize_errors(failed, "test-run")
+    assert model == "openrouter/free"
+    assert "openrouter summary" in summary

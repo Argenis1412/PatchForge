@@ -45,11 +45,37 @@ def call_gemini(
     """Call the scout provider chain. Returns (raw, tokens, cost, model_used)."""
     call_started = time.monotonic()
 
-    chain_result: ProviderChainResult = _call_chain(_SCOUT_CHAIN, prompt, run_id or "")
+    all_failures: list[tuple[str, str]] = []
+    winning: ProviderChainResult | None = None
 
-    if chain_result.success is None:
+    for provider in _SCOUT_CHAIN:
+        candidate = _call_chain([provider], prompt, run_id or "")
+        if candidate.success is None:
+            all_failures.extend(candidate.failures)
+            continue
+        raw, _in, _out, _ = candidate.success
+        try:
+            json.loads(raw)
+        except json.JSONDecodeError as exc:
+            p_name = candidate.provider_name or provider.__name__.removeprefix("_call_")
+            all_failures.append((p_name, f"non-JSON: {exc}"))
+            log_failure(
+                trace_id=trace_id or "",
+                run_id=run_id or "",
+                stage=stage,
+                error_type=FailureType.SCHEMA_VALIDATION_ERROR,
+                message=f"Scout provider {p_name} returned non-JSON: {exc}",
+                source="agent",
+                duration_ms=int((time.monotonic() - call_started) * 1000),
+                logs_dir=logs_dir,
+            )
+            continue
+        winning = candidate
+        break
+
+    if winning is None:
         latency_ms = int((time.monotonic() - call_started) * 1000)
-        failures = "; ".join(f"{n}→{e}" for n, e in chain_result.failures)
+        failures = "; ".join(f"{n}→{e}" for n, e in all_failures)
         log_failure(
             trace_id=trace_id or "",
             run_id=run_id or "",
@@ -64,28 +90,8 @@ def call_gemini(
             "provider_chain", f"[{orchestratorel}] All providers failed: {failures}"
         )
 
-    raw, input_tokens, output_tokens, _ = chain_result.success
-    provider_name = chain_result.provider_name or "gemini"
-
-    # Scout requires valid JSON — validate before accepting
-    try:
-        json.loads(raw)
-    except json.JSONDecodeError as exc:
-        latency_ms = int((time.monotonic() - call_started) * 1000)
-        log_failure(
-            trace_id=trace_id or "",
-            run_id=run_id or "",
-            stage=stage,
-            error_type=FailureType.SCHEMA_VALIDATION_ERROR,
-            message=f"Scout provider {provider_name} returned non-JSON: {exc}",
-            source="agent",
-            duration_ms=latency_ms,
-            logs_dir=logs_dir,
-        )
-        raise ProviderError(
-            "provider_chain",
-            f"[{orchestratorel}] Provider {provider_name} returned non-JSON response",
-        )
+    raw, input_tokens, output_tokens, _ = winning.success
+    provider_name = winning.provider_name or "gemini"
 
     model_used = _MODEL_MAP.get(provider_name, MODEL)
 
