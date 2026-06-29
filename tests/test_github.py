@@ -69,7 +69,9 @@ class TestCreatePR:
         assert result.number == 1
         assert result.title == "Test"
 
-    def test_create_pr_rate_limit_retry(self, client):
+    @patch("orchestrator.clients.github.random.uniform", return_value=0)
+    @patch("orchestrator.clients.github.time.sleep")
+    def test_create_pr_rate_limit_retry(self, mock_sleep, mock_uniform, client):
         from github import GithubException
 
         fake = _fake_pr()
@@ -77,20 +79,30 @@ class TestCreatePR:
         client._repo.create_pull.side_effect = [exc, exc, fake]
         result = client.create_pr(title="Test", body="body", head="branch")
         assert result.number == 1
+        assert mock_sleep.call_count == 2
+        mock_sleep.assert_any_call(0)
 
-    def test_create_pr_rate_limit_exhausted(self, client):
+    @patch("orchestrator.clients.github.random.uniform", return_value=0)
+    @patch("orchestrator.clients.github.time.sleep")
+    def test_create_pr_rate_limit_exhausted(self, mock_sleep, mock_uniform, client):
         from github import GithubException
 
         exc = GithubException(403, {"message": "rate limit exceeded"}, headers={"Retry-After": "0"})
         client._repo.create_pull.side_effect = exc
         with pytest.raises(RuntimeError, match="Max retries"):
             client.create_pr(title="Test", body="body", head="branch")
+        assert mock_sleep.call_count == 3
+        mock_sleep.assert_any_call(0)
 
-    def test_create_pr_network_error_retry(self, client):
+    @patch("orchestrator.clients.github.random.uniform", return_value=0)
+    @patch("orchestrator.clients.github.time.sleep")
+    def test_create_pr_network_error_retry(self, mock_sleep, mock_uniform, client):
         fake = _fake_pr()
         client._repo.create_pull.side_effect = [ConnectionError("reset"), fake]
         result = client.create_pr(title="Test", body="body", head="branch")
         assert result.number == 1
+        assert mock_sleep.call_count == 1
+        mock_sleep.assert_any_call(1)
 
 
 class TestExistingPrForWebhook:
