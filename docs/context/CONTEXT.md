@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-06-28 | Session: feat/docs-p3-status-update
+> Last updated: 2026-06-28 | Session: feat/issue-176-provider-fallback-chain
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 550+ passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 578 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant until Docker/CI-CD lands in P3 closure).
 
@@ -249,6 +249,7 @@ These must not change without a new ADR in `docs/adr/`:
 - ✅ Post-Audit Fixes — Path traversal validation, atomic artifact writes, lock failure logging (#164/#166/#167)
 - ✅ Issue #162 — Replace Groq with OpenRouter (provider hardening)
 - ✅ Issue #171 — GitHub Actions pipeline workflow (CI/CD integration)
+- ✅ Issue #176 — Provider fallback chain for architect, scout, and validator summarizer (#177)
 
 **P3 closure items remaining:**
 - Dockerfile — deferred until self-hosted runners or external deployment needed (follow-up issue)
