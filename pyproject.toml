@@ -43,6 +43,7 @@ dev = [
     "pytest>=8.3.0",
     "ruff>=0.9.0",
     "pytest-cov>=4.0.0",
+    "pytest-xdist>=3.5.0",
 ]
 
 [build-system]
@@ -62,12 +63,13 @@ dev = [
     "pytest>=8.3.0",
     "ruff>=0.9.0",
     "pytest-cov>=4.0.0",
+    "pytest-xdist>=3.5.0",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "."]
-markers = ["unit", "integration"]
+markers = ["unit", "integration", "serial: must run without xdist"]
 filterwarnings = ["ignore::DeprecationWarning"]
 
 [tool.ruff]
