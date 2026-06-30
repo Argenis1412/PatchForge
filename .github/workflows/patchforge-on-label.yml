@@ -1,0 +1,30 @@
+name: "PatchForge: On Label"
+
+on:
+  issues:
+    types: [labeled]
+
+concurrency:
+  group: patchforge-pipeline-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  pipeline:
+    if: >-
+      github.event.label.name == 'patchforge/process'
+      && github.event.issue.pull_request == null
+      && !github.event.repository.fork
+    uses: ./.github/workflows/patchforge-pipeline.yml
+    with:
+      issue-number: ${{ github.event.issue.number }}
+      issue-title: ${{ github.event.issue.title }}
+      issue-body: ${{ github.event.issue.body }}
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}

@@ -150,6 +150,46 @@
 - **Discovered by:** Phase 4 execution
 - **Why deferred:** Pre-existing behavior in scout, architect, validator. Do not change without a unified strategy for all 4 agents.
 
+### [2026-06-30] Issue #183 — `git add -A` in `ci.py` stages all untracked files
+
+- **File:** `src/orchestrator/commands/ci.py`
+- **Debt:** `git add -A` in the apply stage stages all untracked files in the repo.
+  When `--allow-dirty` is used and the working tree has generated files (e.g.
+  `orchestrator.json`, `.pyc` caches), they get committed.
+- **Discovered by:** Post-implementation code review
+- **Partial mitigation (2026-06-30, CodeRabbit review):** A clean-tree guard now
+  blocks the default path — `ci` returns `scan_failed` on a dirty tree unless
+  `--allow-dirty` is passed. The residual risk only applies when a caller
+  explicitly opts into `--allow-dirty`.
+- **Why deferred:** Matches existing pattern in `work_queue.py:405`. The CI
+  workflow doesn't pass `--allow-dirty`. A targeted fix would require switching
+  to `git add` with explicit file paths from `affected_files`, which needs
+  validation that the executor reports all modified files correctly.
+
+### [2026-06-30] Issue #183 — `force_provider` override not propagated to CI pipeline agents
+
+- **File:** `src/orchestrator/commands/ci.py`
+- **Debt:** `patchforge ci` does not expose a `--force-provider` flag. The executor
+  and architect agents use their default provider routing. In contrast,
+  `patchforge preview` supports `--force-provider` for debugging. Adding it to
+  `ci` requires threading the parameter through all agent calls in `execute()`.
+- **Discovered by:** Post-implementation code review
+- **Why deferred:** CI runs are automated — provider override is a debugging tool
+  for interactive use. Not a functional gap for the primary use case.
+
+### [2026-06-30] Issue #183 — `latest` Docker tag non-deterministic in workflow default
+
+- **File:** `.github/workflows/patchforge-pipeline.yml:26`
+- **Debt:** The `patchforge-image` input defaults to `ghcr.io/argenis1412/patchforge:latest`.
+  The `latest` tag is mutable — a new image push between issue creation and
+  pipeline execution could change behavior silently. The original plan specified
+  version pinning (`0.1.0`) but the implementation uses `latest` for ease of
+  adoption.
+- **Discovered by:** Post-implementation code review
+- **Why deferred:** External callers can pin via the `patchforge-image` input.
+  Version-tagged images require a publishing pipeline (separate issue). Low
+  impact while PatchForge is the only consumer.
+
 ### [2026-06-14] Issue #100 — Agent fallback inconsistency
 
 - **File:** `src/orchestrator/agents/validator.py`

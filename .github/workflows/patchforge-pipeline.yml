@@ -1,61 +1,66 @@
 name: PatchForge Pipeline
 
 on:
-  issues:
-    types: [labeled]
-
-concurrency:
-  group: patchforge-pipeline-${{ github.event.issue.number }}
-  cancel-in-progress: true
-
-permissions:
-  contents: write
-  pull-requests: write
-  issues: write
+  workflow_call:
+    inputs:
+      issue-number:
+        required: true
+        type: number
+      issue-title:
+        required: true
+        type: string
+      issue-body:
+        required: true
+        type: string
+      risk-budget:
+        required: false
+        type: string
+        default: "low"
+      base-branch:
+        required: false
+        type: string
+        default: "main"
+      patchforge-image:
+        required: false
+        type: string
+        default: "ghcr.io/argenis1412/patchforge:latest"
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: false
+      GOOGLE_API_KEY:
+        required: false
+      OPENROUTER_API_KEY:
+        required: false
 
 jobs:
   pipeline:
-    if: >-
-      github.event.label.name == 'patchforge/process'
-      && github.event.issue.pull_request == null
-      && !github.event.repository.fork
     runs-on: ubuntu-latest
 
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      PF_WORKSPACE: pf-workspace
-      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      ISSUE_NUMBER: ${{ inputs.issue-number }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          persist-credentials: false
+          persist-credentials: true
+          ref: ${{ inputs.base-branch }}
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      - name: Configure runner git safe.directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Install PatchForge
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Prepare issue file
+      - name: Prepare workspace and issue file
         env:
-          ISSUE_TITLE: ${{ github.event.issue.title }}
-          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_TITLE: ${{ inputs.issue-title }}
+          ISSUE_BODY: ${{ inputs.issue-body }}
         run: |
-          python << 'PYEOF'
-          import json
-          import os
+          mkdir -p /tmp/pf-workspace
+          python3 << 'PYEOF'
+          import json, os
           title = os.environ["ISSUE_TITLE"]
           number = os.environ["ISSUE_NUMBER"]
           body = os.environ["ISSUE_BODY"]
-          with open("issue.md", "w") as f:
+          with open("/tmp/pf-workspace/issue.md", "w") as f:
               f.write("---\n")
               f.write(f"title: {json.dumps(title)}\n")
               f.write(f"number: {number}\n")
@@ -64,92 +69,87 @@ jobs:
               f.write("\n")
           PYEOF
 
-      - name: Scan
-        run: patchforge scan . --workspace "$PF_WORKSPACE" --risk-budget low
-
-      - name: Extract and verify run_id
-        id: run_id
-        run: |
-          RUN_ID=$(ls -1t "$PF_WORKSPACE/runs/" | head -1)
-          if [ -z "$RUN_ID" ]; then
-            echo "::error::No run directory found after scan"
-            exit 1
-          fi
-          STATUS=$(python -c "import json, pathlib; print(json.loads(pathlib.Path('$PF_WORKSPACE/runs/$RUN_ID/run.json').read_text())['status'])")
-          if [ "$STATUS" != "scanned" ]; then
-            echo "::error::run.json status is '$STATUS', expected 'scanned'"
-            exit 1
-          fi
-          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
-          echo "Run ID: $RUN_ID"
-
-      - name: Plan
-        run: |
-          patchforge plan "${{ steps.run_id.outputs.run_id }}" \
-            --workspace "$PF_WORKSPACE" \
-            --issue-file issue.md
-
-      - name: Preview
-        run: |
-          patchforge preview "${{ steps.run_id.outputs.run_id }}" \
-            --workspace "$PF_WORKSPACE"
-
-      - name: Apply
-        run: |
-          patchforge apply "${{ steps.run_id.outputs.run_id }}" \
-            --workspace "$PF_WORKSPACE" \
-            --allow-dirty
-
-      - name: Verify apply success
-        run: |
-          RUN_ID="${{ steps.run_id.outputs.run_id }}"
-          SUCCESS=$(python -c "import json, pathlib; print(json.loads(pathlib.Path('$PF_WORKSPACE/runs/$RUN_ID/apply.json').read_text())['success'])")
-          if [ "$SUCCESS" != "True" ]; then
-            echo "::error::apply.json reports success=$SUCCESS"
-            exit 1
-          fi
-
-      - name: Classify risk level
-        id: risk
+      - name: Run PatchForge pipeline
         env:
-          GH_TOKEN: ${{ github.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          PATCHFORGE_IMAGE: ${{ inputs.patchforge-image }}
+          RISK_BUDGET: ${{ inputs.risk-budget }}
         run: |
-          RUN_ID="${{ steps.run_id.outputs.run_id }}"
-          PATCH_FILE="$PF_WORKSPACE/runs/$RUN_ID/patch.diff"
-          if grep -qE '^\+\+\+ b/(src/|schemas/|tests/)' "$PATCH_FILE"; then
-            RISK_LEVEL="high"
-          else
-            RISK_LEVEL="low"
-          fi
-          echo "level=$RISK_LEVEL" >> "$GITHUB_OUTPUT"
-          gh issue edit "$ISSUE_NUMBER" --add-label "patchforge/$RISK_LEVEL-risk"
-          echo "Risk level: $RISK_LEVEL"
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/repo" \
+            -v /tmp/pf-workspace:/workspace \
+            -e ANTHROPIC_API_KEY \
+            -e GOOGLE_API_KEY \
+            -e OPENROUTER_API_KEY \
+            "$PATCHFORGE_IMAGE" \
+            patchforge ci /repo \
+              --workspace /workspace \
+              --issue-file /workspace/issue.md \
+              --issue-number "$ISSUE_NUMBER" \
+              --risk-budget "$RISK_BUDGET" \
+              --result-file /workspace/ci_result.json
 
-      - name: Commit and push
+      - name: Parse CI result
+        id: result
+        if: always()
         run: |
-          RUN_ID="${{ steps.run_id.outputs.run_id }}"
-          git config user.name "patchforge[bot]"
-          git config user.email "patchforge@users.noreply.github.com"
-          git checkout -b "patchforge/$RUN_ID"
-          git add -A
-          git commit -m "patchforge: apply $RUN_ID (issue #$ISSUE_NUMBER)"
-          git push -u origin "patchforge/$RUN_ID"
+          RESULT_FILE="/tmp/pf-workspace/ci_result.json"
+          if [ ! -f "$RESULT_FILE" ]; then
+            echo "status=unknown" >> "$GITHUB_OUTPUT"
+            echo "::error::ci_result.json not found"
+            exit 1
+          fi
+          cat "$RESULT_FILE"
+          RUN_ID=$(python3 -c "import json; print(json.load(open('$RESULT_FILE'))['run_id'])")
+          BRANCH=$(python3 -c "import json; print(json.load(open('$RESULT_FILE'))['branch'])")
+          STATUS=$(python3 -c "import json; print(json.load(open('$RESULT_FILE'))['status'])")
+          RISK=$(python3 -c "import json; print(json.load(open('$RESULT_FILE'))['risk_budget'])")
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "risk=$RISK" >> "$GITHUB_OUTPUT"
+
+      - name: Push branch
+        if: steps.result.outputs.status == 'applied'
+        env:
+          BRANCH: ${{ steps.result.outputs.branch }}
+        run: git push -u origin "$BRANCH"
 
       - name: Create Pull Request
-        id: pr
+        if: steps.result.outputs.status == 'applied'
         env:
           GH_TOKEN: ${{ github.token }}
+          BASE_BRANCH: ${{ inputs.base-branch }}
+          RUN_ID: ${{ steps.result.outputs.run_id }}
+          BRANCH: ${{ steps.result.outputs.branch }}
+          RISK: ${{ steps.result.outputs.risk }}
         run: |
-          RUN_ID="${{ steps.run_id.outputs.run_id }}"
-          RISK_LEVEL="${{ steps.risk.outputs.level }}"
-          if [ "$RISK_LEVEL" = "high" ]; then
-            RISK_NOTE="**Risk: HIGH** — touches \`src/\`, \`schemas/\`, or \`tests/\`. Manual review required before merge."
-          else
-            RISK_NOTE="**Risk: LOW** — no changes to core source, schemas, or tests."
+
+          AFFECTED=""
+          if [ -f "/tmp/pf-workspace/ci_result.json" ]; then
+            AFFECTED=$(python3 -c "
+          import json
+          r = json.load(open('/tmp/pf-workspace/ci_result.json'))
+          print('\n'.join(f'- \`{f}\`' for f in r.get('affected_files', [])))
+          ")
           fi
+
+          VALIDATION=""
+          VAL_FILE="/tmp/pf-workspace/runs/$RUN_ID/validation.json"
+          if [ -f "$VAL_FILE" ]; then
+            VALIDATION=$(python3 -c "
+          import json
+          v = json.load(open('$VAL_FILE'))
+          passed = v.get('overall_passed', False)
+          print('Passed' if passed else 'Failed')
+          ")
+          fi
+
           gh pr create \
-            --base main \
-            --head "patchforge/$RUN_ID" \
+            --base "$BASE_BRANCH" \
+            --head "$BRANCH" \
             --title "patchforge: issue #$ISSUE_NUMBER" \
             --body "Closes #$ISSUE_NUMBER
 
@@ -157,38 +157,72 @@ jobs:
 
           **Run ID:** \`$RUN_ID\`
           **Source issue:** #$ISSUE_NUMBER
-          $RISK_NOTE
+          **Risk budget:** $RISK
+          **Validation:** $VALIDATION
 
-          This PR was generated by the PatchForge pipeline (\`scan → plan → preview → apply\`).
-          Review the artifacts in the workflow run for \`plan.json\`, \`patch.diff\`, and \`validation.json\`.
+          ### Affected files
+          $AFFECTED
 
           ---
+          Review the artifacts in the workflow run for \`plan.json\`, \`patch.diff\`, and \`validation.json\`.
+
           *Generated by PatchForge CI pipeline*"
 
-      - name: Label issue as completed
-        if: success()
+      - name: Comment and label success
+        if: steps.result.outputs.status == 'applied'
         env:
           GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.result.outputs.branch }}
         run: |
-          gh issue edit "$ISSUE_NUMBER" --remove-label "patchforge/process" --add-label "patchforge/completed"
+          gh issue comment "$ISSUE_NUMBER" \
+            --body "PatchForge pipeline completed successfully. PR created from branch \`$BRANCH\`."
+          gh issue edit "$ISSUE_NUMBER" \
+            --remove-label "patchforge/process" --add-label "patchforge/completed"
+
+      - name: Comment and label on failure
+        if: always() && steps.result.outputs.status != 'applied'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS: ${{ steps.result.outputs.status }}
+        run: |
+          ERROR=""
+          if [ -f "/tmp/pf-workspace/ci_result.json" ]; then
+            ERROR=$(python3 -c "
+          import json
+          r = json.load(open('/tmp/pf-workspace/ci_result.json'))
+          print(r.get('error', 'Unknown error'))
+          " 2>/dev/null || echo "Could not parse error")
+          fi
+          gh issue comment "$ISSUE_NUMBER" \
+            --body "## PatchForge Pipeline Failed
+
+          **Stage:** \`$STATUS\`
+          **Error:** $ERROR
+
+          See the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
+          gh issue edit "$ISSUE_NUMBER" \
+            --remove-label "patchforge/process" --add-label "patchforge/failed"
+
+      - name: Write step summary
+        if: always()
+        env:
+          STATUS: ${{ steps.result.outputs.status }}
+          RUN_ID: ${{ steps.result.outputs.run_id }}
+          RISK: ${{ steps.result.outputs.risk }}
+        run: |
+          echo "## PatchForge Pipeline" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Run ID | \`${RUN_ID:-unknown}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Status | \`${STATUS:-unknown}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Issue | #$ISSUE_NUMBER |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Risk | ${RISK:-unknown} |" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patchforge-run-${{ steps.run_id.outputs.run_id || 'unknown' }}
-          path: ${{ env.PF_WORKSPACE }}/runs/
+          name: patchforge-run-${{ steps.result.outputs.run_id || 'unknown' }}
+          path: /tmp/pf-workspace/runs/
           retention-days: 30
-
-      - name: Comment and label on failure
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh issue comment "$ISSUE_NUMBER" \
-            --body "## PatchForge Pipeline Failed
-
-          The pipeline failed during execution. See the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.
-
-          Artifacts (if any) are uploaded to the workflow run."
-          gh issue edit "$ISSUE_NUMBER" --remove-label "patchforge/process" --add-label "patchforge/failed"

@@ -200,6 +200,67 @@ def preview(
 
 
 @app.command()
+def ci(
+    path: Path = typer.Argument(..., help="Target project path"),
+    workspace: Path = typer.Option(
+        ...,
+        "--workspace",
+        help="Workspace directory (outside target repo)",
+    ),
+    issue_file: Optional[Path] = typer.Option(
+        None,
+        "--issue-file",
+        help="Markdown issue file with frontmatter",
+    ),
+    issue_number: Optional[int] = typer.Option(
+        None,
+        "--issue-number",
+        help="GitHub issue number for traceability",
+    ),
+    risk_budget: str = typer.Option(
+        "low",
+        "--risk-budget",
+        help="Risk budget: low, medium, or high",
+    ),
+    allow_dirty: bool = typer.Option(
+        False,
+        "--allow-dirty",
+        help="Allow application on a dirty tree",
+    ),
+    result_file: Optional[Path] = typer.Option(
+        None,
+        "--result-file",
+        help="Path to write ci_result.json",
+    ),
+) -> None:
+    """Run the full CI pipeline: scan, plan, preview, apply. No push."""
+    if risk_budget not in ("low", "medium", "high"):
+        console.print(
+            "[bold red]Error: --risk-budget must be 'low', 'medium', or 'high'.[/bold red]"
+        )
+        raise typer.Exit(code=1)
+
+    if issue_number is not None and issue_number < 1:
+        console.print("[bold red]Error: --issue-number must be a positive integer.[/bold red]")
+        raise typer.Exit(code=1)
+
+    from orchestrator.commands.ci import execute as execute_ci
+
+    result = execute_ci(
+        target_path=path.resolve(),
+        workspace_path=workspace.resolve(),
+        issue_file=issue_file,
+        issue_number=issue_number,
+        risk_budget=risk_budget,
+        allow_dirty=allow_dirty,
+        result_path=result_file,
+    )
+
+    if result.status != "applied":
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def apply(
     run_id: str = typer.Argument(..., help="Run ID of an existing run"),
     allow_dirty: bool = typer.Option(
