@@ -2,7 +2,7 @@
 
 > **Date:** 2026-06-26
 > **Source:** Roadmap decomposition (`roadmap-phase2.md`) + adversarial audit (`adversarial-audit.md`)
-> **Total:** 20 issues (16 completed, 0 specified, 4 scoped but needing detailed ACs)
+> **Total:** 21 issues (17 completed, 0 specified, 3 scoped but needing detailed ACs)
 
 ---
 
@@ -496,11 +496,14 @@ ADR-0004 must answer exactly five questions:
 - **Scope on implementation:** 42 insertions across 3 files. `apply.py` — branch format `patchforge/{run_id}[/issue_{issue_number}]`, repo lock acquire/release with worker_id, PATCHFORGE_WORKSPACE env guard. `github.py` — token validation moved inside `__init__`. `lock.py` — reads REPO_LOCK_ENABLED and WORKER_ID from env.
 - **Files:** `src/orchestrator/commands/apply.py`, `src/orchestrator/clients/github.py`, `src/orchestrator/storage/lock.py`
 
-### Docker Containerization
-- **Priority:** P3 | **Status:** 📐 Scoped
-- **Goal:** Package core (orchestration, git wrappers, schema validation) as standalone container.
+### ✅ Issue #181 — Docker Containerization
+- **Priority:** P3 | **Status:** ✅ **Completed**
+- **PR:** #182 | **Branch:** `feat/issue-181-docker-containerization` | **Merged:** 2026-06-29
+- **Goal:** Package core (orchestration, git wrappers, schema validation) as standalone container for portable execution in GitHub Actions, ECS, or Kubernetes.
 - **Source:** `roadmap-phase2.md`
 - **Precondition:** All P0 + P1 + P2 complete
+- **Scope on implementation:** 3 new files (`.dockerignore`, `Dockerfile`, `docker-entrypoint.sh`), README.md Docker section. Single-stage `python:3.12-slim` image; non-root `patchforge` user (UID 1000); entrypoint handles workspace init, git identity, credential helper, API key validation with scan/doctor skip, and HOME redirection for arbitrary UID remapping via `--user`.
+- **Files:** `Dockerfile`, `docker-entrypoint.sh`, `.dockerignore`, `README.md`
 
 ### CI/CD Integration
 - **Priority:** P3 | **Status:** 📐 Scoped

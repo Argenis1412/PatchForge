@@ -125,7 +125,7 @@ patch, successful validation, and explicit human approval before repository modi
 
 - V1 complete: 5 commands (`doctor`, `scan`, `plan`, `preview`, `apply`).
 - Current phase: P2 Dogfooding & Hardening.
-- QA: pytest 481 passed, 2 skipped | ruff 0 errors.
+- QA: pytest 585 passed, 2 skipped | ruff 0 errors.
 - See the [Phase 2 Roadmap](./docs/planning/roadmap-phase2.md) for current priorities.
 
 ## Quickstart
@@ -192,6 +192,87 @@ src/
 tests/
 docs/
 ```
+
+## Docker
+
+Build the image:
+
+```bash
+docker build -t patchforge:latest .
+```
+
+Run a scan (no API keys needed):
+
+```bash
+docker run --rm \
+  -v /path/to/target-repo:/repo \
+  -v /path/to/workspace:/workspace \
+  patchforge:latest \
+  patchforge scan /repo --workspace /workspace
+```
+
+Run the full pipeline:
+
+```bash
+docker run --rm \
+  -e ANTHROPIC_API_KEY \
+  -e GOOGLE_API_KEY \
+  -e OPENROUTER_API_KEY \
+  -v /path/to/target-repo:/repo \
+  -v /path/to/workspace:/workspace \
+  patchforge:latest \
+  sh -c 'patchforge scan /repo --workspace /workspace && \
+         RUN_ID=$(ls -1t /workspace/runs/ | head -1) && \
+         patchforge plan $RUN_ID --workspace /workspace && \
+         patchforge preview $RUN_ID --workspace /workspace && \
+         patchforge apply $RUN_ID --workspace /workspace --allow-dirty'
+```
+
+Use in GitHub Actions:
+
+```yaml
+- name: Run PatchForge scan
+  run: |
+    docker run --rm \
+      -e ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }} \
+      -v ${{ github.workspace }}:/repo \
+      -v ${{ runner.temp }}/pf-workspace:/workspace \
+      patchforge:latest \
+      patchforge scan /repo --workspace /workspace
+```
+
+### Environment variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ANTHROPIC_API_KEY` | At least one | Claude API key (architect, executor, validator) |
+| `GOOGLE_API_KEY` | At least one | Gemini API key (fallback provider) |
+| `OPENROUTER_API_KEY` | At least one | OpenRouter API key (fallback provider) |
+| `GITHUB_TOKEN` | For `apply` push | Configures git credential helper for push |
+| `PATCHFORGE_GITHUB_TOKEN` | For `apply` push | Alternative to `GITHUB_TOKEN` |
+
+### Volume mounts
+
+| Container path | Purpose |
+|----------------|---------|
+| `/repo` | Target repository (read-write for `apply`) |
+| `/workspace` | PatchForge workspace: runs, logs, SQLite stores |
+
+SQLite stores (`coordination.db`, `queue.db`) live under `/workspace/stores`. Use a **local bind mount** — NFS does not support SQLite WAL mode reliably.
+
+### UID remapping
+
+The container runs as user `patchforge` (UID 1000) by default. To match host volume ownership:
+
+```bash
+docker run --user 1001:1001 ...
+```
+
+### Notes
+
+- If the target repo contains a `.venv/` from a different platform (e.g., Windows), validation may fail. Exclude it or set a custom `lint_command`/`test_command` in `orchestrator.json`.
+- Validation copies the target repo to `/tmp`. For large repos, use `--tmpfs /tmp:size=2G`.
+- For read-only root filesystem (`--read-only`), add `--tmpfs /tmp`.
 
 ## Development
 
