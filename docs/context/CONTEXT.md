@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-06-29 | Session: feat/issue-181-docker-containerization
+> Last updated: 2026-06-30 | Session: feat/issue-183-ci-cd-reusable-workflow
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 585 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 597 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3).
 
@@ -64,6 +64,7 @@ src/orchestrator/
 │   ├── scan.py            # V1 deterministic scan (non-AI)
 │   ├── plan.py            # V1 AI-assisted planning (+ --issue-file)
 │   ├── preview.py         # Patch preview + validation (staging cleanup)
+│   ├── ci.py              # Full CI pipeline: scan → plan → preview → apply (no push)
 │   └── apply.py           # Patch application to target
 ├── observability/
 │   ├── events.py
@@ -79,6 +80,7 @@ src/orchestrator/
 │   ├── issue.py           # IssueInput — human issue frontmatter parser
 │   ├── git.py             # GitCommandResult, ValidationWorkspace, etc.
 │   ├── pipeline_run.py
+│   ├── ci_result.py       # CiResult — thin projection of RunMetadata for CI output
 │   ├── risk.py
 │   ├── scout_output.py
 │   └── validator_output.py
@@ -92,7 +94,7 @@ src/orchestrator/
 ├── validation_workspace.py
 └── workspace.py           # WorkspaceManager — disk layout
 
-tests/                     (21 test files, 550+ tests)
+tests/                     (22 test files, 590+ tests)
 ```
 
 ---
@@ -256,23 +258,32 @@ These must not change without a new ADR in `docs/adr/`:
 
 **P3 closure items complete:**
 - ✅ Issue #181 — Docker containerization (PR #182, 2026-06-29)
+- ✅ Issue #183 — CI/CD reusable workflow + `patchforge ci` command (2026-06-30)
 
 ---
 
 ## CI/CD Pipeline (P3)
 
-PatchForge can run as a GitHub Actions workflow triggered by issue labels.
+PatchForge ships a reusable GitHub Actions workflow (`workflow_call`) that any repo can consume with a 10-line caller workflow. Pipeline execution runs inside Docker; GitHub API calls (push, PR, labels) run on the runner.
 
-**Trigger:** Label an issue with `patchforge/process`. The workflow executes `scan → plan → preview → apply`, commits the result, pushes a branch, and opens a PR.
+**Architecture:** Container/runner boundary separation:
+- **Container** (`patchforge ci`): scan → plan → preview → apply → commit (no push, no GitHub API)
+- **Runner**: git push, `gh pr create`, issue comments/labels, artifact upload
 
-**Required repository secrets:**
-- `ANTHROPIC_API_KEY` (required — architect agent has no fallback)
-- `GOOGLE_API_KEY` (recommended — Gemini fallback for low/medium risk)
-- `OPENROUTER_API_KEY` (recommended — OpenRouter fallback)
+**CLI:** `patchforge ci <path> --workspace <dir>` — full pipeline, writes `ci_result.json`
 
-**Workflow file:** `.github/workflows/patchforge-pipeline.yml`
+**Workflow files:**
+- `.github/workflows/patchforge-pipeline.yml` — reusable `workflow_call` workflow
+- `.github/workflows/patchforge-on-label.yml` — thin caller for PatchForge's own repo
 
-**Artifacts:** Each run uploads `pf-workspace/runs/<run_id>/` as workflow artifacts (30-day retention). Contains `run.json`, `findings.json`, `plan.json`, `patch.diff`, `validation.json`, `apply.json`.
+**Setup guide:** `docs/ci-cd-setup.md`
+
+**Required repository secrets (at least one):**
+- `ANTHROPIC_API_KEY` (recommended — Claude for architect)
+- `GOOGLE_API_KEY` (Gemini fallback for low/medium risk)
+- `OPENROUTER_API_KEY` (multi-model routing)
+
+**Artifacts:** Each run uploads `runs/<run_id>/` as workflow artifacts (30-day retention). Contains `run.json`, `findings.json`, `plan.json`, `patch.diff`, `validation.json`, `apply.json`.
 
 **Labels:**
 - `patchforge/process` — triggers pipeline execution
