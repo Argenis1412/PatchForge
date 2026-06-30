@@ -1,8 +1,8 @@
 # Issue Registry — PatchForge Phase 2 & Beyond
 
-> **Date:** 2026-06-26
+> **Date:** 2026-06-30
 > **Source:** Roadmap decomposition (`roadmap-phase2.md`) + adversarial audit (`adversarial-audit.md`)
-> **Total:** 21 issues (17 completed, 0 specified, 3 scoped but needing detailed ACs)
+> **Total:** 22 issues (18 completed, 0 specified, 2 scoped but needing detailed ACs)
 
 ---
 
@@ -505,11 +505,21 @@ ADR-0004 must answer exactly five questions:
 - **Scope on implementation:** 3 new files (`.dockerignore`, `Dockerfile`, `docker-entrypoint.sh`), README.md Docker section. Single-stage `python:3.12-slim` image; non-root `patchforge` user (UID 1000); entrypoint handles workspace init, git identity, credential helper, API key validation with scan/doctor skip, and HOME redirection for arbitrary UID remapping via `--user`.
 - **Files:** `Dockerfile`, `docker-entrypoint.sh`, `.dockerignore`, `README.md`
 
-### CI/CD Integration
-- **Priority:** P3 | **Status:** 📐 Scoped
-- **Goal:** GitHub Actions / GitLab CI worker that listens for Issues, clones repo, executes plan → preview → validate, opens PR.
+### ✅ Issue #183 — CI/CD Reusable Workflow + Docker Execution
+- **Priority:** P3 | **Status:** ✅ **Completed**
+- **Branch:** `feat/issue-183-ci-cd-reusable-workflow`
+- **Goal:** Reusable `workflow_call` workflow backed by Docker, with `patchforge ci` CLI command. Any repo can add PatchForge CI/CD with a 15-line caller workflow.
 - **Source:** `roadmap-phase2.md`
-- **Precondition:** Docker Containerization complete
+- **Precondition:** Docker Containerization complete (Issue #181)
+- **Architecture:** Container/runner boundary separation — pipeline runs in Docker (no `gh`, no `git push`), GitHub API calls on runner.
+- **Files:** `src/orchestrator/commands/ci.py`, `src/orchestrator/schemas/ci_result.py`, `src/orchestrator/main.py`, `.github/workflows/patchforge-pipeline.yml`, `.github/workflows/patchforge-on-label.yml`, `docs/ci-cd-setup.md`, `docker-entrypoint.sh`, `tests/test_ci_command.py`
+
+#### Technical debt logged in `docs/context/discoveries.md`
+| # | Item | File | Impact |
+|---|------|------|--------|
+| 1 | `git add -A` stages untracked files with `--allow-dirty` | `ci.py:479` | Low — CI workflow doesn't pass the flag; matches existing pattern in `work_queue.py:405` |
+| 2 | No `--force-provider` in `ci` command | `ci.py` | Low — debugging tool for interactive use, not needed for automated CI runs |
+| 3 | `latest` Docker tag in workflow default | `patchforge-pipeline.yml:26` | Low — callers can pin via `patchforge-image` input; version-tagged publishing a separate issue |
 
 ### Asymmetric Risk Gates (Light)
 - **Priority:** P3 | **Status:** 📐 Scoped
