@@ -152,13 +152,15 @@
 
 ### [2026-06-30] Issue #183 — `git add -A` in `ci.py` stages all untracked files
 
-- **File:** `src/orchestrator/commands/ci.py:479`
+- **File:** `src/orchestrator/commands/ci.py`
 - **Debt:** `git add -A` in the apply stage stages all untracked files in the repo.
   When `--allow-dirty` is used and the working tree has generated files (e.g.
-  `orchestrator.json`, `.pyc` caches), they get committed. The workflow avoids
-  this by running in Docker with a clean checkout and workspace mounted outside
-  the repo, but direct CLI usage with `--allow-dirty` is vulnerable.
+  `orchestrator.json`, `.pyc` caches), they get committed.
 - **Discovered by:** Post-implementation code review
+- **Partial mitigation (2026-06-30, CodeRabbit review):** A clean-tree guard now
+  blocks the default path — `ci` returns `scan_failed` on a dirty tree unless
+  `--allow-dirty` is passed. The residual risk only applies when a caller
+  explicitly opts into `--allow-dirty`.
 - **Why deferred:** Matches existing pattern in `work_queue.py:405`. The CI
   workflow doesn't pass `--allow-dirty`. A targeted fix would require switching
   to `git add` with explicit file paths from `affected_files`, which needs
