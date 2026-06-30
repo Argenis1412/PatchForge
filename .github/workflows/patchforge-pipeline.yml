@@ -70,6 +70,12 @@ jobs:
           PYEOF
 
       - name: Run PatchForge pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          PATCHFORGE_IMAGE: ${{ inputs.patchforge-image }}
+          RISK_BUDGET: ${{ inputs.risk-budget }}
         run: |
           docker run --rm \
             -v "$GITHUB_WORKSPACE:/repo" \
@@ -77,17 +83,13 @@ jobs:
             -e ANTHROPIC_API_KEY \
             -e GOOGLE_API_KEY \
             -e OPENROUTER_API_KEY \
-            ${{ inputs.patchforge-image }} \
+            "$PATCHFORGE_IMAGE" \
             patchforge ci /repo \
               --workspace /workspace \
               --issue-file /workspace/issue.md \
               --issue-number "$ISSUE_NUMBER" \
-              --risk-budget "${{ inputs.risk-budget }}" \
+              --risk-budget "$RISK_BUDGET" \
               --result-file /workspace/ci_result.json
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
 
       - name: Parse CI result
         id: result
@@ -111,16 +113,19 @@ jobs:
 
       - name: Push branch
         if: steps.result.outputs.status == 'applied'
-        run: git push -u origin "${{ steps.result.outputs.branch }}"
+        env:
+          BRANCH: ${{ steps.result.outputs.branch }}
+        run: git push -u origin "$BRANCH"
 
       - name: Create Pull Request
         if: steps.result.outputs.status == 'applied'
         env:
           GH_TOKEN: ${{ github.token }}
+          BASE_BRANCH: ${{ inputs.base-branch }}
+          RUN_ID: ${{ steps.result.outputs.run_id }}
+          BRANCH: ${{ steps.result.outputs.branch }}
+          RISK: ${{ steps.result.outputs.risk }}
         run: |
-          RUN_ID="${{ steps.result.outputs.run_id }}"
-          BRANCH="${{ steps.result.outputs.branch }}"
-          RISK="${{ steps.result.outputs.risk }}"
 
           AFFECTED=""
           if [ -f "/tmp/pf-workspace/ci_result.json" ]; then
@@ -143,7 +148,7 @@ jobs:
           fi
 
           gh pr create \
-            --base "${{ inputs.base-branch }}" \
+            --base "$BASE_BRANCH" \
             --head "$BRANCH" \
             --title "patchforge: issue #$ISSUE_NUMBER" \
             --body "Closes #$ISSUE_NUMBER
@@ -167,9 +172,10 @@ jobs:
         if: steps.result.outputs.status == 'applied'
         env:
           GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.result.outputs.branch }}
         run: |
           gh issue comment "$ISSUE_NUMBER" \
-            --body "PatchForge pipeline completed successfully. PR created from branch \`${{ steps.result.outputs.branch }}\`."
+            --body "PatchForge pipeline completed successfully. PR created from branch \`$BRANCH\`."
           gh issue edit "$ISSUE_NUMBER" \
             --remove-label "patchforge/process" --add-label "patchforge/completed"
 
@@ -177,8 +183,8 @@ jobs:
         if: always() && steps.result.outputs.status != 'applied'
         env:
           GH_TOKEN: ${{ github.token }}
+          STATUS: ${{ steps.result.outputs.status }}
         run: |
-          STATUS="${{ steps.result.outputs.status }}"
           ERROR=""
           if [ -f "/tmp/pf-workspace/ci_result.json" ]; then
             ERROR=$(python3 -c "
@@ -199,9 +205,11 @@ jobs:
 
       - name: Write step summary
         if: always()
+        env:
+          STATUS: ${{ steps.result.outputs.status }}
+          RUN_ID: ${{ steps.result.outputs.run_id }}
+          RISK: ${{ steps.result.outputs.risk }}
         run: |
-          STATUS="${{ steps.result.outputs.status }}"
-          RUN_ID="${{ steps.result.outputs.run_id }}"
           echo "## PatchForge Pipeline" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
@@ -209,7 +217,7 @@ jobs:
           echo "| Run ID | \`${RUN_ID:-unknown}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Status | \`${STATUS:-unknown}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Issue | #$ISSUE_NUMBER |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Risk | ${{ steps.result.outputs.risk }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Risk | ${RISK:-unknown} |" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifacts
         if: always()
