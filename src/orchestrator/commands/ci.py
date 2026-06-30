@@ -50,6 +50,10 @@ def execute(
     Does NOT call ``git push`` or any GitHub API — those are the caller's
     (workflow runner) responsibility.
     """
+    if risk_budget not in ("low", "medium", "high"):
+        raise ValueError(
+            f"Invalid risk_budget: {risk_budget!r}. Must be 'low', 'medium', or 'high'."
+        )
     from orchestrator.agents import architect as architect_agent
     from orchestrator.agents import executor as executor_agent
     from orchestrator.clients.bootstrap import bootstrap_environment

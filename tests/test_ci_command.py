@@ -572,3 +572,307 @@ class TestCiExecute:
         )
         restored = CiResult.model_validate_json(r.model_dump_json())
         assert restored == r
+
+    def test_execute_rejects_invalid_risk_budget(self, tmp_path):
+        from orchestrator.commands.ci import execute
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        ws = tmp_path / "ws"
+        ws.mkdir()
+
+        with pytest.raises(ValueError, match="Invalid risk_budget"):
+            execute(target_path=repo, workspace_path=ws, risk_budget="extreme")
+
+    def test_config_load_failure(self, ci_repo):
+        from orchestrator.commands.ci import execute
+
+        repo, ws = ci_repo
+
+        with (
+            patch("orchestrator.scanners.python.scan", return_value=_make_scan_findings()),
+            patch(
+                "orchestrator.schemas.config.TargetConfig.load",
+                side_effect=RuntimeError("bad config"),
+            ),
+        ):
+            result = execute(target_path=repo, workspace_path=ws)
+
+        assert result.status == "scan_failed"
+        assert "Config load failed" in (result.error or "")
+
+    def test_executor_raises(self, ci_repo):
+        from orchestrator.commands.ci import execute
+
+        repo, ws = ci_repo
+        arch_output = _make_arch_output()
+        issue_md = ws / "issue.md"
+        issue_md.write_text(
+            '---\ntitle: "test"\nnumber: 1\n---\n\nFix bug\n',
+            encoding="utf-8",
+        )
+
+        with (
+            patch("orchestrator.scanners.python.scan", return_value=_make_scan_findings()),
+            patch(
+                "orchestrator.agents.architect.run_from_issue",
+                return_value=(arch_output, {"cost_usd": 0}),
+            ),
+            patch("orchestrator.risk.check_plan_gate", return_value=_make_risk_result()),
+            patch("orchestrator.schemas.experiment.Experiment"),
+            patch("orchestrator.workspace.WorkspaceManager.write_experiment"),
+            patch(
+                "orchestrator.agents.executor.run",
+                side_effect=RuntimeError("executor crash"),
+            ),
+        ):
+            result = execute(
+                target_path=repo,
+                workspace_path=ws,
+                issue_file=issue_md,
+            )
+
+        assert result.status == "preview_failed"
+        assert "executor crash" in (result.error or "").lower()
+
+    def test_patch_gate_failure(self, ci_repo):
+        from orchestrator.commands.ci import execute
+
+        repo, ws = ci_repo
+        arch_output = _make_arch_output()
+        exec_output = _make_executor_output()
+        issue_md = ws / "issue.md"
+        issue_md.write_text(
+            '---\ntitle: "test"\nnumber: 1\n---\n\nFix bug\n',
+            encoding="utf-8",
+        )
+
+        with (
+            patch("orchestrator.scanners.python.scan", return_value=_make_scan_findings()),
+            patch(
+                "orchestrator.agents.architect.run_from_issue",
+                return_value=(arch_output, {"cost_usd": 0}),
+            ),
+            patch("orchestrator.risk.check_plan_gate", return_value=_make_risk_result()),
+            patch("orchestrator.schemas.experiment.Experiment"),
+            patch("orchestrator.workspace.WorkspaceManager.write_experiment"),
+            patch(
+                "orchestrator.agents.executor.run",
+                return_value=(exec_output, {"cost_usd": 0}),
+            ),
+            patch(
+                "orchestrator.risk.check_patch_gate",
+                return_value=_make_risk_result(passed=False),
+            ),
+        ):
+            result = execute(
+                target_path=repo,
+                workspace_path=ws,
+                issue_file=issue_md,
+            )
+
+        assert result.status == "preview_failed"
+        assert "Patch gate" in (result.error or "")
+
+    def test_experiment_capture_failure(self, ci_repo):
+        from orchestrator.commands.ci import execute
+
+        repo, ws = ci_repo
+        arch_output = _make_arch_output()
+        issue_md = ws / "issue.md"
+        issue_md.write_text(
+            '---\ntitle: "test"\nnumber: 1\n---\n\nFix bug\n',
+            encoding="utf-8",
+        )
+
+        with (
+            patch("orchestrator.scanners.python.scan", return_value=_make_scan_findings()),
+            patch(
+                "orchestrator.agents.architect.run_from_issue",
+                return_value=(arch_output, {"cost_usd": 0}),
+            ),
+            patch("orchestrator.risk.check_plan_gate", return_value=_make_risk_result()),
+            patch(
+                "orchestrator.schemas.experiment.Experiment",
+                side_effect=RuntimeError("capture boom"),
+            ),
+        ):
+            result = execute(
+                target_path=repo,
+                workspace_path=ws,
+                issue_file=issue_md,
+            )
+
+        assert result.status == "plan_failed"
+        assert "Experiment capture failed" in (result.error or "")
+
+    def test_branch_creation_failure(self, ci_repo):
+        from orchestrator.commands.ci import execute
+
+        repo, ws = ci_repo
+        arch_output = _make_arch_output()
+        exec_output = _make_executor_output()
+        val_output = _make_validator_output(passed=True)
+        issue_md = ws / "issue.md"
+        issue_md.write_text(
+            '---\ntitle: "test"\nnumber: 1\n---\n\nFix bug\n',
+            encoding="utf-8",
+        )
+
+        mock_git_fail = MagicMock()
+        mock_git_fail.return_code = 1
+        mock_git_fail.stderr = "branch exists"
+
+        with (
+            patch("orchestrator.scanners.python.scan", return_value=_make_scan_findings()),
+            patch(
+                "orchestrator.agents.architect.run_from_issue",
+                return_value=(arch_output, {"cost_usd": 0}),
+            ),
+            patch("orchestrator.risk.check_plan_gate", return_value=_make_risk_result()),
+            patch("orchestrator.risk.check_patch_gate", return_value=_make_risk_result()),
+            patch(
+                "orchestrator.agents.executor.run",
+                return_value=(exec_output, {"cost_usd": 0}),
+            ),
+            patch("orchestrator.schemas.experiment.Experiment"),
+            patch("orchestrator.workspace.WorkspaceManager.write_experiment"),
+            patch(
+                "orchestrator.validation_workspace.create_validation_workspace",
+            ) as mock_val_ws,
+            patch(
+                "orchestrator.validation_workspace.apply_patch_to_copy",
+                return_value=MagicMock(return_code=0),
+            ),
+            patch(
+                "orchestrator.validation_workspace.run_validation_in_copy",
+                return_value=val_output,
+            ),
+            patch(
+                "orchestrator.git.create_controlled_branch",
+                return_value=mock_git_fail,
+            ),
+        ):
+            mock_val_ws.return_value.__enter__ = MagicMock(
+                return_value=MagicMock(
+                    temporary_root=repo,
+                    patch_path=repo / "patch.diff",
+                ),
+            )
+            mock_val_ws.return_value.__exit__ = MagicMock(return_value=False)
+
+            result = execute(
+                target_path=repo,
+                workspace_path=ws,
+                issue_file=issue_md,
+            )
+
+        assert result.status == "apply_failed"
+        assert "Branch creation failed" in (result.error or "")
+        assert result.validation_passed is True
+
+    def test_apply_patch_failure_with_rollback(self, ci_repo):
+        from orchestrator.commands.ci import execute
+
+        repo, ws = ci_repo
+        arch_output = _make_arch_output()
+        exec_output = _make_executor_output()
+        val_output = _make_validator_output(passed=True)
+        issue_md = ws / "issue.md"
+        issue_md.write_text(
+            '---\ntitle: "test"\nnumber: 1\n---\n\nFix bug\n',
+            encoding="utf-8",
+        )
+
+        mock_git_ok = MagicMock()
+        mock_git_ok.return_code = 0
+
+        mock_patch_fail = MagicMock()
+        mock_patch_fail.return_code = 1
+        mock_patch_fail.stderr = "patch does not apply"
+
+        with (
+            patch("orchestrator.scanners.python.scan", return_value=_make_scan_findings()),
+            patch(
+                "orchestrator.agents.architect.run_from_issue",
+                return_value=(arch_output, {"cost_usd": 0}),
+            ),
+            patch("orchestrator.risk.check_plan_gate", return_value=_make_risk_result()),
+            patch("orchestrator.risk.check_patch_gate", return_value=_make_risk_result()),
+            patch(
+                "orchestrator.agents.executor.run",
+                return_value=(exec_output, {"cost_usd": 0}),
+            ),
+            patch("orchestrator.schemas.experiment.Experiment"),
+            patch("orchestrator.workspace.WorkspaceManager.write_experiment"),
+            patch(
+                "orchestrator.validation_workspace.create_validation_workspace",
+            ) as mock_val_ws,
+            patch(
+                "orchestrator.validation_workspace.apply_patch_to_copy",
+                return_value=MagicMock(return_code=0),
+            ),
+            patch(
+                "orchestrator.validation_workspace.run_validation_in_copy",
+                return_value=val_output,
+            ),
+            patch("orchestrator.git.create_controlled_branch", return_value=mock_git_ok),
+            patch("orchestrator.git.apply_patch", return_value=mock_patch_fail),
+            patch("orchestrator.agents.executor.rollback_to_commit") as mock_rollback,
+        ):
+            mock_val_ws.return_value.__enter__ = MagicMock(
+                return_value=MagicMock(
+                    temporary_root=repo,
+                    patch_path=repo / "patch.diff",
+                ),
+            )
+            mock_val_ws.return_value.__exit__ = MagicMock(return_value=False)
+
+            result = execute(
+                target_path=repo,
+                workspace_path=ws,
+                issue_file=issue_md,
+            )
+
+        assert result.status == "apply_failed"
+        assert "Patch apply failed" in (result.error or "")
+        assert result.validation_passed is True
+        mock_rollback.assert_called_once()
+
+    def test_empty_patch_fails(self, ci_repo):
+        from orchestrator.commands.ci import execute
+
+        repo, ws = ci_repo
+        arch_output = _make_arch_output()
+        issue_md = ws / "issue.md"
+        issue_md.write_text(
+            '---\ntitle: "test"\nnumber: 1\n---\n\nFix bug\n',
+            encoding="utf-8",
+        )
+
+        empty_exec = MagicMock()
+        empty_exec.applied = []
+        empty_exec.pending_review = []
+
+        with (
+            patch("orchestrator.scanners.python.scan", return_value=_make_scan_findings()),
+            patch(
+                "orchestrator.agents.architect.run_from_issue",
+                return_value=(arch_output, {"cost_usd": 0}),
+            ),
+            patch("orchestrator.risk.check_plan_gate", return_value=_make_risk_result()),
+            patch("orchestrator.schemas.experiment.Experiment"),
+            patch("orchestrator.workspace.WorkspaceManager.write_experiment"),
+            patch(
+                "orchestrator.agents.executor.run",
+                return_value=(empty_exec, {"cost_usd": 0}),
+            ),
+        ):
+            result = execute(
+                target_path=repo,
+                workspace_path=ws,
+                issue_file=issue_md,
+            )
+
+        assert result.status == "preview_failed"
+        assert "empty patch" in (result.error or "").lower()
