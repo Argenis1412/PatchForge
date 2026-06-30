@@ -7,7 +7,11 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from orchestrator.circuit_breaker import CircuitBreakerOpenError, circuit_breaker_for
+from orchestrator.circuit_breaker import (
+    CircuitBreaker,
+    CircuitBreakerOpenError,
+    circuit_breaker_for,
+)
 from orchestrator.clients.anthropic_client import get_anthropic_client
 from orchestrator.clients.gemini_client import get_gemini_client
 from orchestrator.clients.openrouter_client import get_openrouter_client
@@ -47,13 +51,24 @@ _PROVIDER_CHAIN: dict[str, list] = {
 # in HALF_OPEN — acceptable since a successful probe closes the CB for everyone.
 # ---------------------------------------------------------------------------
 
-_db_dir_env = os.getenv("PATCHFORGE_DATA_DIR")
-_coord_db_dir = Path(_db_dir_env) if _db_dir_env is not None else Path.home() / ".patchforge"
-_coord_store = SqliteCircuitBreakerStore(_coord_db_dir)
+_coord_store: SqliteCircuitBreakerStore | None = None
+_cb_gemini: CircuitBreaker | None = None
+_cb_openrouter: CircuitBreaker | None = None
+_cb_claude: CircuitBreaker | None = None
 
-_cb_gemini = circuit_breaker_for("gemini", store=_coord_store)
-_cb_openrouter = circuit_breaker_for("openrouter", store=_coord_store)
-_cb_claude = circuit_breaker_for("claude", store=_coord_store)
+
+def _init_circuit_breakers() -> None:
+    """Lazy-init shared store + circuit breakers on first use (not at import time)."""
+    global _coord_store, _cb_gemini, _cb_openrouter, _cb_claude  # noqa: PLW0603
+    if _coord_store is not None:
+        return
+    db_dir_env = os.getenv("PATCHFORGE_DATA_DIR")
+    coord_db_dir = Path(db_dir_env) if db_dir_env is not None else Path.home() / ".patchforge"
+    _coord_store = SqliteCircuitBreakerStore(coord_db_dir)
+    _cb_gemini = circuit_breaker_for("gemini", store=_coord_store)
+    _cb_openrouter = circuit_breaker_for("openrouter", store=_coord_store)
+    _cb_claude = circuit_breaker_for("claude", store=_coord_store)
+
 
 # ---------------------------------------------------------------------------
 # Model Helpers
@@ -118,6 +133,7 @@ def _do_gemini_call(prompt: str, run_id: str) -> tuple[str, int, int]:
 
 
 def _call_gemini(prompt: str, run_id: str) -> tuple[str, int, int]:
+    _init_circuit_breakers()
     return _cb_gemini.call(lambda: _do_gemini_call(prompt, run_id))
 
 
@@ -170,6 +186,7 @@ def _do_openrouter_call(prompt: str, run_id: str) -> tuple[str, int, int]:
 
 
 def _call_openrouter(prompt: str, run_id: str) -> tuple[str, int, int]:
+    _init_circuit_breakers()
     return _cb_openrouter.call(lambda: _do_openrouter_call(prompt, run_id))
 
 
@@ -204,6 +221,7 @@ def _do_claude_call(prompt: str, run_id: str) -> tuple[str, int, int]:
 
 
 def _call_claude(prompt: str, run_id: str) -> tuple[str, int, int]:
+    _init_circuit_breakers()
     return _cb_claude.call(lambda: _do_claude_call(prompt, run_id))
 
 
