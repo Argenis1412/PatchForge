@@ -31,6 +31,7 @@ def _risk_limits(risk_budget: str) -> tuple[int, int]:
 
 
 def _write_result(result: CiResult, result_path: Path) -> None:
+    result_path.parent.mkdir(parents=True, exist_ok=True)
     result_path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
 
 
@@ -79,14 +80,21 @@ def execute(
 
     run_id = ""
 
-    def _fail(status: str, error: str, *, branch: str = "") -> CiResult:
+    def _fail(
+        status: str,
+        error: str,
+        *,
+        branch: str = "",
+        affected_files: Optional[list[str]] = None,
+        validation_passed: bool = False,
+    ) -> CiResult:
         r = CiResult(
             run_id=run_id,
             branch=branch,
             status=status,
             risk_budget=risk_budget,
-            affected_files=[],
-            validation_passed=False,
+            affected_files=affected_files or [],
+            validation_passed=validation_passed,
             error=error,
             issue_number=issue_number,
         )
@@ -94,12 +102,21 @@ def execute(
         return r
 
     # ── Bootstrap ──────────────────────────────────────────────────────
-    bootstrap_environment(target_path=target_path)
+    try:
+        bootstrap_environment(target_path=target_path)
+    except Exception as exc:
+        return _fail("scan_failed", f"Bootstrap failed: {exc}")
 
     try:
-        repository_state(target_path)
+        repo_state = repository_state(target_path)
     except ValueError as exc:
         return _fail("scan_failed", str(exc))
+
+    if not allow_dirty and not repo_state.is_clean:
+        return _fail(
+            "scan_failed",
+            "Working tree is not clean. Commit or stash changes, or pass --allow-dirty.",
+        )
 
     workspace_mgr = WorkspaceManager(workspace_path)
     workspace_mgr.setup()
@@ -447,31 +464,40 @@ def execute(
     )
     _wal_write(apply_result, run_dir / "apply.json")
 
-    branch_res = create_controlled_branch(target_path, branch_name)
-    if branch_res.return_code != 0:
-        apply_result.error = branch_res.stderr
+    affected = run_metadata.affected_files or []
+
+    def _apply_fail(error: str, *, rolled_back: bool = False) -> CiResult:
+        apply_result.error = error
+        apply_result.rolled_back = rolled_back
         _wal_write(apply_result, run_dir / "apply.json")
         run_metadata.status = "failed"
         run_metadata.updated_at = datetime.now(timezone.utc)
         workspace_mgr.write_run_json(run_id, run_metadata)
-        msg = f"Branch creation failed: {branch_res.stderr}"
-        return _fail("apply_failed", msg, branch=branch_name)
+        return _fail(
+            "apply_failed",
+            error,
+            branch=branch_name,
+            affected_files=affected,
+            validation_passed=True,
+        )
 
-    apply_res = apply_patch(target_path, patch_path)
-    if apply_res.return_code != 0:
+    def _rollback() -> bool:
         from orchestrator.agents.executor import rollback_to_commit
 
         try:
             rollback_to_commit(target_path, pre_apply_head)
+            return True
         except Exception:
-            pass
-        apply_result.error = apply_res.stderr
-        apply_result.rolled_back = True
-        _wal_write(apply_result, run_dir / "apply.json")
-        run_metadata.status = "failed"
-        run_metadata.updated_at = datetime.now(timezone.utc)
-        workspace_mgr.write_run_json(run_id, run_metadata)
-        return _fail("apply_failed", f"Patch apply failed: {apply_res.stderr}", branch=branch_name)
+            return False
+
+    branch_res = create_controlled_branch(target_path, branch_name)
+    if branch_res.return_code != 0:
+        return _apply_fail(f"Branch creation failed: {branch_res.stderr}")
+
+    apply_res = apply_patch(target_path, patch_path)
+    if apply_res.return_code != 0:
+        rolled = _rollback()
+        return _apply_fail(f"Patch apply failed: {apply_res.stderr}", rolled_back=rolled)
 
     # Commit
     commit_msg = f"patchforge: apply {run_id}"
@@ -484,10 +510,8 @@ def execute(
         timeout=30,
     )
     if ar.returncode != 0:
-        run_metadata.status = "failed"
-        run_metadata.updated_at = datetime.now(timezone.utc)
-        workspace_mgr.write_run_json(run_id, run_metadata)
-        return _fail("apply_failed", f"git add failed: {ar.stderr}", branch=branch_name)
+        rolled = _rollback()
+        return _apply_fail(f"git add failed: {ar.stderr}", rolled_back=rolled)
 
     cr = subprocess.run(
         ["git", "-C", str(target_path), "commit", "-m", commit_msg],
@@ -496,10 +520,8 @@ def execute(
         timeout=30,
     )
     if cr.returncode != 0:
-        run_metadata.status = "failed"
-        run_metadata.updated_at = datetime.now(timezone.utc)
-        workspace_mgr.write_run_json(run_id, run_metadata)
-        return _fail("apply_failed", f"git commit failed: {cr.stderr}", branch=branch_name)
+        rolled = _rollback()
+        return _apply_fail(f"git commit failed: {cr.stderr}", rolled_back=rolled)
 
     apply_result.success = True
     apply_result.status = "committed_local"

@@ -442,6 +442,124 @@ class TestCiExecute:
         data = json.loads(result_path.read_text(encoding="utf-8"))
         assert data["run_id"] == ""
 
+    def test_dirty_tree_blocked_without_allow_dirty(self, ci_repo):
+        from orchestrator.commands.ci import execute
+
+        repo, ws = ci_repo
+        (repo / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
+
+        result = execute(target_path=repo, workspace_path=ws)
+
+        assert result.status == "scan_failed"
+        assert "not clean" in (result.error or "").lower()
+
+    def test_allow_dirty_bypasses_clean_guard(self, ci_repo):
+        from orchestrator.commands.ci import execute
+
+        repo, ws = ci_repo
+        (repo / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
+        findings = _make_scan_findings(v1_supported=False)
+
+        with patch("orchestrator.scanners.python.scan", return_value=findings):
+            result = execute(target_path=repo, workspace_path=ws, allow_dirty=True)
+
+        # Reaching the scan stage proves the clean-tree guard was bypassed.
+        assert result.status == "scan_failed"
+        assert "V1 not supported" in (result.error or "")
+
+    def test_bootstrap_failure_writes_result(self, ci_repo):
+        from orchestrator.commands.ci import execute
+
+        repo, ws = ci_repo
+        result_path = ws / "boot_result.json"
+
+        with patch(
+            "orchestrator.clients.bootstrap.bootstrap_environment",
+            side_effect=RuntimeError("boom"),
+        ):
+            result = execute(
+                target_path=repo,
+                workspace_path=ws,
+                result_path=result_path,
+            )
+
+        assert result.status == "scan_failed"
+        assert "Bootstrap failed" in (result.error or "")
+        assert result_path.exists()
+
+    def test_apply_failure_preserves_validation_context(self, ci_repo):
+        """#5: apply_failed after passing validation must report validation_passed=True."""
+        from orchestrator.commands.ci import execute
+
+        repo, ws = ci_repo
+        arch_output = _make_arch_output()
+        exec_output = _make_executor_output()
+        val_output = _make_validator_output(passed=True)
+        issue_md = ws / "issue.md"
+        issue_md.write_text(
+            '---\ntitle: "test"\nnumber: 1\n---\n\nFix bug\n',
+            encoding="utf-8",
+        )
+
+        def fake_run(cmd, *args, **kwargs):
+            m = MagicMock()
+            m.stdout = ""
+            m.stderr = ""
+            if isinstance(cmd, list) and "commit" in cmd:
+                m.returncode = 1
+                m.stderr = "nothing to commit"
+            else:
+                m.returncode = 0
+            return m
+
+        mock_git_ok = MagicMock()
+        mock_git_ok.return_code = 0
+
+        with (
+            patch("orchestrator.scanners.python.scan", return_value=_make_scan_findings()),
+            patch(
+                "orchestrator.agents.architect.run_from_issue",
+                return_value=(arch_output, {"cost_usd": 0}),
+            ),
+            patch("orchestrator.risk.check_plan_gate", return_value=_make_risk_result()),
+            patch("orchestrator.risk.check_patch_gate", return_value=_make_risk_result()),
+            patch(
+                "orchestrator.agents.executor.run",
+                return_value=(exec_output, {"cost_usd": 0}),
+            ),
+            patch("orchestrator.schemas.experiment.Experiment"),
+            patch("orchestrator.workspace.WorkspaceManager.write_experiment"),
+            patch("orchestrator.validation_workspace.create_validation_workspace") as mock_val_ws,
+            patch(
+                "orchestrator.validation_workspace.apply_patch_to_copy",
+                return_value=MagicMock(return_code=0),
+            ),
+            patch(
+                "orchestrator.validation_workspace.run_validation_in_copy",
+                return_value=val_output,
+            ),
+            patch("orchestrator.git.create_controlled_branch", return_value=mock_git_ok),
+            patch("orchestrator.git.apply_patch", return_value=mock_git_ok),
+            patch("orchestrator.agents.executor.rollback_to_commit"),
+            patch("subprocess.run", side_effect=fake_run),
+        ):
+            mock_val_ws.return_value.__enter__ = MagicMock(
+                return_value=MagicMock(
+                    temporary_root=repo,
+                    patch_path=repo / "patch.diff",
+                ),
+            )
+            mock_val_ws.return_value.__exit__ = MagicMock(return_value=False)
+
+            result = execute(
+                target_path=repo,
+                workspace_path=ws,
+                issue_file=issue_md,
+            )
+
+        assert result.status == "apply_failed"
+        assert result.validation_passed is True
+
     def test_ci_result_schema_roundtrip(self):
         r = CiResult(
             run_id="run_20260630_120000_abc123",
