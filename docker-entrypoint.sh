@@ -14,7 +14,7 @@ fi
 mkdir -p "$HOME"
 
 # 3. Git safe.directory — mounted repos are owned by host UID
-git config --global --add safe.directory '*'
+git config --global --add safe.directory /repo
 
 # 4. Git identity for apply (commits) and validation_workspace (temp git init)
 git config --global user.name "patchforge[bot]"

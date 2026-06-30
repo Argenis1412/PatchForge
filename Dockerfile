@@ -8,7 +8,8 @@ RUN groupadd --gid 1000 patchforge \
     && useradd --uid 1000 --gid 1000 --create-home patchforge
 
 RUN mkdir -p /repo /workspace \
-    && chown patchforge:patchforge /repo /workspace
+    && chown patchforge:patchforge /repo /workspace \
+    && chmod 777 /repo /workspace
 
 COPY pyproject.toml README.md LICENSE CHANGELOG.md ./
 COPY src/ src/
