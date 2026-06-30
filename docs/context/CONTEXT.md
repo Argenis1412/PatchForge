@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-06-28 | Session: feat/issue-176-provider-fallback-chain
+> Last updated: 2026-06-29 | Session: feat/issue-181-docker-containerization
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,9 +15,9 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 578 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 585 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
-**Key constraint:** Single-threaded, synchronous pipeline (invariant until Docker/CI-CD lands in P3 closure).
+**Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3).
 
 ---
 
@@ -252,8 +252,10 @@ These must not change without a new ADR in `docs/adr/`:
 - ✅ Issue #176 — Provider fallback chain for architect, scout, and validator summarizer (#177)
 
 **P3 closure items remaining:**
-- Dockerfile — deferred until self-hosted runners or external deployment needed (follow-up issue)
 - Asymmetric risk gates — deferred to P4
+
+**P3 closure items complete:**
+- ✅ Issue #181 — Docker containerization (PR #182, 2026-06-29)
 
 ---
 
