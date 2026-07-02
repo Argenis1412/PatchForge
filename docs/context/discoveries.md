@@ -190,6 +190,30 @@
   Version-tagged images require a publishing pipeline (separate issue). Low
   impact while PatchForge is the only consumer.
 
+### [2026-07-02] Dogfooding 002 — Executor generates CRLF patch on Windows
+
+- **File:** `src/orchestrator/agents/executor/` (diff generation path)
+- **Debt:** On Windows, the executor writes `patch.diff` with CRLF (`\r\n`) line endings.
+  The validation workspace uses `git apply` internally, which expects LF. Result: "error: patch
+  does not apply" even when the patch is semantically correct. Confirmed: source file uses LF
+  (24 LF, 0 CRLF), patch has 16 CRLF lines. The patch applies correctly after CRLF→LF conversion.
+- **Discovered by:** Dogfooding 002
+- **Why deferred:** Fix requires normalizing line endings in the executor diff output before writing.
+  Does not affect Linux/Mac environments where the default is LF.
+
+### [2026-07-02] Dogfooding 002 — Git root mismatch for subdirectory targets
+
+- **File:** `src/orchestrator/validation_workspace.py` and `src/orchestrator/commands/apply.py`
+- **Debt:** When `target_path` is a subdirectory of the git root (e.g. `Portf-lio/backend/`
+  while git root is `Portf-lio/`), the patch uses paths relative to `target_path`
+  (`app/schemas/philosophy.py`) but `git diff` reports relative to git root
+  (`backend/app/schemas/philosophy.py`). The validation workspace isolates from `target_path`
+  so `apply_patch_to_copy` works, but `patchforge apply` using the git root could fail.
+  Latent risk if the user runs `git apply` manually from the git root.
+- **Discovered by:** Dogfooding 002
+- **Why deferred:** The validation workspace mitigates this in preview. The apply command
+  needs a separate audit to confirm it handles subdirectory git roots correctly.
+
 ### [2026-06-14] Issue #100 — Agent fallback inconsistency
 
 - **File:** `src/orchestrator/agents/validator.py`

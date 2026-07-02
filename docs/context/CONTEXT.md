@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-07-02 | Session: hardening-ci-preview-tests
+> Last updated: 2026-07-02 | Session: dogfooding-002
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -262,6 +262,7 @@ These must not change without a new ADR in `docs/adr/`:
 - ✅ Hardening — CI coverage collection + ruff B/SIM/C4 rules (PR #186, 2026-07-02, closed)
 - ✅ Hardening — CI coverage split: separate data collection from report generation (PR #187, 2026-07-02)
 - ✅ Hardening — Direct tests for preview.execute(): 8 scenarios + 2 safety invariants (PR #188, 2026-07-02)
+- ✅ Dogfooding 002 — Portfolio backend (2026-07-02): PhilosophyItemSchema Field() metadata. Pipeline reliability FAIL (CRLF bug, Windows). Patch quality PASS (correct semantics, QA green after manual apply). 2 bugs discovered: CRLF in patch.diff, git subdirectory root mismatch.
 
 ---
 
