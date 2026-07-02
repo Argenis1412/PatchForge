@@ -196,7 +196,7 @@ def _hydrate_workspace(run_id: str, workspace: Any, store: Any) -> Path:
             continue
         except Exception:
             continue
-        run_dir.joinpath(name).write_text(data, encoding="utf-8")
+        run_dir.joinpath(name).write_text(data, encoding="utf-8", newline="")
     return run_dir
 
 
@@ -225,7 +225,7 @@ def _hydrate_stage(
     else:
         data = checkpoint_output
     local = workspace.run_dir(run_id) / name
-    local.write_text(data, encoding="utf-8")
+    local.write_text(data, encoding="utf-8", newline="")
 
 
 def _ensure_clone(payload: dict, workspace: Any, run_id: str) -> Path:

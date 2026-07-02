@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 617 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 619 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3).
 
@@ -256,10 +256,13 @@ These must not change without a new ADR in `docs/adr/`:
 **P3 closure items remaining:**
 - Asymmetric risk gates — deferred to P4
 
-**Next session — Bug fixes from Dogfooding 002 (priority order):**
-1. **CRLF fix** — executor writes `patch.diff` with `\r\n` on Windows; `git apply` in validation workspace fails. Fix: normalize to LF before writing diff. File: `src/orchestrator/agents/executor/diffing.py`.
-2. **Git root mismatch audit** — `patchforge apply` may fail when `target_path` is a git subdirectory (e.g. `backend/` inside `Portf-lio/`). Audit `apply.py` and `validation_workspace.py` to confirm or fix. Latent risk confirmed in Dogfooding 002.
-3. **Dogfooding 003** — after CRLF fix, run a 3rd experiment where `preview` reaches `status=previewed` to confirm the fix works end-to-end.
+**Next session — Dogfooding 003:**
+- Run experiment against Portfolio backend to validate CRLF fix end-to-end on Windows.
+- Success: `status=previewed`, `overall_passed=true`, `patch.diff` LF-only.
+
+**Completed bug fixes from Dogfooding 002:**
+- ✅ **CRLF fix (Issue #192)** — Added `newline=""` to all write paths: `local_store.py`, `work_queue.py` (×2), `__init__.py` (`_wal_write`). Regression + idempotency tests added.
+- ✅ **Git root mismatch audit** — `apply.py` uses `git -C target_path` throughout; `validation_workspace.py` creates fresh `git init`. PatchForge commands are protected. Risk only if user runs `git apply` manually from git root.
 
 **P3 closure items complete:**
 - ✅ Issue #181 — Docker containerization (PR #182, 2026-06-29)

@@ -190,7 +190,7 @@
   Version-tagged images require a publishing pipeline (separate issue). Low
   impact while PatchForge is the only consumer.
 
-### [2026-07-02] Dogfooding 002 — Executor generates CRLF patch on Windows
+### ✅ [2026-07-02] Dogfooding 002 — Executor generates CRLF patch on Windows (RESOLVED)
 
 - **File:** `src/orchestrator/agents/executor/` (diff generation path)
 - **Debt:** On Windows, the executor writes `patch.diff` with CRLF (`\r\n`) line endings.
@@ -198,10 +198,16 @@
   does not apply" even when the patch is semantically correct. Confirmed: source file uses LF
   (24 LF, 0 CRLF), patch has 16 CRLF lines. The patch applies correctly after CRLF→LF conversion.
 - **Discovered by:** Dogfooding 002
-- **Why deferred:** Fix requires normalizing line endings in the executor diff output before writing.
-  Does not affect Linux/Mac environments where the default is LF.
+- **Resolution (Issue #192):** Added `newline=""` to all write paths that can produce `patch.diff`:
+  - `src/orchestrator/storage/local_store.py:23` — primary path via `LocalArtifactStore.write()`
+  - `src/orchestrator/storage/work_queue.py:199` — `_restore_checkpoint` path
+  - `src/orchestrator/storage/work_queue.py:228` — `_hydrate_stage` path
+  - `src/orchestrator/storage/__init__.py:40` — `_wal_write` (consistency; JSON is not broken by CRLF but matches the pattern)
+  Regression test `test_local_store_preserves_lf` verifies raw bytes contain no `\r\n`.
+  Idempotency test `test_local_store_lf_idempotency_git_apply` confirms `git apply --check` passes
+  with `core.autocrlf=false` pinned.
 
-### [2026-07-02] Dogfooding 002 — Git root mismatch for subdirectory targets
+### ✅ [2026-07-02] Dogfooding 002 — Git root mismatch for subdirectory targets (AUDITED — no bug in PatchForge commands)
 
 - **File:** `src/orchestrator/validation_workspace.py` and `src/orchestrator/commands/apply.py`
 - **Debt:** When `target_path` is a subdirectory of the git root (e.g. `Portf-lio/backend/`
@@ -211,8 +217,11 @@
   so `apply_patch_to_copy` works, but `patchforge apply` using the git root could fail.
   Latent risk if the user runs `git apply` manually from the git root.
 - **Discovered by:** Dogfooding 002
-- **Why deferred:** The validation workspace mitigates this in preview. The apply command
-  needs a separate audit to confirm it handles subdirectory git roots correctly.
+- **Audit result (Issue #192 session):** PatchForge's own commands are protected:
+  - `apply.py` uses `git -C target_path` throughout (lines 121, 169, 328) — operates relative to `target_path`, not git root.
+  - `validation_workspace.py` creates a fresh `git init` at the temp copy root (lines 45-83) — completely isolated from the outer git tree.
+  - Diffs are generated relative to `target_path` via `task.files_to_modify[0]`.
+  - The mismatch is a risk only if the user manually runs `git apply` from the git root using the generated `patch.diff`. External to PatchForge's automated flow.
 
 ### [2026-06-14] Issue #100 — Agent fallback inconsistency
 

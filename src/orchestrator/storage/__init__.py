@@ -37,7 +37,7 @@ def _sqlite_connect(db_path: Path, *, timeout: float = 30.0) -> sqlite3.Connecti
 def _wal_write(result: BaseModel, path: Path) -> None:
     """Atomic WAL write with guaranteed OS fsync. Call after EVERY status change."""
     tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8") as f:
+    with tmp.open("w", encoding="utf-8", newline="") as f:
         f.write(result.model_dump_json(indent=2))
         f.flush()  # flush Python buffer → OS buffer cache
         os.fsync(f.fileno())  # force OS buffer cache → physical disk
