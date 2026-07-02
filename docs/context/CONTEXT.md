@@ -256,6 +256,11 @@ These must not change without a new ADR in `docs/adr/`:
 **P3 closure items remaining:**
 - Asymmetric risk gates — deferred to P4
 
+**Next session — Bug fixes from Dogfooding 002 (priority order):**
+1. **CRLF fix** — executor writes `patch.diff` with `\r\n` on Windows; `git apply` in validation workspace fails. Fix: normalize to LF before writing diff. File: `src/orchestrator/agents/executor/diffing.py`.
+2. **Git root mismatch audit** — `patchforge apply` may fail when `target_path` is a git subdirectory (e.g. `backend/` inside `Portf-lio/`). Audit `apply.py` and `validation_workspace.py` to confirm or fix. Latent risk confirmed in Dogfooding 002.
+3. **Dogfooding 003** — after CRLF fix, run a 3rd experiment where `preview` reaches `status=previewed` to confirm the fix works end-to-end.
+
 **P3 closure items complete:**
 - ✅ Issue #181 — Docker containerization (PR #182, 2026-06-29)
 - ✅ Issue #183 — CI/CD reusable workflow + `patchforge ci` command (2026-06-30)
