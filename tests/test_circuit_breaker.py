@@ -9,6 +9,7 @@ No network calls are made.
 
 from __future__ import annotations
 
+import contextlib
 import time
 from unittest.mock import MagicMock
 
@@ -226,15 +227,10 @@ def test_counter_resets_on_success():
         raise ValueError("x")
 
     for _ in range(5):
-        try:
-            # Alternate fail / success
+        with contextlib.suppress(ValueError):
             cb.call(fail)
-        except ValueError:
-            pass
-        try:
+        with contextlib.suppress(Exception):
             cb.call(lambda: "ok")
-        except Exception:
-            pass
 
     assert cb.state is CircuitBreakerState.CLOSED
     assert cb._consecutive_failures == 0

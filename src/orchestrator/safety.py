@@ -78,5 +78,5 @@ def ensure_safe_relative(path: str, base: Path) -> str:
     try:
         candidate.relative_to(resolved_base)
     except ValueError:
-        raise ValueError(f"Path {path!r} escapes base directory {resolved_base}")
+        raise ValueError(f"Path {path!r} escapes base directory {resolved_base}") from None
     return path

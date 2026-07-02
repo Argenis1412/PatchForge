@@ -26,11 +26,11 @@ def _read_snapshot(name: str) -> str:
 
 
 def test_architect_prompt_snapshot():
-    assert ARCHITECT_PROMPT == _read_snapshot("ARCHITECT_PROMPT.txt")
+    assert _read_snapshot("ARCHITECT_PROMPT.txt") == ARCHITECT_PROMPT
 
 
 def test_issue_architect_prompt_snapshot():
-    assert ISSUE_ARCHITECT_PROMPT == _read_snapshot("ISSUE_ARCHITECT_PROMPT.txt")
+    assert _read_snapshot("ISSUE_ARCHITECT_PROMPT.txt") == ISSUE_ARCHITECT_PROMPT
 
 
 _CLEAN_JSON = (

@@ -29,20 +29,18 @@ jobs:
     - name: Lint with ruff
       run: |
         ruff check src/ tests/
-      continue-on-error: true
 
     - name: Format check with ruff
       run: |
         ruff format --check src/ tests/
-      continue-on-error: true
 
     - name: Run tests (parallel)
       run: |
-        pytest -v --tb=short -n auto --dist loadfile -m "not serial"
+        pytest -v --tb=short --cov=src/orchestrator --cov-report=xml -n auto --dist loadfile -m "not serial"
 
     - name: Run tests (serial)
       run: |
-        pytest -v --tb=short -m serial || [ $? -eq 5 ]
+        pytest -v --tb=short --cov=src/orchestrator --cov-report=xml --cov-append -m serial || [ $? -eq 5 ]
 
     - name: Upload coverage reports
       uses: codecov/codecov-action@v3

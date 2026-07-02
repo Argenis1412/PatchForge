@@ -218,7 +218,7 @@ class Pipeline:
                 f"Failed to load {stage} output: {e}. Re-run from an earlier stage.",
                 stage=stage,
                 data={"stage": stage},
-            )
+            ) from e
 
     def _persist_stage_output(self, stage: str, output) -> None:
         filename = f"{stage}_{self.run.run_id}.json"
@@ -237,7 +237,7 @@ class Pipeline:
             return output
         except Exception as exc:
             self.run.scout_meta = AgentMeta(status="failed", error=str(exc), latency_ms=_ms(t0))
-            raise PipelineAbortError(f"scout failed: {exc}", stage="scout")
+            raise PipelineAbortError(f"scout failed: {exc}", stage="scout") from exc
 
     def _stage_architect(self, scout_output: ScoutOutput) -> ArchitectOutput:
         self._log_event("stage_start", stage="architect")
@@ -265,7 +265,7 @@ class Pipeline:
             raise
         except Exception as exc:
             self.run.architect_meta = AgentMeta(status="failed", error=str(exc), latency_ms=_ms(t0))
-            raise PipelineAbortError(f"architect failed: {exc}", stage="architect")
+            raise PipelineAbortError(f"architect failed: {exc}", stage="architect") from exc
 
     def _apply_executor_results(self, result: ExecutorOutput, model_used: str = "unknown") -> None:
         self.run.tasks_total = len(result.applied) + len(result.pending_review) + len(result.errors)
@@ -320,7 +320,7 @@ class Pipeline:
             )
         except Exception as exc:
             self.run.executor_meta = AgentMeta(status="failed", error=str(exc), latency_ms=_ms(t0))
-            raise PipelineAbortError(f"executor failed: {exc}", stage="executor")
+            raise PipelineAbortError(f"executor failed: {exc}", stage="executor") from exc
 
     def _stage_validator(self) -> None:
         if self.run.tasks_applied == 0:

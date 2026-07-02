@@ -10,10 +10,7 @@ class LocalArtifactStore(ArtifactStore):
 
     def _resolve_and_validate(self, path: str) -> Path:
         candidate = Path(path)
-        if candidate.is_absolute():
-            resolved = candidate.resolve()
-        else:
-            resolved = (self._base / path).resolve()
+        resolved = candidate.resolve() if candidate.is_absolute() else (self._base / path).resolve()
         if not resolved.is_relative_to(self._base):
             raise ValueError(f"Path {path!r} resolves outside store base {self._base}")
         return resolved

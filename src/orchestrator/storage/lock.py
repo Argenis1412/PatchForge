@@ -146,10 +146,9 @@ def acquire_repo_lock(
             (repo_identity,),
         ).fetchone()
         now = time.time()
-        if row:
-            if now < row["expires_at"] and row["worker_id"] != worker_id:
-                conn.rollback()
-                return False
+        if row and now < row["expires_at"] and row["worker_id"] != worker_id:
+            conn.rollback()
+            return False
         conn.execute(
             "INSERT OR REPLACE INTO repo_lock (repo, worker_id, expires_at) VALUES (?, ?, ?)",
             (repo_identity, worker_id, now + ttl_seconds),

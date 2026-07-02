@@ -5,14 +5,14 @@ from orchestrator.workspace import WorkspaceManager
 
 
 def _minimal_meta(**kwargs) -> RunMetadata:
-    defaults = dict(
-        run_id="run_20260101_000000_abc123",
-        target_path="/t",
-        workspace_path="/w",
-        base_commit="a" * 40,
-        branch="main",
-        v1_supported=True,
-    )
+    defaults = {
+        "run_id": "run_20260101_000000_abc123",
+        "target_path": "/t",
+        "workspace_path": "/w",
+        "base_commit": "a" * 40,
+        "branch": "main",
+        "v1_supported": True,
+    }
     defaults.update(kwargs)
     return RunMetadata(**defaults)
 

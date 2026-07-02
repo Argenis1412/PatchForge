@@ -62,10 +62,7 @@ def detect_test_suite(path: Path, pyproject: Optional[dict] = None) -> bool:
 
 def _detect_typescript(path: Path) -> bool:
     """Return True if any .ts or .tsx files exist under *path*."""
-    for pattern in ("*.ts", "*.tsx"):
-        if any(path.rglob(pattern)):
-            return True
-    return False
+    return any(any(path.rglob(pattern)) for pattern in ("*.ts", "*.tsx"))
 
 
 def _read_orchestrator_config(path: Path) -> dict:
@@ -270,14 +267,13 @@ def check_ruff(path: Path) -> CheckResult:
     config = _read_orchestrator_config(path)
     lint_command = config.get("lint_command")
 
-    if lint_command is not None:
-        if isinstance(lint_command, list) and len(lint_command) > 0:
-            return CheckResult(
-                name="ruff",
-                status=CheckStatus.PASS,
-                message="Lint command is explicitly configured in orchestrator.json",
-                detail=f"lint_command: {lint_command}",
-            )
+    if lint_command is not None and isinstance(lint_command, list) and len(lint_command) > 0:
+        return CheckResult(
+            name="ruff",
+            status=CheckStatus.PASS,
+            message="Lint command is explicitly configured in orchestrator.json",
+            detail=f"lint_command: {lint_command}",
+        )
 
     found, version_str = check_command_available("ruff")
     if found:
@@ -301,28 +297,27 @@ def check_pytest(path: Path, pyproject: Optional[dict] = None) -> CheckResult:
     config = _read_orchestrator_config(path)
     test_command = config.get("test_command")
 
-    if test_command is not None:
-        if isinstance(test_command, list) and len(test_command) > 0:
-            if detect_test_suite(path, pyproject):
-                return CheckResult(
-                    name="pytest",
-                    status=CheckStatus.PASS,
-                    message=(
-                        "Test command is explicitly configured "
-                        "in orchestrator.json, and a test suite is detectable"
-                    ),
-                    detail=f"test_command: {test_command}",
-                )
+    if test_command is not None and isinstance(test_command, list) and len(test_command) > 0:
+        if detect_test_suite(path, pyproject):
             return CheckResult(
                 name="pytest",
-                status=CheckStatus.FAIL,
-                message="Test command is configured but no test suite is detectable",
-                detail=(
-                    "No tests/, test/, pytest.ini, conftest.py, "
-                    "[tool.pytest.ini_options], or test_*/*_test.py files found"
+                status=CheckStatus.PASS,
+                message=(
+                    "Test command is explicitly configured "
+                    "in orchestrator.json, and a test suite is detectable"
                 ),
-                fix_hint="Create a tests/ directory or a conftest.py to define your test suite",
+                detail=f"test_command: {test_command}",
             )
+        return CheckResult(
+            name="pytest",
+            status=CheckStatus.FAIL,
+            message="Test command is configured but no test suite is detectable",
+            detail=(
+                "No tests/, test/, pytest.ini, conftest.py, "
+                "[tool.pytest.ini_options], or test_*/*_test.py files found"
+            ),
+            fix_hint="Create a tests/ directory or a conftest.py to define your test suite",
+        )
 
     found, version_str = check_command_available("pytest")
     if not found:

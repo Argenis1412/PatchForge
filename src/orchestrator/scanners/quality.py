@@ -131,8 +131,8 @@ def _has_full_annotations(func: ast.FunctionDef) -> bool:
             return False
     if func.args.vararg is not None and func.args.vararg.annotation is None:
         return False
-    if func.args.kwarg is not None and func.args.kwarg.annotation is None:
-        return False
+    if func.args.kwarg is not None:
+        return func.args.kwarg.annotation is not None
     return True
 
 
@@ -145,13 +145,7 @@ def _max_nesting_depth(body: list[ast.stmt], start_depth: int = 1) -> int:
         for node in nodes:
             if isinstance(node, (ast.If, ast.For, ast.While, ast.Try, ast.With, ast.Match)):
                 max_depth = max(max_depth, depth)
-                if isinstance(node, ast.If):
-                    walk(node.body, depth + 1)
-                    walk(node.orelse, depth + 1)
-                elif isinstance(node, ast.For):
-                    walk(node.body, depth + 1)
-                    walk(node.orelse, depth + 1)
-                elif isinstance(node, ast.While):
+                if isinstance(node, (ast.If, ast.For, ast.While)):
                     walk(node.body, depth + 1)
                     walk(node.orelse, depth + 1)
                 elif isinstance(node, ast.Try):
@@ -183,10 +177,12 @@ def _is_overload_decorator(func: ast.FunctionDef) -> bool:
 def _is_in_main_guard(node: ast.AST, tree: ast.Module) -> bool:
     """Return True if *node* is inside an ``if __name__ == '__main__'`` guard."""
     for child in tree.body:
-        if isinstance(child, ast.If):
-            if _is_name_eq_main(child):
-                if _node_in_body(node, child.body):
-                    return True
+        if (
+            isinstance(child, ast.If)
+            and _is_name_eq_main(child)
+            and _node_in_body(node, child.body)
+        ):
+            return True
     return False
 
 
@@ -289,19 +285,18 @@ def _check_readability(files: list[tuple[Path, str]]) -> list[QualityCheck]:
                     if _has_docstring(node.body):
                         clean_docs += 1
                 for item in node.body:
-                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        if (
-                            _is_public(item.name)
-                            and item.name not in _DUNDER_METHODS
-                            and not _is_test_file(rel)
-                        ):
-                            total_docs += 1
-                            if _has_docstring(item.body):
-                                clean_docs += 1
-                            if not _is_overload_decorator(item):
-                                total_annotations += 1
-                                if _has_full_annotations(item):
-                                    clean_annotations += 1
+                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
+                        _is_public(item.name)
+                        and item.name not in _DUNDER_METHODS
+                        and not _is_test_file(rel)
+                    ):
+                        total_docs += 1
+                        if _has_docstring(item.body):
+                            clean_docs += 1
+                        if not _is_overload_decorator(item):
+                            total_annotations += 1
+                            if _has_full_annotations(item):
+                                clean_annotations += 1
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 if _is_public(node.name) and not _is_test_file(rel):
                     total_docs += 1
@@ -350,7 +345,7 @@ def _check_complexity(files: list[tuple[Path, str]]) -> list[QualityCheck]:
     clean_nesting = 0
     total_nesting = 0
 
-    for filepath, rel in files:
+    for filepath, _rel in files:
         try:
             source = filepath.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -409,9 +404,12 @@ def _check_safety(files: list[tuple[Path, str]]) -> list[QualityCheck]:
                 total_except += 1
                 if node.type is not None:
                     clean_except += 1
-            if isinstance(node, ast.Call):
-                if isinstance(node.func, ast.Name) and node.func.id in ("exec", "eval"):
-                    dangerous = True
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in ("exec", "eval")
+            ):
+                dangerous = True
             if isinstance(node, ast.Assert):
                 has_assert = True
 
@@ -490,11 +488,14 @@ def _check_hygiene(files: list[tuple[Path, str]]) -> list[QualityCheck]:
             total_prints += 1
             has_stray_print = False
             for node in ast.walk(tree):
-                if isinstance(node, ast.Call):
-                    if isinstance(node.func, ast.Name) and node.func.id == "print":
-                        if not _is_in_main_guard(node, tree):
-                            has_stray_print = True
-                            break
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "print"
+                    and not _is_in_main_guard(node, tree)
+                ):
+                    has_stray_print = True
+                    break
             if not has_stray_print:
                 clean_prints += 1
 

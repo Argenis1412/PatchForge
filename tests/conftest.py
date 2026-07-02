@@ -1,3 +1,4 @@
+import contextlib
 from unittest.mock import MagicMock
 
 import pytest
@@ -41,10 +42,8 @@ def mock_gemini(monkeypatch):
     mock = MagicMock()
     # Mock v2 path
     for path in ["orchestrator.agents.scout.call_gemini"]:
-        try:
+        with contextlib.suppress(AttributeError, ModuleNotFoundError):
             monkeypatch.setattr(path, mock)
-        except (AttributeError, ModuleNotFoundError):
-            pass
     return mock
 
 
@@ -52,8 +51,6 @@ def mock_gemini(monkeypatch):
 def mock_claude(monkeypatch):
     mock = MagicMock()
     for path in ["orchestrator.agents.architect.call_claude"]:
-        try:
+        with contextlib.suppress(AttributeError, ModuleNotFoundError):
             monkeypatch.setattr(path, mock)
-        except (AttributeError, ModuleNotFoundError):
-            pass
     return mock

@@ -134,7 +134,7 @@ def _detect_test_suite_info(target: Path, pyproject_data: Optional[dict]) -> Tes
 
 def _has_typescript(target: Path, ignore_dirs: frozenset[str]) -> bool:
     """Return True if any .ts or .tsx files exist under *target*."""
-    for root_str, dirs, files in os.walk(target):
+    for _root_str, dirs, files in os.walk(target):
         dirs[:] = [d for d in dirs if d not in ignore_dirs]
         for f in files:
             if f.endswith((".ts", ".tsx")):

@@ -15,6 +15,7 @@ Architecture notes:
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import random
@@ -331,28 +332,18 @@ def _execute_apply_with_checkpoints(
             return
         if wal is not None:
             if wal.status == "pr_created" and wal.pr_number:
-                try:
+                with contextlib.suppress(Exception):
                     github.close_pr(wal.pr_number)
-                except Exception:
-                    pass
             if wal.status in ("pr_created", "pushed_remote"):
-                try:
+                with contextlib.suppress(Exception):
                     push_delete_remote(repo_path, branch)
-                except Exception:
-                    pass
             if wal.pre_apply_head:
-                try:
+                with contextlib.suppress(Exception):
                     force_reset_apply(repo_path, wal.pre_apply_head)
-                except Exception:
-                    pass
-            try:
+            with contextlib.suppress(Exception):
                 delete_local_branch(repo_path, branch, force=True)
-            except Exception:
-                pass
-        try:
+        with contextlib.suppress(OSError):
             wal_path.unlink()
-        except OSError:
-            pass
 
     # ---- Phase 0: fresh entry --------------------------------------------
     pre_apply_head = current_head(repo_path)

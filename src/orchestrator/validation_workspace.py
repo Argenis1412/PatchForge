@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -91,15 +92,13 @@ def run_validation_in_copy(
     import subprocess
 
     val_config = config.model_copy(update={"target_path": temp_root})
-    try:
+    with contextlib.suppress(FileNotFoundError, subprocess.TimeoutExpired):
         subprocess.run(
             ["ruff", "format", str(temp_root)],
             capture_output=True,
             timeout=60,
             check=False,
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
     validator_output, _ = run_validator(config=val_config, progress_callback=progress_callback)
     return validator_output
 

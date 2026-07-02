@@ -77,7 +77,8 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N"]
+select = ["E", "F", "W", "I", "N", "B", "SIM", "C4"]
+ignore = ["B008"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["orchestrator"]

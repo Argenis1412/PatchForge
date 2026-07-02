@@ -148,11 +148,7 @@ class TestIsDangerous:
     def test_all_patterns_covered(self):
         """Every entry in DANGEROUS_PATTERNS triggers _is_dangerous."""
         for pattern in DANGEROUS_PATTERNS:
-            if pattern.endswith("/"):
-                # directory prefix — use a concrete file under it
-                path = pattern + "ci.yml"
-            else:
-                path = pattern
+            path = pattern + "ci.yml" if pattern.endswith("/") else pattern
             assert _is_dangerous(path) is True, f"Pattern not matched: {pattern!r}"
 
 

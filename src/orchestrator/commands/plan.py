@@ -51,7 +51,7 @@ def execute(
         workspace_mgr.ensure_run_exists(run_id)
     except FileNotFoundError as exc:
         console.print(f"[bold red]Error: {exc}[/bold red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     # 2. Read metadata shared by both paths
     run_metadata = workspace_mgr.read_run_json(run_id)
@@ -65,7 +65,7 @@ def execute(
         config = TargetConfig.load(target_path=target_path, workspace_path=workspace_path)
     except Exception as exc:
         console.print(f"[bold red]Error loading target config: {exc}[/bold red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     log_event(
         trace_id=run_id,
@@ -87,13 +87,13 @@ def execute(
             raw = Path(issue_file).read_text(encoding="utf-8")
         except FileNotFoundError:
             console.print(f"[bold red]Error: Issue file not found: {issue_file}[/bold red]")
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None
 
         try:
             issue_input = parse_issue_markdown(raw)
         except ValueError as exc:
             console.print(f"[bold red]Error: {exc}[/bold red]")
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None
 
         # Warn if findings.json already exists from a prior scan
         try:
@@ -136,7 +136,7 @@ def execute(
                 run_metadata.updated_at = datetime.now(timezone.utc)
                 workspace_mgr.write_run_json(run_id, run_metadata)
                 console.print(f"[bold red]Architect failed: {exc}[/bold red]")
-                raise typer.Exit(code=1)
+                raise typer.Exit(code=1) from None
 
         goal = issue_input.title
 
@@ -146,7 +146,7 @@ def execute(
             findings_content = workspace_mgr.read_artifact(run_id, "findings.json")
         except Exception as exc:
             console.print(f"[bold red]Error reading findings: {exc}[/bold red]")
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None
 
         # Detect V1 deterministic scan findings.
         try:
@@ -164,7 +164,7 @@ def execute(
             run_metadata.status = "failed"
             run_metadata.updated_at = datetime.now(timezone.utc)
             workspace_mgr.write_run_json(run_id, run_metadata)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None
         except typer.Exit:
             raise
         except ValidationError:
@@ -174,7 +174,7 @@ def execute(
             scout_output = ScoutOutput.model_validate_json(findings_content)
         except Exception as exc:
             console.print(f"[bold red]Error reading findings: {exc}[/bold red]")
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None
 
         with Progress(
             SpinnerColumn(),
@@ -205,7 +205,7 @@ def execute(
                 run_metadata.updated_at = datetime.now(timezone.utc)
                 workspace_mgr.write_run_json(run_id, run_metadata)
                 console.print(f"[bold red]Architect failed: {exc}[/bold red]")
-                raise typer.Exit(code=1)
+                raise typer.Exit(code=1) from None
 
         goal = scout_output.summary
 
@@ -227,7 +227,7 @@ def execute(
         run_metadata.status = "failed"
         run_metadata.updated_at = datetime.now(timezone.utc)
         workspace_mgr.write_run_json(run_id, run_metadata)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     # 6. Write plan artifact (shared)
     workspace_mgr.write_artifact(run_id, "plan.json", output.model_dump_json(indent=2))
@@ -261,13 +261,13 @@ def execute(
         run_metadata.updated_at = datetime.now(timezone.utc)
         workspace_mgr.write_run_json(run_id, run_metadata)
         console.print(f"[bold red]Error capturing experiment context: {exc}[/bold red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     # 7. Update run metadata (shared)
     files = set()
     for t in output.implementation_plan:
         files.update(t.files_to_modify)
-    run_metadata.affected_files = sorted(list(files))
+    run_metadata.affected_files = sorted(files)
     run_metadata.goal = goal
     run_metadata.status = "planned"
     run_metadata.updated_at = datetime.now(timezone.utc)

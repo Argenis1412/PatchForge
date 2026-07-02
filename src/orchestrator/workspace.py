@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -180,10 +181,8 @@ class WorkspaceManager:
             failure_data = json.dumps(
                 {"error": "Failed to write run.json", "traceback": traceback.format_exc()},
             )
-            try:
+            with contextlib.suppress(OSError):
                 failure_path.write_text(failure_data, encoding="utf-8")
-            except OSError:
-                pass
             raise
 
         try:

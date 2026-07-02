@@ -186,7 +186,7 @@ def test_provider_by_name_covers_all_chain_providers():
 
 @pytest.mark.unit
 def test_known_provider_names_sorted():
-    assert KNOWN_PROVIDER_NAMES == tuple(sorted(KNOWN_PROVIDER_NAMES))
+    assert tuple(sorted(KNOWN_PROVIDER_NAMES)) == KNOWN_PROVIDER_NAMES
     assert len(KNOWN_PROVIDER_NAMES) >= 3
 
 

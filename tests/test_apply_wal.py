@@ -16,15 +16,15 @@ from orchestrator.storage import _wal_write
 
 
 def _make_apply_result(**kwargs) -> ApplyResult:
-    defaults = dict(
-        run_id="run_20240101_000000_abc123",
-        applied_at=datetime.now(timezone.utc),
-        branch="patchforge/run_20240101_000000_abc123",
-        success=False,
-        status="applying",
-        pre_apply_head="deadbeef",
-        pre_apply_branch="main",
-    )
+    defaults = {
+        "run_id": "run_20240101_000000_abc123",
+        "applied_at": datetime.now(timezone.utc),
+        "branch": "patchforge/run_20240101_000000_abc123",
+        "success": False,
+        "status": "applying",
+        "pre_apply_head": "deadbeef",
+        "pre_apply_branch": "main",
+    }
     defaults.update(kwargs)
     return ApplyResult(**defaults)
 

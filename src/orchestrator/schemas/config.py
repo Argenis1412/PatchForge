@@ -224,7 +224,7 @@ def detect_capabilities(target_path: Path, ignore_dirs: List[str]) -> TargetCapa
     ignore_set = set(ignore_dirs)
 
     if target_path.exists():
-        for root, dirs, files in os.walk(target_path):
+        for _root, dirs, files in os.walk(target_path):
             # Prune ignored directories in-place
             dirs[:] = [d for d in dirs if d not in ignore_set]
             for f in files:

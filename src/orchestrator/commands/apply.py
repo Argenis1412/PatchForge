@@ -74,7 +74,7 @@ def execute(
         workspace_mgr.ensure_run_exists(run_id)
     except FileNotFoundError as exc:
         console.print(f"[bold red]Error: {exc}[/bold red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     # 2. Read run.json and patch.diff
     run_metadata = workspace_mgr.read_run_json(run_id)
@@ -96,7 +96,7 @@ def execute(
             "Only successfully previewed runs can be applied.",
         )
         console.print(f"[bold red]Error: {msg}[/bold red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     target_path = Path(run_metadata.target_path)
 
@@ -107,7 +107,7 @@ def execute(
         verify_experiment_or_warn(workspace_mgr, run_id, target_path)
     except ValueError as exc:
         console.print(f"[bold red]Validation Error: {exc}[/bold red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     logs_dir = workspace_path / "logs"
     run_dir = workspace_mgr.run_dir(run_id)
@@ -115,7 +115,7 @@ def execute(
 
     if not patch_path.exists():
         console.print(f"[bold red]Error: patch.diff does not exist in {run_dir}[/bold red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     try:
         current_head_sha = current_head(target_path)
@@ -132,7 +132,7 @@ def execute(
             ),
             encoding="utf-8",
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     if current_head_sha != run_metadata.base_commit:
         expected = run_metadata.base_commit
@@ -153,7 +153,7 @@ def execute(
             ),
             encoding="utf-8",
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     # 3. Bootstrap target environment & load config
     bootstrap_environment(env_file=env_file, target_path=target_path)
@@ -161,7 +161,7 @@ def execute(
         config = TargetConfig.load(target_path=target_path, workspace_path=workspace_path)
     except Exception as exc:
         console.print(f"[bold red]Error loading target config: {exc}[/bold red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     # 4. Perform Git Safety Checks
     # Verify valid git repo
@@ -169,7 +169,7 @@ def execute(
         git_state = repository_state(target_path)
     except ValueError as exc:
         console.print(f"[bold red]Git Error: {exc}[/bold red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     # Check cleanliness
     if not git_state.is_clean and not allow_dirty:
@@ -177,7 +177,7 @@ def execute(
             "[bold red]Error: Target repository has uncommitted changes. "
             "Please commit, stash them, or run with --allow-dirty.[/bold red]"
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     # Classify lifecycle state using the dedicated lifecycle module.
     lifecycle_state = classify_lifecycle(run_id, workspace_mgr)
@@ -193,7 +193,7 @@ def execute(
             f"{run_metadata.base_commit} and the patch cannot be applied cleanly. "
             "Please rebase the patch or generate a new one.[/bold red]"
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     if lifecycle_state is PatchLifecycleState.STALE:
         console.print(
@@ -202,7 +202,7 @@ def execute(
             "(git executable not found or invalid patch format). "
             "Please run the preview command again.[/bold red]"
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     if lifecycle_state is PatchLifecycleState.REBASEABLE:
         console.print(
@@ -212,7 +212,7 @@ def execute(
             "rebasing is blocked in V1. Please generate a new patch for the "
             "current HEAD.[/bold red]"
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     log_event(
         trace_id=run_id,
@@ -243,7 +243,7 @@ def execute(
         if "checksum_mismatch" not in run_metadata.failure_artifacts:
             run_metadata.failure_artifacts.append("checksum_mismatch")
         workspace_mgr.write_run_json(run_id, run_metadata)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
     if actual_checksum != run_metadata.patch_checksum:
         console.print(
             "[bold red]Error: Patch checksum mismatch. The patch.diff has been modified "
@@ -259,7 +259,7 @@ def execute(
         if "checksum_mismatch" not in run_metadata.failure_artifacts:
             run_metadata.failure_artifacts.append("checksum_mismatch")
         workspace_mgr.write_run_json(run_id, run_metadata)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     # 6. Save pre-apply Git state
     pre_apply_head = current_head(target_path)
@@ -317,7 +317,7 @@ def execute(
             if "checkout_failure" not in run_metadata.failure_artifacts:
                 run_metadata.failure_artifacts.append("checkout_failure")
             workspace_mgr.write_run_json(run_id, run_metadata)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None
 
         # 8. Apply patch
         backup_path = run_dir / "patch.apply-backup.diff"
@@ -381,7 +381,7 @@ def execute(
             if "apply.json" not in run_metadata.failure_artifacts:
                 run_metadata.failure_artifacts.append("apply.json")
             workspace_mgr.write_run_json(run_id, run_metadata)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None
 
         # 9. Run post-apply validation checks
         with Progress(
@@ -469,7 +469,7 @@ def execute(
                 if artifact not in run_metadata.failure_artifacts:
                     run_metadata.failure_artifacts.append(artifact)
             workspace_mgr.write_run_json(run_id, run_metadata)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None
 
         # 11. Checkpoint 5: status="applied", success=True
         apply_result.applied_at = datetime.now(timezone.utc)
