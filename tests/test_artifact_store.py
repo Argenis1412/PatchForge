@@ -1,3 +1,5 @@
+import difflib
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -111,6 +113,76 @@ def test_local_store_write_result(tmp_path: Path):
     assert isinstance(result.ref, str)
     assert result.ref.startswith(str(tmp_path.resolve()))
     assert result.durability == DurabilityLevel.LOCAL_ATOMIC
+
+
+# ── CRLF regression tests (Dogfooding 002) ───────────────────────────────
+
+
+def test_local_store_preserves_lf(tmp_path: Path):
+    """Regression: CRLF corruption on Windows (Dogfooding 002)."""
+    store = LocalArtifactStore(tmp_path)
+    content = "--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n"
+    result = store.write("patch.diff", content)
+    raw_bytes = Path(result.ref).read_bytes()
+    assert b"\r\n" not in raw_bytes
+    assert raw_bytes == content.encode("utf-8")
+
+
+def test_local_store_lf_idempotency_git_apply(tmp_path: Path):
+    """patch.diff written by LocalArtifactStore must pass git apply --check."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "core.autocrlf", "false"],
+        cwd=str(repo),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=str(repo),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=str(repo),
+        check=True,
+        capture_output=True,
+    )
+
+    source = repo / "file.py"
+    source.write_text("old\n", encoding="utf-8", newline="")
+    subprocess.run(["git", "add", "file.py"], cwd=str(repo), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=str(repo),
+        check=True,
+        capture_output=True,
+    )
+
+    original = "old\n"
+    modified = "new\n"
+    diff_lines = list(
+        difflib.unified_diff(
+            original.splitlines(keepends=True),
+            modified.splitlines(keepends=True),
+            fromfile="a/file.py",
+            tofile="b/file.py",
+        )
+    )
+    diff_content = "".join(diff_lines)
+
+    store = LocalArtifactStore(tmp_path / "store")
+    result = store.write("patch.diff", diff_content)
+
+    proc = subprocess.run(
+        ["git", "apply", "--check", result.ref],
+        cwd=str(repo),
+        capture_output=True,
+    )
+    assert proc.returncode == 0, proc.stderr.decode()
 
 
 # ── ABC contract tests ────────────────────────────────────────────────────

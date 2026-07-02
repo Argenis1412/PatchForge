@@ -20,7 +20,7 @@ class LocalArtifactStore(ArtifactStore):
         full_path.parent.mkdir(parents=True, exist_ok=True)
 
         tmp = full_path.with_suffix(full_path.suffix + ".tmp")
-        with tmp.open("w", encoding="utf-8") as f:
+        with tmp.open("w", encoding="utf-8", newline="") as f:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
