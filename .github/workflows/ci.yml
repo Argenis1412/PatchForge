@@ -36,7 +36,7 @@ jobs:
 
     - name: Run tests (parallel)
       run: |
-        pytest -v --tb=short --cov=src/orchestrator --cov-report=xml -n auto --dist loadfile -m "not serial"
+        pytest -v --tb=short --cov=src/orchestrator --cov-report= --cov-append -n auto --dist loadfile -m "not serial"
 
     - name: Run tests (serial)
       run: |
