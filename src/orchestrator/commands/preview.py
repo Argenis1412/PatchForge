@@ -59,7 +59,7 @@ def execute(
         workspace_mgr.ensure_run_exists(run_id)
     except FileNotFoundError as exc:
         console.print(f"[bold red]Error: {exc}[/bold red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     # 2. Read metadata and plan
     run_metadata = workspace_mgr.read_run_json(run_id)
@@ -72,7 +72,7 @@ def execute(
         architect_output = ArchitectOutput.model_validate_json(plan_content)
     except Exception as exc:
         console.print(f"[bold red]Error reading implementation plan: {exc}[/bold red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     # 2.5 Verify experiment context if experiment.json is present
     from orchestrator.schemas.experiment import verify_experiment_or_warn
@@ -81,7 +81,7 @@ def execute(
         verify_experiment_or_warn(workspace_mgr, run_id, target_path)
     except ValueError as exc:
         console.print(f"[bold red]Validation Error: {exc}[/bold red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     # 3. Bootstrap target environment & load config
     bootstrap_environment(env_file=env_file, target_path=target_path)
@@ -93,7 +93,7 @@ def execute(
         )
     except Exception as exc:
         console.print(f"[bold red]Error loading target config: {exc}[/bold red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     # 4. Run Executor
     log_event(
@@ -129,7 +129,7 @@ def execute(
             run_metadata.updated_at = datetime.now(timezone.utc)
             workspace_mgr.write_run_json(run_id, run_metadata)
             console.print(f"[bold red]Error clearing staging directory: {exc}[/bold red]")
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None
     staging_dir.mkdir(parents=True, exist_ok=True)
 
     if cleaned_count > 0:
@@ -192,7 +192,7 @@ def execute(
             run_metadata.updated_at = datetime.now(timezone.utc)
             workspace_mgr.write_run_json(run_id, run_metadata)
             console.print(f"[bold red]Executor failed: {exc}[/bold red]")
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None
 
     # 4.5. Show error panel if any tasks failed
     if executor_output.errors:
@@ -243,7 +243,7 @@ def execute(
             "[yellow]Possible causes: all tasks NOOP, stale staging, "
             "LLM idempotent response.[/yellow]"
         )
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     # 6. Check patch gate on the consolidated diff
     risk_result = check_patch_gate(run_metadata, patch_diff, workspace_mgr=workspace_mgr)
@@ -263,7 +263,7 @@ def execute(
         run_metadata.status = "failed"
         run_metadata.updated_at = datetime.now(timezone.utc)
         workspace_mgr.write_run_json(run_id, run_metadata)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     # 7. Write patch.diff
     workspace_mgr.write_artifact(run_id, "patch.diff", patch_diff)
@@ -336,7 +336,7 @@ def execute(
             run_metadata.updated_at = datetime.now(timezone.utc)
             workspace_mgr.write_run_json(run_id, run_metadata)
             console.print(f"[bold red]Validator failed: {exc}[/bold red]")
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None
 
     # Write validation results
     workspace_mgr.write_artifact(

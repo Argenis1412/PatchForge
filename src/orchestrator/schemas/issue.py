@@ -85,9 +85,8 @@ def parse_issue_markdown(content: str) -> IssueInput:
                     if v not in ("low", "medium", "high"):
                         raise ValueError(f"Invalid severity {v!r}; expected low, medium, or high")
                     severity = v  # type: ignore
-                elif k == "labels":
-                    if v:
-                        labels = [x.strip() for x in v.split(",") if x.strip()]
+                elif k == "labels" and v:
+                    labels = [x.strip() for x in v.split(",") if x.strip()]
                 # Unknown keys are silently ignored
 
     return IssueInput(

@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-06-30 | Session: feat/issue-183-ci-cd-reusable-workflow
+> Last updated: 2026-07-02 | Session: chore/hardening-ci-ruff
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 601 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 609 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3).
 
@@ -259,6 +259,7 @@ These must not change without a new ADR in `docs/adr/`:
 **P3 closure items complete:**
 - ✅ Issue #181 — Docker containerization (PR #182, 2026-06-29)
 - ✅ Issue #183 — CI/CD reusable workflow + `patchforge ci` command (2026-06-30)
+- ✅ Hardening — CI coverage collection + ruff B/SIM/C4 rules (PR #186, 2026-07-02)
 
 ---
 

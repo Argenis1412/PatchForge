@@ -305,7 +305,7 @@ def test_scan_fails_without_test_suite(tmp_path: Path, workspace_dir: Path):
 
 
 def test_scan_does_not_touch_target(valid_repo: Path, workspace_dir: Path):
-    before = set(p.name for p in valid_repo.iterdir())
+    before = {p.name for p in valid_repo.iterdir()}
 
     with (
         patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
@@ -316,7 +316,7 @@ def test_scan_does_not_touch_target(valid_repo: Path, workspace_dir: Path):
             ["scan", str(valid_repo), "--workspace", str(workspace_dir)],
         )
 
-    after = set(p.name for p in valid_repo.iterdir())
+    after = {p.name for p in valid_repo.iterdir()}
     assert before == after, (
         f"Scan modified target repo: added={after - before}, removed={before - after}"
     )

@@ -10,14 +10,14 @@ from orchestrator.workspace import WorkspaceManager
 
 
 def _verdict(**overrides) -> Verdict:
-    defaults = dict(
-        run_id="run_001",
-        status="passed",
-        validation_passed=True,
-        apply_succeeded=True,
-        error_message=None,
-        generated_at=datetime.now(timezone.utc),
-    )
+    defaults = {
+        "run_id": "run_001",
+        "status": "passed",
+        "validation_passed": True,
+        "apply_succeeded": True,
+        "error_message": None,
+        "generated_at": datetime.now(timezone.utc),
+    }
     defaults.update(overrides)
     return Verdict(**defaults)
 

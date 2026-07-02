@@ -67,7 +67,7 @@ def execute(
             print(json.dumps({"error": str(exc)}))
         else:
             console.print(f"[bold red]Error: {exc}[/bold red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     # 2. Setup workspace directories
     workspace_mgr = WorkspaceManager(config.workspace_path)
@@ -142,7 +142,7 @@ def execute(
                 print(json.dumps({"error": f"Scanner failed: {exc}"}))
             else:
                 console.print(f"[bold red]Scanner failed: {exc}[/bold red]")
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from None
 
     # 6. Build run metadata from scanner results
     now = datetime.now(timezone.utc)
@@ -230,4 +230,4 @@ def execute(
             console.print("[bold red]V1 not supported. Reasons:[/bold red]")
             for reason in findings.unsupported_reasons:
                 console.print(f"  [red]• {reason}[/red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None

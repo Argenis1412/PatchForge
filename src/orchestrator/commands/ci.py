@@ -272,7 +272,7 @@ def execute(
     files = set()
     for t in arch_output.implementation_plan:
         files.update(t.files_to_modify)
-    run_metadata.affected_files = sorted(list(files))
+    run_metadata.affected_files = sorted(files)
     run_metadata.goal = goal
     run_metadata.status = "planned"
     run_metadata.updated_at = datetime.now(timezone.utc)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from typing import Optional
 
@@ -15,14 +16,12 @@ def rollback_to_commit(
     from orchestrator.git import force_reset_apply
 
     if backup_diff is not None and backup_diff.is_file():
-        try:
+        with contextlib.suppress(Exception):
             subprocess.run(
                 ["git", "-C", str(repo_root), "apply", "--reverse", str(backup_diff)],
                 capture_output=True,
                 text=True,
             )
-        except Exception:
-            pass  # fall through to force_reset_apply
 
     result = force_reset_apply(repo_root, target_sha)
     if result.return_code != 0:
