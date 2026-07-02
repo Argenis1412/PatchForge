@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-07-02 | Session: chore/hardening-ci-ruff
+> Last updated: 2026-07-02 | Session: hardening-ci-preview-tests
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 609 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 617 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3).
 
@@ -94,7 +94,7 @@ src/orchestrator/
 ├── validation_workspace.py
 └── workspace.py           # WorkspaceManager — disk layout
 
-tests/                     (22 test files, 600+ tests)
+tests/                     (23 test files, 600+ tests)
 ```
 
 ---
@@ -259,7 +259,9 @@ These must not change without a new ADR in `docs/adr/`:
 **P3 closure items complete:**
 - ✅ Issue #181 — Docker containerization (PR #182, 2026-06-29)
 - ✅ Issue #183 — CI/CD reusable workflow + `patchforge ci` command (2026-06-30)
-- ✅ Hardening — CI coverage collection + ruff B/SIM/C4 rules (PR #186, 2026-07-02)
+- ✅ Hardening — CI coverage collection + ruff B/SIM/C4 rules (PR #186, 2026-07-02, closed)
+- ✅ Hardening — CI coverage split: separate data collection from report generation (PR #187, 2026-07-02)
+- ✅ Hardening — Direct tests for preview.execute(): 8 scenarios + 2 safety invariants (PR #188, 2026-07-02)
 
 ---
 
