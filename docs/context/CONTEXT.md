@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 633 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 640 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3).
 
@@ -95,7 +95,7 @@ src/orchestrator/
 ├── validation_workspace.py
 └── workspace.py           # WorkspaceManager — disk layout
 
-tests/                     (26 test files, 633+ tests)
+tests/                     (27 test files, 640+ tests)
 ```
 
 ---
@@ -254,12 +254,10 @@ These must not change without a new ADR in `docs/adr/`:
 - ✅ Issue #171 — GitHub Actions pipeline workflow (CI/CD integration)
 - ✅ Issue #176 — Provider fallback chain for architect, scout, and validator summarizer (#177)
 
-**P3 closure items remaining:**
-- Asymmetric risk gates — now unblocked by Issue #194 (silent-failure hardening)
+**P3 closure items remaining:** None — all P3 items complete.
 
-**Next session:**
-- Asymmetric risk gates — P3 final closure item.
-- D-004 (Low): raise `DEFAULT_TIMEOUT` to ≥450s or add docs note for self-dogfooding. (Optional — workaround: `--validator-timeout 450`.)
+**Recent:**
+- ✅ Issue #198 — Asymmetric risk gates + D-004 timeout bump (PR #199, 2026-07-07): `auto_apply_eligible` informational field on `RunMetadata`, `DEFAULT_TIMEOUT` 300→450s. `compute_auto_apply_eligible()` extracted to shared function in `artifacts.py`.
 
 **Completed bug fixes from Dogfooding 002:**
 - ✅ **CRLF fix (Issue #192)** — Added `newline=""` to all write paths: `local_store.py`, `work_queue.py` (×2), `__init__.py` (`_wal_write`). Regression + idempotency tests added.

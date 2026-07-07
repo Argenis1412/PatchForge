@@ -223,7 +223,7 @@
   - Diffs are generated relative to `target_path` via `task.files_to_modify[0]`.
   - The mismatch is a risk only if the user manually runs `git apply` from the git root using the generated `patch.diff`. External to PatchForge's automated flow.
 
-### [2026-07-07] Dogfooding 005 — Default timeout (300s) insufficient for self-dogfooding post-PR-#195
+### ✅ [2026-07-07] Dogfooding 005 — Default timeout (300s) insufficient for self-dogfooding post-PR-#195 (RESOLVED)
 
 - **File:** `src/orchestrator/agents/validator/runners.py:14`
 - **Debt:** D-002 fix (PR #195) raised `DEFAULT_TIMEOUT` from 120s to 300s. PR #195
@@ -232,10 +232,9 @@
   633 tests. The combined suite now exceeds 300s when run via the validator in a
   self-dogfooding scenario. The fix raised the floor but the floor moved simultaneously.
 - **Discovered by:** Dogfooding 005
-- **Why deferred:** D-004 is low severity. The `--validator-timeout` hint is already
-  displayed and actionable. Workaround: `--validator-timeout 450`. A second raise of
-  `DEFAULT_TIMEOUT` (to 450s or 600s) would fix self-dogfooding but delays any
-  legitimate timeout detection by 2-5x on small projects.
+- **Resolution (Issue #198, PR #199):** `DEFAULT_TIMEOUT` raised from 300s to 450s.
+  Test floor assertion updated to `>= 450`. The `--validator-timeout` hint remains
+  available for projects needing custom values.
 
 ### [2026-06-14] Issue #100 — Agent fallback inconsistency
 
