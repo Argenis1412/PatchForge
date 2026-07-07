@@ -17,6 +17,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from orchestrator.agents import architect as architect_agent
 from orchestrator.clients.bootstrap import bootstrap_environment
 from orchestrator.observability.events import log_event, log_failure
+from orchestrator.plan_validation import validate_plan_paths
 from orchestrator.risk import check_plan_gate
 from orchestrator.schemas.config import TargetConfig, default_workspace_path
 from orchestrator.schemas.findings import ScanFindings
@@ -221,6 +222,26 @@ def execute(
             stage="architect",
             error_type="risk_gate_blocked",
             message="; ".join(risk_result.reasons),
+            logs_dir=logs_dir,
+            run_dir=run_dir,
+        )
+        run_metadata.status = "failed"
+        run_metadata.updated_at = datetime.now(timezone.utc)
+        workspace_mgr.write_run_json(run_id, run_metadata)
+        raise typer.Exit(code=1) from None
+
+    # 5.5 Validate plan paths against target filesystem (D-001)
+    path_reasons = validate_plan_paths(output, target_path)
+    if path_reasons:
+        console.print("[bold red]Plan blocked — invalid file references:[/bold red]")
+        for reason in path_reasons:
+            console.print(f"  - {reason}")
+        log_failure(
+            trace_id=run_id,
+            run_id=run_id,
+            stage="architect",
+            error_type="plan_references_missing_files",
+            message="; ".join(path_reasons),
             logs_dir=logs_dir,
             run_dir=run_dir,
         )

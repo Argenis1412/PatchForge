@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-07-02 | Session: dogfooding-002
+> Last updated: 2026-07-07 | Session: dogfooding-004-hardening
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 619 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 633 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3).
 
@@ -89,12 +89,13 @@ src/orchestrator/
 ├── lifecycle.py           # Patch lifecycle state machine
 ├── main.py                # CLI surface
 ├── pipeline.py            # Central orchestrator (Pipeline class)
+├── plan_validation.py     # Filesystem path validation for plans (D-001)
 ├── risk.py                # Plan gate + patch gate logic
 ├── safety.py              # Path-safety validation utilities
 ├── validation_workspace.py
 └── workspace.py           # WorkspaceManager — disk layout
 
-tests/                     (23 test files, 600+ tests)
+tests/                     (26 test files, 633+ tests)
 ```
 
 ---
@@ -254,11 +255,11 @@ These must not change without a new ADR in `docs/adr/`:
 - ✅ Issue #176 — Provider fallback chain for architect, scout, and validator summarizer (#177)
 
 **P3 closure items remaining:**
-- Asymmetric risk gates — deferred to P4
+- Asymmetric risk gates — now unblocked by Issue #194 (silent-failure hardening)
 
-**Next session — Dogfooding 003:**
-- Run experiment against Portfolio backend to validate CRLF fix end-to-end on Windows.
-- Success: `status=previewed`, `overall_passed=true`, `patch.diff` LF-only.
+**Next session:**
+- Dogfooding-005 (optional): E2E verification that D-001/D-002/D-003 fixes catch the dogfooding-004 scenario in a live run.
+- Asymmetric risk gates — P3 final closure item.
 
 **Completed bug fixes from Dogfooding 002:**
 - ✅ **CRLF fix (Issue #192)** — Added `newline=""` to all write paths: `local_store.py`, `work_queue.py` (×2), `__init__.py` (`_wal_write`). Regression + idempotency tests added.
@@ -271,6 +272,9 @@ These must not change without a new ADR in `docs/adr/`:
 - ✅ Hardening — CI coverage split: separate data collection from report generation (PR #187, 2026-07-02)
 - ✅ Hardening — Direct tests for preview.execute(): 8 scenarios + 2 safety invariants (PR #188, 2026-07-02)
 - ✅ Dogfooding 002 — Portfolio backend (2026-07-02): PhilosophyItemSchema Field() metadata. Pipeline reliability FAIL (CRLF bug, Windows). Patch quality PASS (correct semantics, QA green after manual apply). 2 bugs discovered: CRLF in patch.diff, git subdirectory root mismatch.
+- ✅ Dogfooding 003 — Portfolio backend CRLF fix E2E validation (2026-07-02): `status=previewed`, `overall_passed=true`, `patch.diff` LF-only. CRLF fix confirmed end-to-end on Windows.
+- ✅ Dogfooding 004 — PatchForge self-modification (`_is_dangerous` requirements* variants, 2026-07-02): code change correct. 3 silent-failure findings: D-001 (phantom path in plan), D-002 (timeout 120s too short), D-003 (executor ERROR masked as previewed).
+- ✅ Issue #194 — Silent-failure hardening (D-001/D-002/D-003): `validate_plan_paths()` new module, `DEFAULT_TIMEOUT` 120→300s, `executor_had_errors` field + `validation_failed` on hard errors (2026-07-07)
 
 ---
 

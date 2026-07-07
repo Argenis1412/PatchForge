@@ -21,6 +21,11 @@ def test_default_timeout_positive():
     assert DEFAULT_TIMEOUT > 0
 
 
+@pytest.mark.unit
+def test_default_timeout_covers_large_suites():
+    assert DEFAULT_TIMEOUT >= 180
+
+
 # ---------------------------------------------------------------------------
 # TargetConfig.validator_timeout field
 # ---------------------------------------------------------------------------
