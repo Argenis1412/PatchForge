@@ -58,7 +58,11 @@ def execute(
     )
     from orchestrator.lifecycle import classify_lifecycle
     from orchestrator.observability.events import log_event, log_failure
-    from orchestrator.schemas.artifacts import ApplyResult, PatchLifecycleState
+    from orchestrator.schemas.artifacts import (
+        ApplyResult,
+        PatchLifecycleState,
+        compute_auto_apply_eligible,
+    )
     from orchestrator.schemas.config import default_workspace_path
 
     # 1. Resolve workspace path and ensure run exists
@@ -183,10 +187,8 @@ def execute(
     lifecycle_state = classify_lifecycle(run_id, workspace_mgr)
 
     run_metadata.lifecycle_state = lifecycle_state
-    run_metadata.auto_apply_eligible = (
-        run_metadata.risk_budget == "low"
-        and lifecycle_state is PatchLifecycleState.VALID
-        and not run_metadata.executor_had_errors
+    run_metadata.auto_apply_eligible = compute_auto_apply_eligible(
+        run_metadata.risk_budget, lifecycle_state, run_metadata.executor_had_errors
     )
     run_metadata.updated_at = datetime.now(timezone.utc)
     workspace_mgr.write_run_json(run_id, run_metadata)

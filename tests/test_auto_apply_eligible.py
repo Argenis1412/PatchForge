@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from orchestrator.schemas.artifacts import PatchLifecycleState, RunMetadata
+from orchestrator.schemas.artifacts import (
+    PatchLifecycleState,
+    RunMetadata,
+    compute_auto_apply_eligible,
+)
 
 
 def _make_run_metadata(**kwargs) -> RunMetadata:
@@ -20,47 +24,29 @@ def _make_run_metadata(**kwargs) -> RunMetadata:
     return RunMetadata(**defaults)
 
 
-def _compute_eligible(meta: RunMetadata, lifecycle_state: PatchLifecycleState) -> bool:
-    return (
-        meta.risk_budget == "low"
-        and lifecycle_state is PatchLifecycleState.VALID
-        and not meta.executor_had_errors
-    )
-
-
 @pytest.mark.unit
 def test_eligible_low_valid_no_errors():
-    meta = _make_run_metadata(risk_budget="low", executor_had_errors=False)
-    meta.auto_apply_eligible = _compute_eligible(meta, PatchLifecycleState.VALID)
-    assert meta.auto_apply_eligible is True
+    assert compute_auto_apply_eligible("low", PatchLifecycleState.VALID, False) is True
 
 
 @pytest.mark.unit
 def test_ineligible_medium_risk():
-    meta = _make_run_metadata(risk_budget="medium", executor_had_errors=False)
-    meta.auto_apply_eligible = _compute_eligible(meta, PatchLifecycleState.VALID)
-    assert meta.auto_apply_eligible is False
+    assert compute_auto_apply_eligible("medium", PatchLifecycleState.VALID, False) is False
 
 
 @pytest.mark.unit
 def test_ineligible_high_risk():
-    meta = _make_run_metadata(risk_budget="high", executor_had_errors=False)
-    meta.auto_apply_eligible = _compute_eligible(meta, PatchLifecycleState.VALID)
-    assert meta.auto_apply_eligible is False
+    assert compute_auto_apply_eligible("high", PatchLifecycleState.VALID, False) is False
 
 
 @pytest.mark.unit
 def test_ineligible_rebaseable():
-    meta = _make_run_metadata(risk_budget="low", executor_had_errors=False)
-    meta.auto_apply_eligible = _compute_eligible(meta, PatchLifecycleState.REBASEABLE)
-    assert meta.auto_apply_eligible is False
+    assert compute_auto_apply_eligible("low", PatchLifecycleState.REBASEABLE, False) is False
 
 
 @pytest.mark.unit
 def test_ineligible_executor_errors():
-    meta = _make_run_metadata(risk_budget="low", executor_had_errors=True)
-    meta.auto_apply_eligible = _compute_eligible(meta, PatchLifecycleState.VALID)
-    assert meta.auto_apply_eligible is False
+    assert compute_auto_apply_eligible("low", PatchLifecycleState.VALID, True) is False
 
 
 @pytest.mark.unit

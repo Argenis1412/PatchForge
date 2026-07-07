@@ -15,6 +15,7 @@ __all__ = [
     "RUN_JSON",
     "RunMetadata",
     "VALIDATION_JSON",
+    "compute_auto_apply_eligible",
 ]
 
 import uuid
@@ -99,6 +100,18 @@ class RunMetadata(BaseModel):
     secrets_ref: Optional[str] = None
     provider_config: Optional[dict] = None
     current_stage: Optional[str] = None
+
+
+def compute_auto_apply_eligible(
+    risk_budget: str,
+    lifecycle_state: PatchLifecycleState | None,
+    executor_had_errors: bool,
+) -> bool:
+    return (
+        risk_budget == "low"
+        and lifecycle_state is PatchLifecycleState.VALID
+        and not executor_had_errors
+    )
 
 
 class ApplyResult(BaseModel):
