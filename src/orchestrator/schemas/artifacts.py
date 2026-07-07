@@ -78,6 +78,7 @@ class RunMetadata(BaseModel):
     max_diff_lines: int = Field(default=100, ge=1)
 
     # Fields updated later by other commands
+    executor_had_errors: bool = False
     goal: Optional[str] = None
     affected_files: Optional[List[str]] = None
     patch_checksum: Optional[str] = None

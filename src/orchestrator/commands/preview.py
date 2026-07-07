@@ -22,6 +22,7 @@ from orchestrator.observability.events import log_event, log_failure
 from orchestrator.risk import check_patch_gate
 from orchestrator.schemas.architect_output import ArchitectOutput
 from orchestrator.schemas.config import TargetConfig, default_workspace_path
+from orchestrator.schemas.executor_output import TaskStatus
 from orchestrator.schemas.validator_output import ValidatorOutput
 from orchestrator.validation_workspace import (
     apply_patch_to_copy,
@@ -209,6 +210,8 @@ def execute(
             )
         )
 
+    hard_errors = [e for e in executor_output.errors if e.status == TaskStatus.ERROR]
+
     # 5. Consolidate file changes into a single patch.diff
     diffs = []
     for change in executor_output.applied + executor_output.pending_review:
@@ -359,20 +362,28 @@ def execute(
     patch_checksum = hashlib.sha256(patch_diff.encode("utf-8")).hexdigest()
 
     timeout_tools = [t for t in validator_output.tools if t.timed_out]
-    timeout_prefix = ""
+
+    prefix_parts: list[str] = []
+    if hard_errors:
+        failed_ids = ", ".join(sorted(e.task_id for e in hard_errors))
+        prefix_parts.append(
+            f"Incomplete deliverables: {len(hard_errors)} task(s) failed ({failed_ids}). "
+        )
     if timeout_tools:
         tool_names = ", ".join(t.tool for t in timeout_tools)
         effective_timeout = config.validator_timeout or DEFAULT_TIMEOUT
-        timeout_prefix = (
+        prefix_parts.append(
             f"Timeout: {tool_names} exceeded {effective_timeout}s limit. "
             f"Increase with --validator-timeout <seconds>. "
         )
 
-    validation_summary = (
+    base = (
         "All checks passed successfully"
-        if validator_output.overall_passed
-        else timeout_prefix + (validator_output.llm_summary or "Validation failed")
+        if validator_output.overall_passed and not hard_errors
+        else (validator_output.llm_summary or "Validation failed")
     )
+    validation_summary = "".join(prefix_parts) + base
+
     model_metadata = {
         "executor": exec_meta,
         "validator": {
@@ -381,15 +392,23 @@ def execute(
         },
     }
 
+    run_metadata.executor_had_errors = bool(hard_errors)
+    if hard_errors:
+        run_metadata.status = "validation_failed"
+    elif validator_output.overall_passed:
+        run_metadata.status = "previewed"
+    else:
+        run_metadata.status = "validation_failed"
+
     run_metadata.patch_checksum = patch_checksum
     run_metadata.validation_summary = validation_summary
     run_metadata.model_metadata = model_metadata
-    run_metadata.status = "previewed" if validator_output.overall_passed else "validation_failed"
     run_metadata.updated_at = datetime.now(timezone.utc)
     workspace_mgr.write_run_json(run_id, run_metadata)
 
-    status_color = "green" if validator_output.overall_passed else "red"
-    validation_label = "PASSED" if validator_output.overall_passed else "FAILED"
+    success = validator_output.overall_passed and not hard_errors
+    status_color = "green" if success else "red"
+    validation_label = "PASSED" if success else "FAILED"
     timeout_hint = ""
     if timeout_tools:
         tool_names = ", ".join(t.tool for t in timeout_tools)
@@ -398,9 +417,14 @@ def execute(
             f"\n[yellow]Timeout:[/yellow] {tool_names} exceeded {effective_timeout}s limit."
             f"\n         Increase with --validator-timeout <seconds>"
         )
+    title_line = (
+        "[bold green]✔ Preview and validation completed successfully![/bold green]"
+        if success
+        else "[bold red]✘ Preview completed with failures[/bold red]"
+    )
     console.print(
         Panel(
-            f"[bold green]✔ Preview and validation completed successfully![/bold green]\n"
+            f"{title_line}\n"
             f"Run ID: [yellow]{run_id}[/yellow]\n"
             f"Validation Status: [bold {status_color}]{validation_label}[/bold {status_color}]\n"
             f"Patch Checksum: [cyan]{patch_checksum[:12]}[/cyan]\n"
