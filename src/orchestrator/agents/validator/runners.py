@@ -11,7 +11,7 @@ from orchestrator.schemas.validator_output import ToolResult
 
 from .logging import _get_logger
 
-DEFAULT_TIMEOUT = 120
+DEFAULT_TIMEOUT = 300
 assert DEFAULT_TIMEOUT > 0
 
 IGNORE_DIRS = [
