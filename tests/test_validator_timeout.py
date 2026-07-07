@@ -23,7 +23,7 @@ def test_default_timeout_positive():
 
 @pytest.mark.unit
 def test_default_timeout_covers_large_suites():
-    assert DEFAULT_TIMEOUT >= 180
+    assert DEFAULT_TIMEOUT >= 450
 
 
 # ---------------------------------------------------------------------------
