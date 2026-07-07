@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-07-07 | Session: dogfooding-004-hardening
+> Last updated: 2026-07-07 | Session: dogfooding-005-verification
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -258,8 +258,8 @@ These must not change without a new ADR in `docs/adr/`:
 - Asymmetric risk gates — now unblocked by Issue #194 (silent-failure hardening)
 
 **Next session:**
-- Dogfooding-005 (optional): E2E verification that D-001/D-002/D-003 fixes catch the dogfooding-004 scenario in a live run.
 - Asymmetric risk gates — P3 final closure item.
+- D-004 (Low): raise `DEFAULT_TIMEOUT` to ≥450s or add docs note for self-dogfooding. (Optional — workaround: `--validator-timeout 450`.)
 
 **Completed bug fixes from Dogfooding 002:**
 - ✅ **CRLF fix (Issue #192)** — Added `newline=""` to all write paths: `local_store.py`, `work_queue.py` (×2), `__init__.py` (`_wal_write`). Regression + idempotency tests added.
@@ -275,6 +275,7 @@ These must not change without a new ADR in `docs/adr/`:
 - ✅ Dogfooding 003 — Portfolio backend CRLF fix E2E validation (2026-07-02): `status=previewed`, `overall_passed=true`, `patch.diff` LF-only. CRLF fix confirmed end-to-end on Windows.
 - ✅ Dogfooding 004 — PatchForge self-modification (`_is_dangerous` requirements* variants, 2026-07-02): code change correct. 3 silent-failure findings: D-001 (phantom path in plan), D-002 (timeout 120s too short), D-003 (executor ERROR masked as previewed).
 - ✅ Issue #194 — Silent-failure hardening (D-001/D-002/D-003): `validate_plan_paths()` new module, `DEFAULT_TIMEOUT` 120→300s, `executor_had_errors` field + `validation_failed` on hard errors (2026-07-07)
+- ✅ Dogfooding 005 — E2E verification of D-001/D-002/D-003 fixes (2026-07-07): D-003 fully verified (executor_had_errors, validation_failed, apply blocked). D-001 not exercised (known recall limitation). D-002 partial (300s still insufficient for 633-test suite). New finding D-004.
 
 ---
 
