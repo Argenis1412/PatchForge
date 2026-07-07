@@ -16,7 +16,7 @@ No code changes were made during this experiment.
 
 ## Locations
 
-```
+```text
 PatchForge : C:\Users\Visitante\Desktop\Projectos de Github\PatchForge\
 Target     : C:\Users\Visitante\Desktop\Projectos de Github\Clon_PatchForge_Proper\
 Issue file : docs/experiments/dogfooding-004-issue.md
@@ -65,7 +65,7 @@ outside its stated recall.
 **Status: PARTIAL** — fix verified, but 300s still insufficient for this target
 
 The timeout message confirms the new default is in effect:
-```
+```text
 Timeout: pytest exceeded 300s limit. Increase with --validator-timeout <seconds>.
 ```
 
@@ -90,7 +90,7 @@ new default. See D-004 below.
 ```
 
 Panel output:
-```
+```text
 ✘ Preview completed with failures
 Validation Status: FAILED
 ```
@@ -165,7 +165,7 @@ auto-detect suite size.
 
 ## Verdict
 
-```
+```text
 Issue:
 Extend _is_dangerous to detect requirements file variants
 
