@@ -65,6 +65,7 @@ def execute(
         repository_state,
     )
     from orchestrator.observability.events import log_event, log_failure
+    from orchestrator.plan_validation import validate_plan_paths
     from orchestrator.risk import check_patch_gate, check_plan_gate
     from orchestrator.scanners.python import scan
     from orchestrator.schemas.artifacts import ApplyResult, RunMetadata, generate_run_id
@@ -239,6 +240,22 @@ def execute(
         run_metadata.updated_at = datetime.now(timezone.utc)
         workspace_mgr.write_run_json(run_id, run_metadata)
         return _fail("plan_failed", "Risk gate blocked: " + "; ".join(risk_result.reasons))
+
+    path_reasons = validate_plan_paths(arch_output, target_path)
+    if path_reasons:
+        log_failure(
+            trace_id=run_id,
+            run_id=run_id,
+            stage="architect",
+            error_type="plan_references_missing_files",
+            message="; ".join(path_reasons),
+            logs_dir=logs_dir,
+            run_dir=run_dir,
+        )
+        run_metadata.status = "failed"
+        run_metadata.updated_at = datetime.now(timezone.utc)
+        workspace_mgr.write_run_json(run_id, run_metadata)
+        return _fail("plan_failed", "Invalid file references: " + "; ".join(path_reasons))
 
     workspace_mgr.write_artifact(run_id, "plan.json", arch_output.model_dump_json(indent=2))
 
