@@ -86,6 +86,7 @@ class RunMetadata(BaseModel):
     model_metadata: Optional[dict[str, Any]] = None
     lifecycle_state: Optional[PatchLifecycleState] = None
     apply_status: Optional[str] = None
+    auto_apply_eligible: bool = False
     failure_artifacts: Optional[List[str]] = None
 
     # Sprint 0 — B2: execution context for worker cold-start from run.json

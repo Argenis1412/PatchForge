@@ -183,6 +183,11 @@ def execute(
     lifecycle_state = classify_lifecycle(run_id, workspace_mgr)
 
     run_metadata.lifecycle_state = lifecycle_state
+    run_metadata.auto_apply_eligible = (
+        run_metadata.risk_budget == "low"
+        and lifecycle_state is PatchLifecycleState.VALID
+        and not run_metadata.executor_had_errors
+    )
     run_metadata.updated_at = datetime.now(timezone.utc)
     workspace_mgr.write_run_json(run_id, run_metadata)
 
@@ -501,10 +506,17 @@ def execute(
         if coordination_db_dir is not None and acquired:
             release_repo_lock(repo_identity, worker_id or "unknown", db_dir=coordination_db_dir)
 
+    eligibility_line = (
+        "[green]✔ Auto-apply eligible[/green]"
+        if run_metadata.auto_apply_eligible
+        else "[yellow]⚠ Manual review recommended[/yellow]"
+    )
+
     console.print(
         Panel(
             "[bold green]Patch applied successfully to branch "
             f"[yellow]{branch_name}[/yellow]![/bold green]\n\n"
+            f"{eligibility_line}\n\n"
             "To review and commit the changes, run:\n"
             "  [cyan]git status[/cyan]\n"
             "  [cyan]git diff[/cyan]\n"
