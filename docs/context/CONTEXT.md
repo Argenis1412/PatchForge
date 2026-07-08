@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-07-08 | Session: D-005-architect-structural-context
+> Last updated: 2026-07-08 | Session: Dogfooding-007
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -258,6 +258,7 @@ These must not change without a new ADR in `docs/adr/`:
 **P3 closure items remaining:** None — all P3 items complete.
 
 **Recent:**
+- ✅ Dogfooding 007 — D-005 + D-006 validated end-to-end (2026-07-08): D-005 confirmed (architect correctly targeted `summarizer.py` from annotations; `_summarize_errors()` annotation was the decisive signal). D-006 happy path confirmed (T1 diff generated, modified `.py` syntactically valid). `validation_failed` due to LLM over-engineering Claude fallback (reused `_cb_validator` instead of extending `_call_chain`). Two new discoveries: D-007a (executor cannot create new files, confirmed again) and D-007b (LLM adds new try/except instead of extending existing `_call_chain` call; AC must name the construct to modify).
 - ✅ D-005 — Architect structural context annotations (2026-07-08): `build_target_files_block()` annotates `.py` files inside Python packages with module docstring + top-level symbols via `ast.parse()`. Package detection runs before path truncation. 10k-char annotation budget. Graceful degradation on errors. 17 new tests.
 - ✅ D-006 — Executor pre-diff syntax validation (PR #202, 2026-07-08): new `validation.py` module with `validate_python_content()` using `ast.parse()`. Rejects non-Python LLM output (XML markup, prose) before diff/staging for `.py` files. Only rejects when original parses but modified does not (no false positives on pre-existing syntax errors). Non-`.py` files skip validation. 7 new tests.
 - ✅ Dogfooding 006 — D-001 validated end-to-end (PR #201, 2026-07-08): `[TARGET FILES]` injection into architect prompt prevents phantom paths. D-005 (bad function boundaries) and D-006 (executor writes markup) documented.
