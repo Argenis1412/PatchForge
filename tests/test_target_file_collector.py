@@ -232,6 +232,12 @@ class TestSummarizePythonFile:
         assert _summarize_python_file(tmp_path / "nonexistent.py") is None
 
     @pytest.mark.unit
+    def test_null_bytes(self, tmp_path):
+        f = tmp_path / "null.py"
+        f.write_bytes(b"def foo():\n    pass\n\x00")
+        assert _summarize_python_file(f) is None
+
+    @pytest.mark.unit
     def test_truncates_docstring(self, tmp_path):
         f = tmp_path / "mod.py"
         long_doc = "A" * 120

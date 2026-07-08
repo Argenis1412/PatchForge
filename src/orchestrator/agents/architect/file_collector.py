@@ -38,7 +38,7 @@ def _summarize_python_file(filepath: Path) -> str | None:
 
     try:
         tree = ast.parse(source)
-    except SyntaxError:
+    except (SyntaxError, ValueError):
         return None
 
     docstring = ast.get_docstring(tree)
