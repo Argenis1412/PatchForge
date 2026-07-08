@@ -10,6 +10,10 @@ import sys
 from pathlib import Path
 from typing import Optional, Union
 
+from orchestrator.agents.architect.file_collector import (
+    build_target_files_block,
+    collect_target_files,
+)
 from orchestrator.agents.architect.prompts import ARCHITECT_PROMPT, ISSUE_ARCHITECT_PROMPT
 from orchestrator.agents.architect.provider import MODEL, call_claude
 from orchestrator.llm.parser import LLMParseError, SchemaValidationError, parse_llm_response
@@ -35,10 +39,14 @@ def run(
 
     print("[Architect] Processing ScoutOutput object...")
     scout_data = scout_output.model_dump_json()
+
+    target_files_block = build_target_files_block(config)
+    paths, truncated, total = collect_target_files(config)
+    print(f"[Architect] Target files: {len(paths)} of {total} paths injected (truncated={truncated})")
     print(f"[Architect] Asking {MODEL} to structure the implementation plan...")
 
     raw_response, tokens, cost, model_used = call_claude(
-        ARCHITECT_PROMPT.format(scout_data=scout_data),
+        ARCHITECT_PROMPT.format(scout_data=scout_data, target_files=target_files_block),
         orchestratorel="architect",
         logs_dir=logs_dir,
         trace_id=trace_id,
@@ -108,6 +116,10 @@ def run_from_issue(
 
     print("[Architect] Processing IssueInput object...")
 
+    target_files_block = build_target_files_block(config)
+    paths, truncated, total = collect_target_files(config)
+    print(f"[Architect] Target files: {len(paths)} of {total} paths injected (truncated={truncated})")
+
     def _escape(v: str) -> str:
         return v.replace("{", "{{").replace("}", "}}")
 
@@ -116,6 +128,7 @@ def run_from_issue(
         severity=_escape(issue_input.severity),
         labels=_escape(", ".join(issue_input.labels)),
         body=_escape(issue_input.body),
+        target_files=_escape(target_files_block),
     )
     print(f"[Architect] Asking {MODEL} to structure the implementation plan...")
 

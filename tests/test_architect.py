@@ -10,6 +10,7 @@ from orchestrator.agents.architect import (
 )
 from orchestrator.llm.parser import LLMParseError
 from orchestrator.schemas.architect_output import ArchitectOutput
+from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.issue import IssueInput
 from orchestrator.schemas.scout_output import ScoutOutput
 
@@ -265,3 +266,99 @@ class TestArchitectProviderChain:
 
         with pytest.raises(ProviderError):
             arch_provider.call_claude("prompt", "architect")
+
+
+# ---------------------------------------------------------------------------
+# Target files injection tests (D-001 root cause)
+# ---------------------------------------------------------------------------
+
+
+def _touch(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("", encoding="utf-8")
+
+
+def _make_target_config(tmp_path: Path) -> TargetConfig:
+    workspace = tmp_path.parent / "_workspace"
+    workspace.mkdir(exist_ok=True)
+    return TargetConfig(target_path=tmp_path, workspace_path=workspace)
+
+
+class TestArchitectTargetFilesInjection:
+    @pytest.mark.unit
+    def test_run_prompt_contains_target_files(self, tmp_path, mock_claude):
+        _touch(tmp_path / "src" / "main.py")
+        _touch(tmp_path / "README.md")
+        config = _make_target_config(tmp_path)
+
+        mock_claude.return_value = (
+            _CLEAN_JSON,
+            {"input": 1, "output": 1},
+            0.01,
+            "claude-sonnet-4-6",
+        )
+        run(_make_scout(), config)
+
+        prompt_sent = mock_claude.call_args[0][0]
+        assert "[TARGET FILES]" in prompt_sent
+        assert "src/main.py" in prompt_sent
+        assert "README.md" in prompt_sent
+
+    @pytest.mark.unit
+    def test_run_from_issue_prompt_contains_target_files(self, tmp_path, mock_claude):
+        _touch(tmp_path / "src" / "app.py")
+        config = _make_target_config(tmp_path)
+
+        mock_claude.return_value = (
+            _CLEAN_JSON,
+            {"input": 1, "output": 1},
+            0.01,
+            "claude-sonnet-4-6",
+        )
+        run_from_issue(_make_issue(), config)
+
+        prompt_sent = mock_claude.call_args[0][0]
+        assert "[TARGET FILES]" in prompt_sent
+        assert "src/app.py" in prompt_sent
+
+    @pytest.mark.unit
+    def test_run_no_config_shows_unavailable(self, mock_claude):
+        mock_claude.return_value = (
+            _CLEAN_JSON,
+            {"input": 1, "output": 1},
+            0.01,
+            "claude-sonnet-4-6",
+        )
+        run(_make_scout(), config=None)
+
+        prompt_sent = mock_claude.call_args[0][0]
+        assert "[TARGET FILES]" in prompt_sent
+        assert "(unavailable — no target config provided)" in prompt_sent
+
+    @pytest.mark.unit
+    def test_run_from_issue_no_config_shows_unavailable(self, mock_claude):
+        mock_claude.return_value = (
+            _CLEAN_JSON,
+            {"input": 1, "output": 1},
+            0.01,
+            "claude-sonnet-4-6",
+        )
+        run_from_issue(_make_issue(), config=None)
+
+        prompt_sent = mock_claude.call_args[0][0]
+        assert "[TARGET FILES]" in prompt_sent
+        assert "(unavailable — no target config provided)" in prompt_sent
+
+    @pytest.mark.unit
+    def test_prompt_contains_path_constraint_instruction(self, mock_claude):
+        mock_claude.return_value = (
+            _CLEAN_JSON,
+            {"input": 1, "output": 1},
+            0.01,
+            "claude-sonnet-4-6",
+        )
+        run(_make_scout())
+
+        prompt_sent = mock_claude.call_args[0][0]
+        assert "IMPORTANT — path constraints:" in prompt_sent
+        assert "Do NOT invent paths whose parent directory does not exist." in prompt_sent

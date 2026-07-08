@@ -42,6 +42,14 @@ Risk level criteria:
 
 All fields are required. Do not omit any field.
 
+IMPORTANT — path constraints:
+You MUST only reference files that either:
+  (a) appear in [TARGET FILES] below, OR
+  (b) are NEW files whose immediate parent directory exists in [TARGET FILES].
+Do NOT invent paths whose parent directory does not exist.
+
+{target_files}
+
 [SCOUT OUTPUT]
 {scout_data}
 """
@@ -87,6 +95,14 @@ Risk level criteria:
 - "low": documentation-only changes, comment updates, or trivial non-code renames
 
 All fields are required. Do not omit any field.
+
+IMPORTANT — path constraints:
+You MUST only reference files that either:
+  (a) appear in [TARGET FILES] below, OR
+  (b) are NEW files whose immediate parent directory exists in [TARGET FILES].
+Do NOT invent paths whose parent directory does not exist.
+
+{target_files}
 
 [ISSUE]
 Title: {title}
