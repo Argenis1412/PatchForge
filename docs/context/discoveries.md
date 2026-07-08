@@ -251,7 +251,37 @@
   `validate_plan_paths()` remains as defense in depth.
 - **Remaining risks:** alphabetical truncation may bias file selection; `.gitignore`
   not fully parsed (only common artifact dirs excluded); LLM may still ignore the
-  constraint (safety net catches this). To be validated in dogfooding-006.
+  constraint (safety net catches this).
+- **Dogfooding-006 outcome (2026-07-08):** Fix validated. Zero phantom paths for
+  existing files across 7-file plan. 195/195 paths injected (truncated=False) —
+  500-path cap non-binding for PatchForge repo. Architect found real files in the
+  executor package but targeted `scheduler.py` instead of `__init__.py` — correct
+  path, wrong file within the package (see D-005). Alphabetical truncation untested
+  (repo < 500 files).
+
+### [2026-07-08] Dogfooding 006 — D-005: Architect targets wrong file within package
+
+- **File:** `src/orchestrator/agents/executor/scheduler.py` (targeted instead of `__init__.py`)
+- **Debt:** The `[TARGET FILES]` block lists all files but provides no structural context
+  about which file contains what functionality. For packages with multiple submodules
+  the architect can pick the correct directory but the wrong file within it. In D006
+  it targeted `scheduler.py` (DAG builder) instead of `__init__.py` (task loop with `run()`).
+  The executor then wrote LLM tool-call markup into scheduler.py, gutting the file.
+- **Discovered by:** Dogfooding 006
+- **Why deferred:** Fix requires injecting structural context (e.g. function-index per file)
+  into the architect prompt — a more invasive change than path listing. Tracked as D-005.
+
+### [2026-07-08] Dogfooding 006 — D-006: Executor writes tool-call markup as file content
+
+- **File:** `src/orchestrator/agents/executor/` (applier path)
+- **Debt:** When the executor's internal prompt asks it to read a file before writing,
+  but the read tool is unavailable at execution time, it writes an XML tool-call fragment
+  as the file's new content. The diff is generated, validation accepts it syntactically
+  (it's valid diff format), and only ruff catches the resulting invalid Python. No
+  pre-diff validation rejects markup-as-code.
+- **Discovered by:** Dogfooding 006 (T1 — scheduler.py replaced with `<tool_call>` markup)
+- **Why deferred:** Fix requires the executor to validate generated content is valid Python
+  before writing the diff. Out of scope for D-001 validation sprint.
 
 ### [2026-06-14] Issue #100 — Agent fallback inconsistency
 
