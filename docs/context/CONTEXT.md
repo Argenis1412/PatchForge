@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-07-07 | Session: dogfooding-005-verification
+> Last updated: 2026-07-08 | Session: D-006-executor-syntax-validation
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 640 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 665 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3).
 
@@ -48,7 +48,8 @@ src/orchestrator/
 │   │   ├── __init__.py    # run() entrypoint + DAG scheduler
 │   │   ├── applier.py     # Task prompt builder + file staging
 │   │   ├── providers.py   # LLM provider chain (Gemini, OpenRouter, Claude)
-│   │   └── diffing.py     # Unified diff generation
+│   │   ├── diffing.py     # Unified diff generation
+│   │   └── validation.py  # Pre-diff ast.parse() syntax validation (D-006)
 │   ├── scout/             # Gemini — repository analysis (legacy)
 │   └── validator/         # ruff + pytest subprocess runners
 │       ├── __init__.py    # run() entrypoint
@@ -95,7 +96,7 @@ src/orchestrator/
 ├── validation_workspace.py
 └── workspace.py           # WorkspaceManager — disk layout
 
-tests/                     (27 test files, 640+ tests)
+tests/                     (27 test files, 665+ tests)
 ```
 
 ---
@@ -257,6 +258,8 @@ These must not change without a new ADR in `docs/adr/`:
 **P3 closure items remaining:** None — all P3 items complete.
 
 **Recent:**
+- ✅ D-006 — Executor pre-diff syntax validation (PR #202, 2026-07-08): new `validation.py` module with `validate_python_content()` using `ast.parse()`. Rejects non-Python LLM output (XML markup, prose) before diff/staging for `.py` files. Only rejects when original parses but modified does not (no false positives on pre-existing syntax errors). Non-`.py` files skip validation. 7 new tests.
+- ✅ Dogfooding 006 — D-001 validated end-to-end (PR #201, 2026-07-08): `[TARGET FILES]` injection into architect prompt prevents phantom paths. D-005 (bad function boundaries) and D-006 (executor writes markup) documented.
 - ✅ Issue #198 — Asymmetric risk gates + D-004 timeout bump (PR #199, 2026-07-07): `auto_apply_eligible` informational field on `RunMetadata`, `DEFAULT_TIMEOUT` 300→450s. `compute_auto_apply_eligible()` extracted to shared function in `artifacts.py`.
 
 **Completed bug fixes from Dogfooding 002:**
@@ -275,6 +278,7 @@ These must not change without a new ADR in `docs/adr/`:
 - ✅ Issue #194 — Silent-failure hardening (D-001/D-002/D-003): `validate_plan_paths()` new module, `DEFAULT_TIMEOUT` 120→300s, `executor_had_errors` field + `validation_failed` on hard errors (2026-07-07)
 - ✅ Dogfooding 005 — E2E verification of D-001/D-002/D-003 fixes (2026-07-07): D-003 fully verified (executor_had_errors, validation_failed, apply blocked). D-001 not exercised (known recall limitation). D-002 partial (300s still insufficient for 633-test suite). New finding D-004.
 - ✅ D-001 root cause fix — Inject target file listing into Architect prompt (2026-07-07): new `file_collector` module lists all target files (no extension filter), injects `[TARGET FILES]` block + path constraint instruction into both `ARCHITECT_PROMPT` and `ISSUE_ARCHITECT_PROMPT`. Cap at 500 paths with truncation. `validate_plan_paths()` remains as defense in depth.
+- ✅ D-006 fix — Executor pre-diff syntax validation (PR #202, 2026-07-08): `ast.parse()` rejects non-Python LLM output before staging. Gated on `.py` extension; false-positive guard for pre-existing syntax errors. 7 regression tests.
 
 ---
 

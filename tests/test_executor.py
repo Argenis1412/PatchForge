@@ -361,3 +361,138 @@ def test_executor_run_unknown_force_provider(tmp_path):
 
     with pytest.raises(ValueError, match="Unknown provider.*pepino"):
         run(arch_out, config=config, force_provider="pepino")
+
+
+# ---------------------------------------------------------------------------
+# D-006 — Pre-diff syntax validation
+# ---------------------------------------------------------------------------
+
+
+class TestValidatePythonContent:
+    @pytest.mark.unit
+    def test_valid_python_returns_none(self):
+        from orchestrator.agents.executor.validation import validate_python_content
+
+        assert validate_python_content("x = 1\n", "x = 0\n", "test.py") is None
+
+    @pytest.mark.unit
+    def test_xml_markup_returns_error(self):
+        from orchestrator.agents.executor.validation import validate_python_content
+
+        result = validate_python_content(
+            '<tool_call>read_file("a.py")</tool_call>',
+            "x = 1\n",
+            "scheduler.py",
+        )
+        assert result is not None
+        assert "not valid Python" in result
+
+    @pytest.mark.unit
+    def test_both_broken_returns_none(self):
+        from orchestrator.agents.executor.validation import validate_python_content
+
+        result = validate_python_content("def f(\n", "def f(\n", "broken.py")
+        assert result is None
+
+    @pytest.mark.unit
+    def test_markdown_preamble_returns_error(self):
+        from orchestrator.agents.executor.validation import validate_python_content
+
+        result = validate_python_content(
+            "Here is the modified file:\n\nx = 1\n",
+            "x = 1\n",
+            "test.py",
+        )
+        assert result is not None
+        assert "not valid Python" in result
+
+
+@pytest.mark.unit
+def test_apply_task_rejects_xml_output(tmp_path, monkeypatch):
+    from orchestrator.agents.executor.applier import _apply_task
+
+    source_file = tmp_path / "scheduler.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    task = Task(
+        task_id="t1",
+        title="refactor",
+        description="refactor scheduler",
+        files_to_modify=["scheduler.py"],
+        priority="high",
+        effort="low",
+        risk_level="low",
+        dependencies=[],
+    )
+
+    cb_gemini_mock = MagicMock()
+    cb_gemini_mock.call.side_effect = lambda fn: (
+        '<tool_call>read_file("a.py")</tool_call>',
+        10,
+        5,
+    )
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini_mock)
+
+    change = _apply_task(task, "run_d006", tmp_path, staging)
+    assert change.status == "error"
+    assert "not valid Python" in change.error
+    assert change.tokens_used == 15
+    assert not (staging / "scheduler.py").exists()
+
+
+@pytest.mark.unit
+def test_apply_task_valid_python_passes(tmp_path, monkeypatch):
+    from orchestrator.agents.executor.applier import _apply_task
+
+    source_file = tmp_path / "test.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    task = Task(
+        task_id="t1",
+        title="bump x",
+        description="change x to 2",
+        files_to_modify=["test.py"],
+        priority="high",
+        effort="low",
+        risk_level="low",
+        dependencies=[],
+    )
+
+    cb_gemini_mock = MagicMock()
+    cb_gemini_mock.call.side_effect = lambda fn: ("x = 2\n", 10, 5)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini_mock)
+
+    change = _apply_task(task, "run_d006", tmp_path, staging)
+    assert change.status == "applied"
+
+
+@pytest.mark.unit
+def test_apply_task_skips_validation_for_non_python(tmp_path, monkeypatch):
+    from orchestrator.agents.executor.applier import _apply_task
+
+    source_file = tmp_path / "config.toml"
+    source_file.write_text("[tool]\nname = 'old'\n", encoding="utf-8")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    task = Task(
+        task_id="t1",
+        title="update config",
+        description="change name",
+        files_to_modify=["config.toml"],
+        priority="high",
+        effort="low",
+        risk_level="low",
+        dependencies=[],
+    )
+
+    cb_gemini_mock = MagicMock()
+    cb_gemini_mock.call.side_effect = lambda fn: ("[tool]\nname = 'new'\n", 10, 5)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini_mock)
+
+    change = _apply_task(task, "run_d006", tmp_path, staging)
+    assert change.status == "applied"
