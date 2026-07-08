@@ -236,6 +236,23 @@
   Test floor assertion updated to `>= 450`. The `--validator-timeout` hint remains
   available for projects needing custom values.
 
+### ✅ [2026-07-07] D-001 root cause — Architect generates phantom file paths (RESOLVED)
+
+- **File:** `src/orchestrator/agents/architect/file_collector.py` (new), `src/orchestrator/agents/architect/prompts.py`
+- **Debt:** The Architect Agent hallucinated file paths because its prompt had no context
+  about which files actually exist in the target repo. The post-hoc guard
+  `validate_plan_paths()` (PR #195) caught phantom paths but wasted tokens and
+  produced artificial blockers.
+- **Discovered by:** Dogfooding 004
+- **Resolution:** New `file_collector` module injects a `[TARGET FILES]` block into both
+  `ARCHITECT_PROMPT` and `ISSUE_ARCHITECT_PROMPT` with the full target file listing
+  (all extensions, no filter). Path constraint instruction added. Cap at 500 paths
+  with truncation warning. Build artifact dirs excluded via `_EXTRA_IGNORE_DIRS`.
+  `validate_plan_paths()` remains as defense in depth.
+- **Remaining risks:** alphabetical truncation may bias file selection; `.gitignore`
+  not fully parsed (only common artifact dirs excluded); LLM may still ignore the
+  constraint (safety net catches this). To be validated in dogfooding-006.
+
 ### [2026-06-14] Issue #100 — Agent fallback inconsistency
 
 - **File:** `src/orchestrator/agents/validator.py`
