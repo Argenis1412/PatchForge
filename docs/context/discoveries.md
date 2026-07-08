@@ -290,9 +290,34 @@
 - **Known limitation:** Catches syntactically invalid content only. Semantically wrong
   but syntactically valid replacements remain undetected until ruff/pytest.
 
+### [2026-07-08] Dogfooding 007 — Executor cannot create new files
+
+- **File:** `src/orchestrator/agents/executor/` (general)
+- **Debt:** When `files_to_modify` in the plan lists a path that does not exist, the
+  executor fails immediately with "File not found" and marks the task `ERROR`. The
+  architect correctly plans new test files (e.g. `test_validator_summarizer.py` in D-007,
+  `test_executor_observability.py` in D-006) but the executor rejects them. New-file
+  creation requires a dedicated executor code path (write from scratch vs. read-diff-apply).
+- **Discovered by:** Dogfooding 006 (T7), confirmed again in Dogfooding 007 (T2).
+- **Why deferred:** Non-trivial executor change outside dogfooding scope.
+
+### [2026-07-08] Dogfooding 007 — LLM adds new CB block instead of extending _call_chain
+
+- **File:** `src/orchestrator/agents/validator/summarizer.py`
+- **Debt:** When the issue says "add Claude as fallback," the executor LLM copies the
+  existing Gemini try/except pattern and reuses `_cb_validator` for Claude instead of
+  extending the existing `_call_chain([_call_openrouter], ...)` call. The bloated
+  implementation breaks `test_validator_uses_raw_stderr_when_cb_open` (CB called twice,
+  test expects once). The minimal correct fix is a one-argument extension:
+  `_call_chain([_call_openrouter, _call_claude], ...)`.
+- **Discovered by:** Dogfooding 007
+- **Why deferred:** Root cause is issue AC quality. Lesson: ACs for minimal-edit issues
+  should name the exact construct to modify ("extend the existing `_call_chain(...)` call"),
+  not just describe the desired behavior. Apply to future issues in the validator fallback area.
+
 ### [2026-06-14] Issue #100 — Agent fallback inconsistency
 
-- **File:** `src/orchestrator/agents/validator.py`
+- **File:** `src/orchestrator/agents/validator/summarizer.py` (stale path: was `validator.py`)
 - **Debt:** The executor now uses a resilient, unified fallback chain via _call_chain().
   However, the validator agent still uses a primitive, manual fallback (returning
   raw stderr) when Gemini is unavailable. This creates an architectural
@@ -300,4 +325,7 @@
 - **Discovered by:** Implementation of Issue #100
 - **Why deferred:** Out of scope for Issue #100, which specifically targets the
   executor pipeline. Correcting this requires extracting the chain logic into a
-  shared utility.
+  shared utility. D-007 confirms the minimal fix is: extend
+  `_call_chain([_call_openrouter], ...)` to `_call_chain([_call_openrouter, _call_claude], ...)`
+  in `summarizer.py` line ~81 — but the AC must explicitly name the construct to avoid
+  the D-007b pattern.
