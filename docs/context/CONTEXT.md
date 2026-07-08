@@ -274,6 +274,7 @@ These must not change without a new ADR in `docs/adr/`:
 - ✅ Dogfooding 004 — PatchForge self-modification (`_is_dangerous` requirements* variants, 2026-07-02): code change correct. 3 silent-failure findings: D-001 (phantom path in plan), D-002 (timeout 120s too short), D-003 (executor ERROR masked as previewed).
 - ✅ Issue #194 — Silent-failure hardening (D-001/D-002/D-003): `validate_plan_paths()` new module, `DEFAULT_TIMEOUT` 120→300s, `executor_had_errors` field + `validation_failed` on hard errors (2026-07-07)
 - ✅ Dogfooding 005 — E2E verification of D-001/D-002/D-003 fixes (2026-07-07): D-003 fully verified (executor_had_errors, validation_failed, apply blocked). D-001 not exercised (known recall limitation). D-002 partial (300s still insufficient for 633-test suite). New finding D-004.
+- ✅ D-001 root cause fix — Inject target file listing into Architect prompt (2026-07-07): new `file_collector` module lists all target files (no extension filter), injects `[TARGET FILES]` block + path constraint instruction into both `ARCHITECT_PROMPT` and `ISSUE_ARCHITECT_PROMPT`. Cap at 500 paths with truncation. `validate_plan_paths()` remains as defense in depth.
 
 ---
 
