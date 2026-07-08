@@ -271,17 +271,19 @@
 - **Why deferred:** Fix requires injecting structural context (e.g. function-index per file)
   into the architect prompt — a more invasive change than path listing. Tracked as D-005.
 
-### [2026-07-08] Dogfooding 006 — D-006: Executor writes tool-call markup as file content
+### [2026-07-08] Dogfooding 006 — D-006: Executor writes tool-call markup as file content — RESOLVED
 
-- **File:** `src/orchestrator/agents/executor/` (applier path)
-- **Debt:** When the executor's internal prompt asks it to read a file before writing,
-  but the read tool is unavailable at execution time, it writes an XML tool-call fragment
-  as the file's new content. The diff is generated, validation accepts it syntactically
-  (it's valid diff format), and only ruff catches the resulting invalid Python. No
-  pre-diff validation rejects markup-as-code.
+- **File:** `src/orchestrator/agents/executor/validation.py`, `applier.py`
+- **Debt:** When the executor's LLM output is non-Python content (XML tool-call markup,
+  prose), it was written to staging as valid code. Now `ast.parse()` validates
+  `.py` file content before diff generation; syntactically invalid output is
+  rejected with `ERROR` status immediately.
 - **Discovered by:** Dogfooding 006 (T1 — scheduler.py replaced with `<tool_call>` markup)
-- **Why deferred:** Fix requires the executor to validate generated content is valid Python
-  before writing the diff. Out of scope for D-001 validation sprint.
+- **Resolution:** Pre-diff `ast.parse()` validation in `validation.py`, gated on `.py`
+  extension. Only rejects when original parses but modified does not (avoids false
+  positives on files with pre-existing syntax errors).
+- **Known limitation:** Catches syntactically invalid content only. Semantically wrong
+  but syntactically valid replacements remain undetected until ruff/pytest.
 
 ### [2026-06-14] Issue #100 — Agent fallback inconsistency
 

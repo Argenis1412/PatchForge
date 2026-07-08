@@ -10,6 +10,7 @@ from orchestrator.schemas.executor_output import FileChange, TaskStatus
 from .diffing import _make_diff
 from .logging import _get_logger
 from .providers import _PROVIDER_CHAIN, MAX_RETRIES, _call_chain, _provider_by_name
+from .validation import validate_python_content
 
 
 def _build_prompt(task: Task, file_path: Path, file_content: str) -> str:
@@ -126,6 +127,19 @@ def _apply_task(
 
     if original_content and not modified_content.endswith(original_content[-1]):
         modified_content += original_content[-1]
+
+    if relative_path.endswith(".py"):
+        syntax_error = validate_python_content(modified_content, original_content, relative_path)
+        if syntax_error:
+            _get_logger().error("[%s] Task %s — %s", run_id, task.task_id, syntax_error)
+            return FileChange(
+                task_id=task.task_id,
+                file=relative_path,
+                status="error",
+                error=syntax_error,
+                tokens_used=input_tokens + output_tokens,
+                cost_usd=cost_this_call,
+            )
 
     diff = _make_diff(original_content, modified_content, relative_path)
 
