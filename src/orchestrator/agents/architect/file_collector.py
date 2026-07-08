@@ -59,15 +59,21 @@ def collect_target_files(
     return all_paths, truncated, total
 
 
-def build_target_files_block(config: TargetConfig | None) -> str:
-    """Format the ``[TARGET FILES]`` block for prompt injection."""
+def build_target_files_block(
+    config: TargetConfig | None,
+) -> tuple[str, list[str], bool, int]:
+    """Format the ``[TARGET FILES]`` block for prompt injection.
+
+    Returns ``(block_text, paths, truncated, total)`` so callers can log stats
+    without triggering a second directory walk.
+    """
     paths, truncated, total = collect_target_files(config)
 
     if config is None:
-        return "[TARGET FILES]\n(unavailable — no target config provided)"
+        return "[TARGET FILES]\n(unavailable — no target config provided)", [], False, 0
 
     if not paths:
-        return "[TARGET FILES]\n(no files found in target directory)"
+        return "[TARGET FILES]\n(no files found in target directory)", [], False, 0
 
     lines: list[str] = ["[TARGET FILES]"]
 
@@ -78,4 +84,4 @@ def build_target_files_block(config: TargetConfig | None) -> str:
             lines.append(f"(top-level dirs present: {', '.join(top_dirs)})")
 
     lines.extend(paths)
-    return "\n".join(lines)
+    return "\n".join(lines), paths, truncated, total

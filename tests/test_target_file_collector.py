@@ -121,16 +121,20 @@ class TestCollectTargetFiles:
 class TestBuildTargetFilesBlock:
     @pytest.mark.unit
     def test_none_config(self):
-        block = build_target_files_block(None)
+        block, paths, truncated, total = build_target_files_block(None)
         assert "[TARGET FILES]" in block
         assert "(unavailable — no target config provided)" in block
+        assert paths == []
+        assert truncated is False
+        assert total == 0
 
     @pytest.mark.unit
     def test_empty_listing(self, tmp_path):
         config = _make_config(tmp_path)
-        block = build_target_files_block(config)
+        block, paths, truncated, total = build_target_files_block(config)
         assert "[TARGET FILES]" in block
         assert "(no files found in target directory)" in block
+        assert paths == []
 
     @pytest.mark.unit
     def test_normal_listing(self, tmp_path):
@@ -138,47 +142,37 @@ class TestBuildTargetFilesBlock:
         _touch(tmp_path / "README.md")
         config = _make_config(tmp_path)
 
-        block = build_target_files_block(config)
+        block, paths, truncated, total = build_target_files_block(config)
 
         assert "[TARGET FILES]" in block
         assert "README.md" in block
         assert "src/main.py" in block
         assert "truncated" not in block
+        assert truncated is False
+        assert total == 2
 
     @pytest.mark.unit
-    def test_truncated_listing_via_collect(self, tmp_path):
-        for i in range(10):
-            _touch(tmp_path / "src" / f"mod_{i:02d}.py")
-        _touch(tmp_path / "docs" / "guide.md")
-        config = _make_config(tmp_path)
-
-        paths, truncated, total = collect_target_files(config, max_paths=3)
-        assert total == 11
-        assert truncated is True
-        assert len(paths) == 3
-
-    @pytest.mark.unit
-    def test_truncated_block_has_top_level_dirs(self, tmp_path):
+    def test_truncated_block_has_top_level_dirs(self, tmp_path, monkeypatch):
         for i in range(5):
             _touch(tmp_path / "src" / f"mod_{i:02d}.py")
         _touch(tmp_path / "docs" / "guide.md")
         _touch(tmp_path / "tests" / "test_a.py")
         config = _make_config(tmp_path)
 
-        # Monkey-patch max_paths to force truncation in build_target_files_block
         import orchestrator.agents.architect.file_collector as fc
 
         orig = fc.collect_target_files
+        monkeypatch.setattr(
+            fc,
+            "collect_target_files",
+            lambda cfg, max_paths=500: orig(cfg, max_paths=3),
+        )
 
-        def _patched(cfg, max_paths=500):
-            return orig(cfg, max_paths=3)
-
-        fc.collect_target_files = _patched
-        try:
-            block = build_target_files_block(config)
-        finally:
-            fc.collect_target_files = orig
+        block, paths, truncated, total = build_target_files_block(config)
 
         assert "(truncated: showing 3 of 7 paths, alphabetical order)" in block
         assert "(top-level dirs present:" in block
         assert "docs/" in block
+        assert truncated is True
+        assert total == 7
+        assert len(paths) == 3

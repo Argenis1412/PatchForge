@@ -362,3 +362,17 @@ class TestArchitectTargetFilesInjection:
         prompt_sent = mock_claude.call_args[0][0]
         assert "IMPORTANT — path constraints:" in prompt_sent
         assert "Do NOT invent paths whose parent directory does not exist." in prompt_sent
+
+    @pytest.mark.unit
+    def test_run_from_issue_prompt_contains_path_constraint_instruction(self, mock_claude):
+        mock_claude.return_value = (
+            _CLEAN_JSON,
+            {"input": 1, "output": 1},
+            0.01,
+            "claude-sonnet-4-6",
+        )
+        run_from_issue(_make_issue())
+
+        prompt_sent = mock_claude.call_args[0][0]
+        assert "IMPORTANT — path constraints:" in prompt_sent
+        assert "Do NOT invent paths whose parent directory does not exist." in prompt_sent
