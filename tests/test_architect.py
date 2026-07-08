@@ -376,3 +376,26 @@ class TestArchitectTargetFilesInjection:
         prompt_sent = mock_claude.call_args[0][0]
         assert "IMPORTANT — path constraints:" in prompt_sent
         assert "Do NOT invent paths whose parent directory does not exist." in prompt_sent
+
+    @pytest.mark.unit
+    def test_run_prompt_contains_annotations(self, tmp_path, mock_claude):
+        pkg = tmp_path / "src" / "pkg"
+        pkg.mkdir(parents=True)
+        (pkg / "__init__.py").write_text(
+            '"""Package entry."""\n\ndef run():\n    pass\n',
+            encoding="utf-8",
+        )
+        (pkg / "helper.py").write_text("def assist():\n    pass\n", encoding="utf-8")
+        config = _make_target_config(tmp_path)
+
+        mock_claude.return_value = (
+            _CLEAN_JSON,
+            {"input": 1, "output": 1},
+            0.01,
+            "claude-sonnet-4-6",
+        )
+        run(_make_scout(), config)
+
+        prompt_sent = mock_claude.call_args[0][0]
+        assert "src/pkg/__init__.py  # Package entry. | run()" in prompt_sent
+        assert "src/pkg/helper.py  # assist()" in prompt_sent

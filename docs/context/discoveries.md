@@ -259,17 +259,22 @@
   path, wrong file within the package (see D-005). Alphabetical truncation untested
   (repo < 500 files).
 
-### [2026-07-08] Dogfooding 006 — D-005: Architect targets wrong file within package
+### ✅ [2026-07-08] Dogfooding 006 — D-005: Architect targets wrong file within package (RESOLVED)
 
-- **File:** `src/orchestrator/agents/executor/scheduler.py` (targeted instead of `__init__.py`)
+- **File:** `src/orchestrator/agents/architect/file_collector.py`
 - **Debt:** The `[TARGET FILES]` block lists all files but provides no structural context
   about which file contains what functionality. For packages with multiple submodules
   the architect can pick the correct directory but the wrong file within it. In D006
   it targeted `scheduler.py` (DAG builder) instead of `__init__.py` (task loop with `run()`).
   The executor then wrote LLM tool-call markup into scheduler.py, gutting the file.
 - **Discovered by:** Dogfooding 006
-- **Why deferred:** Fix requires injecting structural context (e.g. function-index per file)
-  into the architect prompt — a more invasive change than path listing. Tracked as D-005.
+- **Resolution:** `build_target_files_block()` now annotates `.py` files inside Python
+  packages (directories containing `__init__.py`) with structural context extracted via
+  `ast.parse()`: module docstring (truncated to 80 chars) and top-level function/class
+  names (capped at 8). Format: `path  # docstring | name1(), ClassName`. Package
+  detection runs before path truncation so late-alphabet packages are still recognized.
+  10,000-char annotation budget prevents token bloat. Graceful degradation on `OSError`,
+  `SyntaxError`, or `UnicodeDecodeError`. 17 new tests.
 
 ### [2026-07-08] Dogfooding 006 — D-006: Executor writes tool-call markup as file content — RESOLVED
 

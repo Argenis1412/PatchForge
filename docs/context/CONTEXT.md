@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-07-08 | Session: D-006-executor-syntax-validation
+> Last updated: 2026-07-08 | Session: D-005-architect-structural-context
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 665 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 682 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3).
 
@@ -96,7 +96,7 @@ src/orchestrator/
 ├── validation_workspace.py
 └── workspace.py           # WorkspaceManager — disk layout
 
-tests/                     (27 test files, 665+ tests)
+tests/                     (27 test files, 682+ tests)
 ```
 
 ---
@@ -258,6 +258,7 @@ These must not change without a new ADR in `docs/adr/`:
 **P3 closure items remaining:** None — all P3 items complete.
 
 **Recent:**
+- ✅ D-005 — Architect structural context annotations (2026-07-08): `build_target_files_block()` annotates `.py` files inside Python packages with module docstring + top-level symbols via `ast.parse()`. Package detection runs before path truncation. 10k-char annotation budget. Graceful degradation on errors. 17 new tests.
 - ✅ D-006 — Executor pre-diff syntax validation (PR #202, 2026-07-08): new `validation.py` module with `validate_python_content()` using `ast.parse()`. Rejects non-Python LLM output (XML markup, prose) before diff/staging for `.py` files. Only rejects when original parses but modified does not (no false positives on pre-existing syntax errors). Non-`.py` files skip validation. 7 new tests.
 - ✅ Dogfooding 006 — D-001 validated end-to-end (PR #201, 2026-07-08): `[TARGET FILES]` injection into architect prompt prevents phantom paths. D-005 (bad function boundaries) and D-006 (executor writes markup) documented.
 - ✅ Issue #198 — Asymmetric risk gates + D-004 timeout bump (PR #199, 2026-07-07): `auto_apply_eligible` informational field on `RunMetadata`, `DEFAULT_TIMEOUT` 300→450s. `compute_auto_apply_eligible()` extracted to shared function in `artifacts.py`.
