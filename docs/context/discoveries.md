@@ -115,6 +115,7 @@
 - **Debt:** `--force-provider` override is logged only to `executor.log` via `_get_logger().info()`. No `log_event()` is emitted to `pipeline.jsonl` because the executor does not receive `run_id`/`logs_dir` from the pipeline caller. Any future caller (test, API, new command) that passes `force_provider` without manually logging would create an audit hole.
 - **Discovered by:** Post-implementation audit
 - **Why deferred:** Fix requires adding optional `run_id`/`logs_dir` parameters to `executor_agent.run()` — a contract change outside the hardening sprint scope.
+- **Resolved:** [2026-07-09] Issue #208 — `executor_agent.run()` now accepts `logs_dir`/`run_dir` and emits a full lifecycle event trail (`executor_start`, `task_start`, `file_start`/`file_end`, `task_end`, `task_skipped`, `executor_end`) via `log_event()`.
 
 ### ✅ [2026-06-15] Phase 4 — Provider clients lack consistent timeout (RESOLVED)
 
@@ -176,6 +177,7 @@
 - **Discovered by:** Post-implementation code review
 - **Why deferred:** CI runs are automated — provider override is a debugging tool
   for interactive use. Not a functional gap for the primary use case.
+- **Resolved:** [2026-07-09] Issue #208 — `patchforge ci` now accepts `--force-provider`, forwards it to the executor, emits a symmetric `force_provider_override` event, and records it on `CiResult.force_provider`.
 
 ### [2026-06-30] Issue #183 — `latest` Docker tag non-deterministic in workflow default
 
