@@ -677,3 +677,154 @@ def test_apply_task_skips_validation_for_non_python(tmp_path, monkeypatch):
 
     change = _apply_task(task, "run_d006", tmp_path, staging)
     assert change.status == "applied"
+
+
+# ---------------------------------------------------------------------------
+# New-file creation support (Issue #210)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_apply_task_creates_new_file(tmp_path, monkeypatch):
+    """A .py file that doesn't exist should be created, not rejected."""
+    from orchestrator.agents.executor.applier import _apply_task
+
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    task = Task(
+        task_id="t1",
+        title="create test file",
+        description="write a new test file",
+        files_to_modify=["tests/test_new.py"],
+        priority="high",
+        effort="low",
+        risk_level="low",
+        dependencies=[],
+    )
+
+    new_content = "import pytest\n\ndef test_example():\n    assert True\n"
+    cb_gemini_mock = MagicMock()
+    cb_gemini_mock.call.side_effect = lambda fn: (new_content, 10, 5)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini_mock)
+
+    change = _apply_task(task, "run_new", tmp_path, staging)
+    assert change.status == "applied"
+    assert (staging / "tests" / "test_new.py").exists()
+    assert change.diff is not None
+    assert "/dev/null" in change.diff
+
+
+@pytest.mark.unit
+def test_apply_task_creates_new_non_python_file(tmp_path, monkeypatch):
+    """Non-Python new files skip syntax validation and succeed."""
+    from orchestrator.agents.executor.applier import _apply_task
+
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    task = Task(
+        task_id="t1",
+        title="create readme",
+        description="write a readme",
+        files_to_modify=["docs/README.md"],
+        priority="high",
+        effort="low",
+        risk_level="low",
+        dependencies=[],
+    )
+
+    md_content = "# README\n\nHello world.\n"
+    cb_gemini_mock = MagicMock()
+    cb_gemini_mock.call.side_effect = lambda fn: (md_content, 10, 5)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini_mock)
+
+    change = _apply_task(task, "run_md", tmp_path, staging)
+    assert change.status == "applied"
+    assert (staging / "docs" / "README.md").exists()
+    assert "/dev/null" in change.diff
+
+
+@pytest.mark.unit
+def test_apply_task_new_file_accumulated_from_staging(tmp_path, monkeypatch):
+    """A file not on disk but already in staging is a modification, not a creation."""
+    from orchestrator.agents.executor.applier import _apply_task
+
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / "new_module.py").write_text("x = 1\n", encoding="utf-8")
+
+    task = Task(
+        task_id="t2",
+        title="extend module",
+        description="add y",
+        files_to_modify=["new_module.py"],
+        priority="high",
+        effort="low",
+        risk_level="low",
+        dependencies=[],
+    )
+
+    cb_gemini_mock = MagicMock()
+    cb_gemini_mock.call.side_effect = lambda fn: ("x = 1\ny = 2\n", 10, 5)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini_mock)
+
+    change = _apply_task(task, "run_accum", tmp_path, staging)
+    assert change.status == "applied"
+    assert "/dev/null" not in change.diff
+    assert "a/new_module.py" in change.diff
+
+
+@pytest.mark.unit
+def test_apply_task_new_file_rejects_path_traversal(tmp_path):
+    """Path traversal is rejected even for files that don't exist."""
+    from orchestrator.agents.executor.applier import _apply_task
+    from orchestrator.exceptions import PathSafetyError
+
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    task = Task(
+        task_id="t1",
+        title="traversal",
+        description="attempt escape",
+        files_to_modify=["../../evil.py"],
+        priority="high",
+        effort="low",
+        risk_level="low",
+        dependencies=[],
+    )
+
+    with pytest.raises(PathSafetyError):
+        _apply_task(task, "run_trav", tmp_path, staging)
+
+
+@pytest.mark.unit
+def test_new_file_diff_compatible_with_git_apply(tmp_path):
+    """Diff generated for a new file must pass `git apply --check`."""
+    import subprocess
+
+    from orchestrator.agents.executor.diffing import _make_diff
+
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-m", "init"],
+        cwd=tmp_path,
+        capture_output=True,
+        check=True,
+    )
+
+    new_content = "x = 1\ny = 2\n"
+    diff = _make_diff("", new_content, "new_file.py", is_new_file=True)
+    assert "/dev/null" in diff
+
+    patch_path = tmp_path / "patch.diff"
+    patch_path.write_text(diff, encoding="utf-8", newline="")
+
+    res = subprocess.run(
+        ["git", "apply", "--check", str(patch_path)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, f"git apply --check failed: {res.stderr}"

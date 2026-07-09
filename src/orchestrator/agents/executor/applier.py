@@ -36,6 +36,25 @@ FILE CONTENT
 """
 
 
+def _build_create_prompt(task: Task, file_path: Path) -> str:
+    return f"""You are a precise code author. Write the complete content of a new file.
+
+TASK
+----
+Title       : {task.title}
+Description : {task.description}
+File        : {file_path}
+
+RULES (mandatory)
+-----------------
+1. Return ONLY the complete file content.
+2. Do NOT include markdown code fences (``` or ~~~).
+3. Do NOT include any explanation, comments, or preamble.
+4. Include all necessary imports and declarations.
+5. Follow standard conventions for the file type.
+"""
+
+
 def _apply_task(
     task: Task,
     run_id: str,
@@ -61,17 +80,23 @@ def _apply_task(
 
     file_path = project_root / relative_path
 
-    if not file_path.exists():
-        msg = f"File not found: {file_path}"
-        _get_logger().error("[%s] %s", run_id, msg)
-        return FileChange(task_id=task.task_id, file=relative_path, status="error", error=msg)
-
     staged_path = staging_dir / relative_path
     if staged_path.exists():
         original_content = staged_path.read_text(encoding="utf-8")
-    else:
+        is_new_file = False
+    elif file_path.exists():
         original_content = file_path.read_text(encoding="utf-8")
-    prompt = _build_prompt(task, file_path, original_content)
+        is_new_file = False
+    else:
+        original_content = ""
+        is_new_file = True
+        _get_logger().info("[%s] New file: %s", run_id, relative_path)
+
+    prompt = (
+        _build_create_prompt(task, file_path)
+        if is_new_file
+        else _build_prompt(task, file_path, original_content)
+    )
 
     modified_content: str | None = None
     input_tokens = output_tokens = 0
@@ -141,7 +166,7 @@ def _apply_task(
                 cost_usd=cost_this_call,
             )
 
-    diff = _make_diff(original_content, modified_content, relative_path)
+    diff = _make_diff(original_content, modified_content, relative_path, is_new_file=is_new_file)
 
     if not diff:
         _get_logger().info("[%s] Task %s — no changes (idempotent)", run_id, task.task_id)
