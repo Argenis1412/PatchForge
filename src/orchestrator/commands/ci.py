@@ -44,6 +44,7 @@ def execute(
     risk_budget: str = "low",
     allow_dirty: bool = False,
     result_path: Optional[Path] = None,
+    force_provider: Optional[str] = None,
 ) -> CiResult:
     """Run the full CI pipeline and return a :class:`CiResult`.
 
@@ -102,6 +103,7 @@ def execute(
             validation_passed=validation_passed,
             error=error,
             issue_number=issue_number,
+            force_provider=force_provider,
         )
         _write_result(r, result_path)
         return r
@@ -317,6 +319,18 @@ def execute(
         run_dir=run_dir,
     )
 
+    if force_provider is not None:
+        log_event(
+            trace_id=run_id,
+            run_id=run_id,
+            source="ci",
+            stage="executor",
+            event="force_provider_override",
+            data={"provider": force_provider, "source": "cli"},
+            logs_dir=logs_dir,
+            run_dir=run_dir,
+        )
+
     staging_dir = run_dir / "staging"
     if staging_dir.exists():
         shutil.rmtree(staging_dir)
@@ -328,6 +342,9 @@ def execute(
             run_id=run_id,
             config=config,
             staging_dir=staging_dir,
+            force_provider=force_provider,
+            logs_dir=logs_dir,
+            run_dir=run_dir,
         )
     except Exception as exc:
         log_failure(
@@ -573,6 +590,7 @@ def execute(
         affected_files=run_metadata.affected_files or [],
         validation_passed=True,
         issue_number=issue_number,
+        force_provider=force_provider,
     )
     _write_result(result, result_path)
     return result

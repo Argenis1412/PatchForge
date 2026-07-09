@@ -421,6 +421,85 @@ class TestCiExecute:
         assert result.issue_number == 7
         assert "patchforge/" in result.branch
 
+    def test_force_provider_forwarded_to_executor_and_result(self, ci_repo):
+        from orchestrator.commands.ci import execute
+
+        repo, ws = ci_repo
+        arch_output = _make_arch_output()
+        exec_output = _make_executor_output()
+        val_output = _make_validator_output(passed=True)
+        issue_md = ws / "issue.md"
+        issue_md.write_text(
+            '---\ntitle: "test"\nnumber: 1\n---\n\nFix bug\n',
+            encoding="utf-8",
+        )
+
+        mock_git_ok = MagicMock()
+        mock_git_ok.return_code = 0
+        mock_git_ok.returncode = 0
+        mock_git_ok.stderr = ""
+        mock_git_ok.stdout = ""
+
+        mock_executor_run = MagicMock(return_value=(exec_output, {"cost_usd": 0}))
+
+        with (
+            patch("orchestrator.scanners.python.scan", return_value=_make_scan_findings()),
+            patch(
+                "orchestrator.agents.architect.run_from_issue",
+                return_value=(arch_output, {"cost_usd": 0}),
+            ),
+            patch(
+                "orchestrator.risk.check_plan_gate",
+                return_value=_make_risk_result(),
+            ),
+            patch(
+                "orchestrator.risk.check_patch_gate",
+                return_value=_make_risk_result(),
+            ),
+            patch("orchestrator.agents.executor.run", mock_executor_run),
+            patch("orchestrator.schemas.experiment.Experiment"),
+            patch("orchestrator.workspace.WorkspaceManager.write_experiment"),
+            patch(
+                "orchestrator.validation_workspace.create_validation_workspace",
+            ) as mock_val_ws,
+            patch(
+                "orchestrator.validation_workspace.apply_patch_to_copy",
+                return_value=MagicMock(return_code=0),
+            ),
+            patch(
+                "orchestrator.validation_workspace.run_validation_in_copy",
+                return_value=val_output,
+            ),
+            patch(
+                "orchestrator.git.create_controlled_branch",
+                return_value=mock_git_ok,
+            ),
+            patch(
+                "orchestrator.git.apply_patch",
+                return_value=mock_git_ok,
+            ),
+            patch("subprocess.run", return_value=mock_git_ok),
+        ):
+            mock_val_ws.return_value.__enter__ = MagicMock(
+                return_value=MagicMock(
+                    temporary_root=repo,
+                    patch_path=repo / "patch.diff",
+                ),
+            )
+            mock_val_ws.return_value.__exit__ = MagicMock(return_value=False)
+
+            result = execute(
+                target_path=repo,
+                workspace_path=ws,
+                issue_file=issue_md,
+                force_provider="claude",
+            )
+
+        assert result.status == "applied"
+        assert result.force_provider == "claude"
+        mock_executor_run.assert_called_once()
+        assert mock_executor_run.call_args.kwargs["force_provider"] == "claude"
+
     def test_fail_before_run_id_still_writes_result(self, tmp_path):
         """Regression: _fail must work before run_id is generated."""
         from orchestrator.commands.ci import execute
