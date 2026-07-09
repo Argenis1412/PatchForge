@@ -301,7 +301,7 @@
 - **Discovered by:** Dogfooding 006 (T7), confirmed again in Dogfooding 007 (T2).
 - **Why deferred:** Non-trivial executor change outside dogfooding scope.
 
-### [2026-07-08] Dogfooding 007 — LLM adds new CB block instead of extending _call_chain
+### ✅ [2026-07-08] Dogfooding 007 — LLM adds new CB block instead of extending _call_chain (RESOLVED)
 
 - **File:** `src/orchestrator/agents/validator/summarizer.py`
 - **Debt:** When the issue says "add Claude as fallback," the executor LLM copies the
@@ -311,9 +311,27 @@
   test expects once). The minimal correct fix is a one-argument extension:
   `_call_chain([_call_openrouter, _call_claude], ...)`.
 - **Discovered by:** Dogfooding 007
-- **Why deferred:** Root cause is issue AC quality. Lesson: ACs for minimal-edit issues
-  should name the exact construct to modify ("extend the existing `_call_chain(...)` call"),
-  not just describe the desired behavior. Apply to future issues in the validator fallback area.
+- **Resolution (Issue #205, PR #206):** Applied the minimal fix by hand instead of via
+  the executor LLM: extended the import and the `_call_chain([...])` list with
+  `_call_claude`, and fixed a model-tag misattribution found during adversarial review
+  (`chain_result.provider_name` instead of a hardcoded `"openrouter/free"` string, which
+  was wrong whenever OpenRouter's fallback was actually served by a different provider).
+  Confirms the AC-quality lesson below did not need to be re-litigated once the exact
+  construct to modify was named up front.
+- **Lesson:** ACs for minimal-edit issues should name the exact construct to modify
+  ("extend the existing `_call_chain(...)` call"), not just describe the desired
+  behavior. Apply to future issues in the validator fallback area.
+
+### [2026-07-08] Issue #205 — Docstring coverage bot check (60% < 80% threshold)
+
+- **File:** repo-wide (CodeRabbit "Docstring Coverage" check)
+- **Debt:** CodeRabbit's automated docstring coverage check reports 60.00% coverage
+  against an 80.00% threshold, flagged as a warning on PR #206. The gap is pre-existing
+  and repo-wide, not introduced by PR #206 (a 2-file, 3-line summarizer fix).
+- **Discovered by:** CodeRabbit bot review on PR #206
+- **Why deferred:** Raising repo-wide docstring coverage 20 points is a large,
+  unscoped effort unrelated to the validator fallback fix. Out of scope per the
+  Golden Rule (smallest correct change). Revisit as a dedicated docs/hardening issue.
 
 ### [2026-06-14] Issue #100 — Agent fallback inconsistency
 

@@ -15,7 +15,7 @@ COST_PER_SUMMARY = 0.0
 def _summarize_errors(failed_tools: list[ToolResult], run_id: str) -> tuple[str, str]:
     """Summarize tool errors via LLM. Returns (summary, model_used).
 
-    Falls back through: Gemini → OpenRouter → raw stderr.
+    Falls back through: Gemini → OpenRouter → Claude → raw stderr.
     ``model_used`` is empty string when raw stderr fallback is used.
     """
     has_google_key = bool(os.getenv("GOOGLE_API_KEY"))
@@ -71,20 +71,26 @@ ERRORS
             return summary, MODEL_GEMINI
 
         except CircuitBreakerOpenError:
-            _get_logger().warning("[%s] Gemini CB open — trying OpenRouter fallback", run_id)
+            _get_logger().warning("[%s] Gemini CB open — trying provider chain", run_id)
         except Exception as exc:
-            _get_logger().error("[%s] Gemini summary failed: %s — trying OpenRouter", run_id, exc)
+            _get_logger().error(
+                "[%s] Gemini summary failed: %s — trying provider chain", run_id, exc
+            )
     else:
-        _get_logger().warning("[%s] GOOGLE_API_KEY not set — trying OpenRouter", run_id)
+        _get_logger().warning("[%s] GOOGLE_API_KEY not set — trying provider chain", run_id)
 
     try:
-        from orchestrator.agents.executor.providers import _call_chain, _call_openrouter
+        from orchestrator.agents.executor.providers import (
+            _call_chain,
+            _call_claude,
+            _call_openrouter,
+        )
 
-        chain_result = _call_chain([_call_openrouter], prompt, run_id)
+        chain_result = _call_chain([_call_openrouter, _call_claude], prompt, run_id)
         if chain_result.success is not None:
-            return chain_result.success[0], "openrouter/free"
+            return chain_result.success[0], chain_result.provider_name
     except Exception as inner_exc:
-        _get_logger().warning("[%s] OpenRouter fallback also failed: %s", run_id, inner_exc)
+        _get_logger().warning("[%s] Provider chain fallback also failed: %s", run_id, inner_exc)
 
     raw = "\n".join(f"[{r.tool}] {(r.stderr or r.stdout)[:500]}" for r in failed_tools)
     return raw, ""
