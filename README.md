@@ -278,8 +278,15 @@ docker run --user 1001:1001 ...
 
 ```bash
 pip install -e ".[dev]"
-pytest -v
-ruff check src/
+
+# Quick QA (lint + format check + tests)
+make qa
+
+# Or individual steps:
+make lint       # ruff check
+make format     # ruff format --check
+make test       # pytest -v
+make fix        # auto-fix lint and format
 ```
 
 For more details, see the [documentation](./docs/index.md).

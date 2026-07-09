@@ -1,15 +1,18 @@
 PYTHON = .venv\Scripts\python
-.PHONY: qa lint fix test
+.PHONY: qa lint format fix test
 
-qa: lint test
-	@echo "[OK] QA completo: lint + tests pasaron"
+qa: lint format test
+	@echo "[OK] QA complete: check + format + tests passed"
 
 lint:
-	$(PYTHON) -m ruff check src/ tests/
+	$(PYTHON) -m ruff check .
+
+format:
+	$(PYTHON) -m ruff format --check .
 
 fix:
-	$(PYTHON) -m ruff check --fix src/ tests/
-	$(PYTHON) -m ruff format src/ tests/
+	$(PYTHON) -m ruff check --fix .
+	$(PYTHON) -m ruff format .
 
 test:
 	$(PYTHON) -m pytest tests/ -v -n auto
