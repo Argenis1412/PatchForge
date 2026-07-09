@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-07-08 | Session: Issue #205
+> Last updated: 2026-07-09 | Session: Issue #208
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 682 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 688 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3).
 
@@ -96,7 +96,7 @@ src/orchestrator/
 ├── validation_workspace.py
 └── workspace.py           # WorkspaceManager — disk layout
 
-tests/                     (27 test files, 682+ tests)
+tests/                     (27 test files, 688+ tests)
 ```
 
 ---
@@ -258,6 +258,14 @@ These must not change without a new ADR in `docs/adr/`:
 **P3 closure items remaining:** None — all P3 items complete.
 
 **Recent:**
+- ✅ Issue #208 — Executor observability + `ci --force-provider` (2026-07-09): `executor_agent.run()` now
+  accepts `logs_dir`/`run_dir` and emits a full lifecycle event trail (`executor_start`, `task_start`,
+  `file_start`/`file_end`, `task_end`, `task_skipped`, `executor_end`) via `log_event()`, wrapped in a
+  `_safe_log_event` helper so observability failures cannot crash a run. `preview.py` and `pipeline.py`
+  forward `logs_dir`/`run_dir` to the executor. `patchforge ci` gained `--force-provider` (shared
+  `_validate_force_provider()` with `preview`), forwarded to the executor with a symmetric external
+  `force_provider_override` event and recorded on `CiResult.force_provider`. Closes the audit-hole debt
+  from issues #145 and #183 (documented in `discoveries.md`).
 - ✅ Issue #205 — Add Claude as third fallback in validator summarizer (PR #206, 2026-07-08):
   extended `_call_chain([_call_openrouter], ...)` to `_call_chain([_call_openrouter, _call_claude], ...)`
   in `summarizer.py`. Fixed a model-tag misattribution found during adversarial review

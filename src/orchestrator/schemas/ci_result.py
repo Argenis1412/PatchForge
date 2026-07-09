@@ -24,3 +24,4 @@ class CiResult(BaseModel):
     validation_passed: bool
     error: Optional[str] = None
     issue_number: Optional[int] = None
+    force_provider: Optional[str] = None

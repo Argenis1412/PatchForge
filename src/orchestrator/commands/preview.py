@@ -176,6 +176,8 @@ def execute(
                 config=config,
                 staging_dir=staging_dir,
                 force_provider=force_provider,
+                logs_dir=logs_dir,
+                run_dir=run_dir,
             )
             progress.update(task, completed=100)
         except Exception as exc:

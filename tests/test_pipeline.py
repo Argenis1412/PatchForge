@@ -101,6 +101,48 @@ def test_successful_run_completed(config, monkeypatch):
     assert result.status == "completed"
 
 
+def test_stage_executor_forwards_pipeline_trace_id(config, monkeypatch):
+    """The executor must receive the pipeline's trace_id, not just run_id,
+    so its events correlate with the rest of the run's trace."""
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_scout", MagicMock(return_value=(_scout_output(), _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_architect",
+        MagicMock(
+            return_value=(
+                _architect_output(
+                    tasks=[
+                        Task(
+                            task_id="t1",
+                            title="x",
+                            description="x",
+                            files_to_modify=["x.py"],
+                            priority="low",
+                            effort="low",
+                            risk_level="low",
+                            dependencies=[],
+                        )
+                    ]
+                ),
+                _meta(),
+            )
+        ),
+    )
+    mock_run_executor = MagicMock(return_value=(_executor_output(applied=1), _meta()))
+    monkeypatch.setattr("orchestrator.pipeline.run_executor", mock_run_executor)
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_validator",
+        MagicMock(return_value=(_validator_output(passed=True), _meta())),
+    )
+
+    pipeline = Pipeline(config=config)
+    pipeline.execute(dry_run=False)
+
+    assert mock_run_executor.call_args.kwargs["trace_id"] == pipeline.trace_id
+    assert mock_run_executor.call_args.kwargs["run_id"] == pipeline.run.run_id
+
+
 def test_pending_review_produces_awaiting_review(config, monkeypatch):
     exec_out = ExecutorOutput(
         model="test",

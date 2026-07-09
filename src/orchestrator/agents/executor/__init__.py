@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 from orchestrator.exceptions import SchedulerInvariantError
+from orchestrator.observability.events import log_event
 from orchestrator.schemas.architect_output import ArchitectOutput
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.executor_output import ExecutorOutput, FileChange, TaskStatus
@@ -40,12 +41,33 @@ PROJECT_ROOT = Path(
 # ---------------------------------------------------------------------------
 
 
+def _safe_log_event(
+    trace_id: str, run_id: str, event: str, data: dict, logs_dir: Path, run_dir: Optional[Path]
+) -> None:
+    try:
+        log_event(
+            trace_id=trace_id,
+            run_id=run_id,
+            source="executor",
+            stage="executor",
+            event=event,
+            data=data,
+            logs_dir=logs_dir,
+            run_dir=run_dir,
+        )
+    except OSError as exc:
+        _get_logger().warning("[%s] Failed to emit event %s: %s", run_id, event, exc)
+
+
 def run(
     architect_output: ArchitectOutput,
     run_id: Optional[str] = None,
     config: Optional[Union[str, Path, TargetConfig]] = None,
     staging_dir: Optional[Path] = None,
     force_provider: Optional[str] = None,
+    logs_dir: Optional[Path] = None,
+    run_dir: Optional[Path] = None,
+    trace_id: Optional[str] = None,
 ) -> tuple[ExecutorOutput, dict]:
     if config is None:
         config = TargetConfig.load(target_path=PROJECT_ROOT)
@@ -54,13 +76,15 @@ def run(
 
     if run_id is None:
         run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:6]
-    logs_dir = config.workspace_path / "logs"
+    effective_trace_id = trace_id or run_id
+    file_logs_dir = config.workspace_path / "logs"
     project_root = config.target_path.resolve()
     if staging_dir is None:
         staging_dir = config.workspace_path / "outputs" / "staging" / run_id
+    event_logs_dir = logs_dir if logs_dir is not None else file_logs_dir
 
     # Initialize logger
-    _get_logger(logs_dir)
+    _get_logger(file_logs_dir)
     _get_logger().info("=== Executor run %s ===", run_id)
 
     if force_provider is not None:
@@ -81,9 +105,26 @@ def run(
     ordered_tasks = _topological_order(tasks, dag)
     task_status_results: dict[str, TaskStatus] = {}
 
+    _safe_log_event(
+        effective_trace_id,
+        run_id,
+        "executor_start",
+        {"run_id": run_id, "task_count": len(tasks)},
+        event_logs_dir,
+        run_dir,
+    )
+
     for task in ordered_tasks:
         _get_logger().info(
             "[%s] Task %s | risk=%s | title=%s", run_id, task.task_id, task.risk_level, task.title
+        )
+        _safe_log_event(
+            effective_trace_id,
+            run_id,
+            "task_start",
+            {"task_id": task.task_id, "title": task.title, "risk_level": task.risk_level},
+            event_logs_dir,
+            run_dir,
         )
 
         # --- dependency check ---
@@ -101,6 +142,18 @@ def run(
                     task.task_id,
                     dep_id,
                     dep_status,
+                )
+                _safe_log_event(
+                    effective_trace_id,
+                    run_id,
+                    "task_skipped",
+                    {
+                        "task_id": task.task_id,
+                        "dependency": dep_id,
+                        "dependency_status": str(dep_status),
+                    },
+                    event_logs_dir,
+                    run_dir,
                 )
                 result.errors.append(
                     FileChange(
@@ -126,8 +179,30 @@ def run(
         task_statuses: list[TaskStatus] = []
         for file_relative in task.files_to_modify:
             single_file_task = task.model_copy(update={"files_to_modify": [file_relative]})
+            _safe_log_event(
+                effective_trace_id,
+                run_id,
+                "file_start",
+                {"task_id": task.task_id, "file": file_relative},
+                event_logs_dir,
+                run_dir,
+            )
             change = _applier._apply_task(
                 single_file_task, run_id, project_root, staging_dir, force_provider=force_provider
+            )
+            _safe_log_event(
+                effective_trace_id,
+                run_id,
+                "file_end",
+                {
+                    "task_id": task.task_id,
+                    "file": file_relative,
+                    "status": str(change.status),
+                    "tokens_used": change.tokens_used,
+                    "cost_usd": change.cost_usd,
+                },
+                event_logs_dir,
+                run_dir,
             )
 
             result.total_tokens += change.tokens_used
@@ -157,6 +232,19 @@ def run(
         else:
             task_status_results[task.task_id] = TaskStatus.NOOP
 
+        _safe_log_event(
+            effective_trace_id,
+            run_id,
+            "task_end",
+            {
+                "task_id": task.task_id,
+                "status": str(task_status_results[task.task_id]),
+                "file_count": len(task_statuses),
+            },
+            event_logs_dir,
+            run_dir,
+        )
+
     _get_logger().info(
         "[%s] Finished | applied=%d | pending_review=%d | errors=%d | cost=$%.6f",
         run_id,
@@ -164,6 +252,20 @@ def run(
         len(result.pending_review),
         len(result.errors),
         result.total_cost_usd,
+    )
+
+    _safe_log_event(
+        effective_trace_id,
+        run_id,
+        "executor_end",
+        {
+            "applied": len(result.applied),
+            "pending_review": len(result.pending_review),
+            "errors": len(result.errors),
+            "total_cost_usd": result.total_cost_usd,
+        },
+        event_logs_dir,
+        run_dir,
     )
 
     meta = {

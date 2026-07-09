@@ -156,6 +156,17 @@ def plan(
     execute_plan(run_id=run_id, workspace=workspace, env_file=env_file, issue_file=issue_file)
 
 
+def _validate_force_provider(force_provider: Optional[str]) -> None:
+    from orchestrator.agents.executor.providers import KNOWN_PROVIDER_NAMES
+
+    if force_provider is not None and force_provider not in KNOWN_PROVIDER_NAMES:
+        console.print(
+            f"[bold red]Error: Invalid value for --force-provider. "
+            f"Valid options are: {', '.join(KNOWN_PROVIDER_NAMES)}.[/bold red]"
+        )
+        raise typer.Exit(1)
+
+
 @app.command()
 def preview(
     run_id: str = typer.Argument(..., help="Run ID of an existing run"),
@@ -176,15 +187,9 @@ def preview(
     ),
 ) -> None:
     """Generate and validate a unified patch without modifying the target repository."""
-    from orchestrator.agents.executor.providers import KNOWN_PROVIDER_NAMES
     from orchestrator.commands.preview import execute as execute_preview
 
-    if force_provider is not None and force_provider not in KNOWN_PROVIDER_NAMES:
-        console.print(
-            f"[bold red]Error: Invalid value for --force-provider. "
-            f"Valid options are: {', '.join(KNOWN_PROVIDER_NAMES)}.[/bold red]"
-        )
-        raise typer.Exit(1)
+    _validate_force_provider(force_provider)
 
     if validator_timeout is not None and validator_timeout <= 0:
         console.print("[bold red]Error: --validator-timeout must be greater than 0.[/bold red]")
@@ -232,6 +237,12 @@ def ci(
         "--result-file",
         help="Path to write ci_result.json",
     ),
+    force_provider: Optional[str] = typer.Option(
+        None,
+        "--force-provider",
+        help="Force a specific LLM ('gemini'|'openrouter'|'claude') for all tasks, "
+        "ignoring risk_level routing. Does not affect high-risk gating.",
+    ),
 ) -> None:
     """Run the full CI pipeline: scan, plan, preview, apply. No push."""
     if risk_budget not in ("low", "medium", "high"):
@@ -244,6 +255,8 @@ def ci(
         console.print("[bold red]Error: --issue-number must be a positive integer.[/bold red]")
         raise typer.Exit(code=1)
 
+    _validate_force_provider(force_provider)
+
     from orchestrator.commands.ci import execute as execute_ci
 
     result = execute_ci(
@@ -254,6 +267,7 @@ def ci(
         risk_budget=risk_budget,
         allow_dirty=allow_dirty,
         result_path=result_file,
+        force_provider=force_provider,
     )
 
     if result.status != "applied":
