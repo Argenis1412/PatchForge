@@ -1,3 +1,4 @@
+import json
 import logging
 from unittest.mock import MagicMock
 
@@ -468,6 +469,162 @@ def test_apply_task_valid_python_passes(tmp_path, monkeypatch):
 
     change = _apply_task(task, "run_d006", tmp_path, staging)
     assert change.status == "applied"
+
+
+# ---------------------------------------------------------------------------
+# Issue #208 — Executor lifecycle events
+# ---------------------------------------------------------------------------
+
+
+def _read_events(run_dir):
+    events_path = run_dir / "events.jsonl"
+    if not events_path.exists():
+        return []
+    lines = events_path.read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in lines]
+
+
+@pytest.mark.unit
+def test_executor_emits_lifecycle_events(tmp_path):
+    arch_out = ArchitectOutput(
+        validated_findings=[],
+        false_positives=[],
+        systemic_risks=[],
+        implementation_plan=[],
+        blockers=[],
+    )
+    workspace = tmp_path.parent / f"{tmp_path.name}-workspace"
+    config = TargetConfig(target_path=tmp_path, workspace_path=workspace)
+    run_dir = tmp_path.parent / f"{tmp_path.name}-rundir"
+    run_dir.mkdir()
+
+    run(arch_out, config=config, run_dir=run_dir)
+
+    events = [e["event"] for e in _read_events(run_dir)]
+    assert "executor_start" in events
+    assert "executor_end" in events
+    assert events.index("executor_start") < events.index("executor_end")
+
+
+@pytest.mark.unit
+def test_executor_emits_task_events(tmp_path, monkeypatch):
+    source_file = tmp_path / "test.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+
+    task = Task(
+        task_id="t1",
+        title="bump x",
+        description="change x to 2",
+        files_to_modify=["test.py"],
+        priority="high",
+        effort="low",
+        risk_level="low",
+        dependencies=[],
+    )
+    arch_out = ArchitectOutput(
+        validated_findings=[],
+        false_positives=[],
+        systemic_risks=[],
+        implementation_plan=[task],
+        blockers=[],
+    )
+    workspace = tmp_path.parent / f"{tmp_path.name}-workspace"
+    config = TargetConfig(target_path=tmp_path, workspace_path=workspace)
+    staging_dir = tmp_path / "staging"
+    run_dir = tmp_path.parent / f"{tmp_path.name}-rundir"
+    run_dir.mkdir()
+
+    cb_gemini_mock = MagicMock()
+    cb_gemini_mock.call.side_effect = lambda fn: ("x = 2\n", 10, 5)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini_mock)
+
+    run(arch_out, config=config, staging_dir=staging_dir, run_dir=run_dir)
+
+    events = [e["event"] for e in _read_events(run_dir)]
+    assert "task_start" in events
+    assert "file_start" in events
+    assert "file_end" in events
+    assert "task_end" in events
+
+
+@pytest.mark.unit
+def test_executor_emits_task_skipped(tmp_path, monkeypatch):
+    source_file = tmp_path / "test.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+
+    tasks = [
+        Task(
+            task_id="t1",
+            title="fail",
+            description="always errors",
+            files_to_modify=["test.py"],
+            priority="high",
+            effort="low",
+            risk_level="low",
+            dependencies=[],
+        ),
+        Task(
+            task_id="t2",
+            title="depends on t1",
+            description="should be skipped",
+            files_to_modify=["test.py"],
+            priority="high",
+            effort="low",
+            risk_level="low",
+            dependencies=["t1"],
+        ),
+    ]
+    arch_out = ArchitectOutput(
+        validated_findings=[],
+        false_positives=[],
+        systemic_risks=[],
+        implementation_plan=tasks,
+        blockers=[],
+    )
+    workspace = tmp_path.parent / f"{tmp_path.name}-workspace"
+    config = TargetConfig(target_path=tmp_path, workspace_path=workspace)
+    staging_dir = tmp_path / "staging"
+    run_dir = tmp_path.parent / f"{tmp_path.name}-rundir"
+    run_dir.mkdir()
+
+    cb_gemini_mock = MagicMock()
+    cb_gemini_mock.call.side_effect = lambda fn: (_ for _ in ()).throw(Exception("boom"))
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini_mock)
+    monkeypatch.setattr(
+        "orchestrator.agents.executor.providers._recoverable_exceptions",
+        lambda: (Exception,),
+    )
+
+    run(arch_out, config=config, staging_dir=staging_dir, run_dir=run_dir)
+
+    events = _read_events(run_dir)
+    skipped = [e for e in events if e["event"] == "task_skipped"]
+    assert len(skipped) == 1
+    assert skipped[0]["data"]["task_id"] == "t2"
+    assert skipped[0]["data"]["dependency"] == "t1"
+
+
+@pytest.mark.unit
+def test_executor_log_event_failure_does_not_crash(tmp_path, monkeypatch):
+    arch_out = ArchitectOutput(
+        validated_findings=[],
+        false_positives=[],
+        systemic_risks=[],
+        implementation_plan=[],
+        blockers=[],
+    )
+    workspace = tmp_path.parent / f"{tmp_path.name}-workspace"
+    config = TargetConfig(target_path=tmp_path, workspace_path=workspace)
+    run_dir = tmp_path.parent / f"{tmp_path.name}-rundir"
+    run_dir.mkdir()
+
+    monkeypatch.setattr(
+        "orchestrator.agents.executor.log_event",
+        MagicMock(side_effect=OSError("disk full")),
+    )
+
+    output, meta = run(arch_out, config=config, run_dir=run_dir)
+    assert isinstance(meta, dict)
 
 
 @pytest.mark.unit
