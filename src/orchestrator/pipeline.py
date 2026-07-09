@@ -308,7 +308,12 @@ class Pipeline:
         try:
             staging_dir = self.workspace.staging_dir_for_run(self.run.run_id)
             result, meta = run_executor(
-                architect_output, config=self.config, staging_dir=staging_dir
+                architect_output,
+                run_id=self.run.run_id,
+                config=self.config,
+                staging_dir=staging_dir,
+                logs_dir=self.config.workspace_path / "logs",
+                run_dir=self.workspace.run_dir(self.run.run_id),
             )
             self.run.executor_meta = AgentMeta(status="success", latency_ms=_ms(t0), **meta)
             self._persist_stage_output("executor", result)
