@@ -78,11 +78,15 @@ ERRORS
         _get_logger().warning("[%s] GOOGLE_API_KEY not set — trying OpenRouter", run_id)
 
     try:
-        from orchestrator.agents.executor.providers import _call_chain, _call_openrouter
+        from orchestrator.agents.executor.providers import (
+            _call_chain,
+            _call_claude,
+            _call_openrouter,
+        )
 
-        chain_result = _call_chain([_call_openrouter], prompt, run_id)
+        chain_result = _call_chain([_call_openrouter, _call_claude], prompt, run_id)
         if chain_result.success is not None:
-            return chain_result.success[0], "openrouter/free"
+            return chain_result.success[0], chain_result.provider_name
     except Exception as inner_exc:
         _get_logger().warning("[%s] OpenRouter fallback also failed: %s", run_id, inner_exc)
 

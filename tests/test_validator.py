@@ -73,7 +73,7 @@ def test_summarizer_returns_tuple(monkeypatch):
 
 @pytest.mark.unit
 def test_summarizer_openrouter_fallback(monkeypatch):
-    from orchestrator.agents.executor.providers import ProviderChainResult
+    from orchestrator.agents.executor.providers import ProviderChainResult, _call_claude
     from orchestrator.agents.validator.summarizer import _summarize_errors
     from orchestrator.exceptions import CircuitBreakerOpenError
 
@@ -87,14 +87,19 @@ def test_summarizer_openrouter_fallback(monkeypatch):
         success=("- openrouter summary", 10, 5, 0.0),
         provider_name="openrouter",
     )
+
+    def _mock_chain(chain, prompt, run_id):
+        assert _call_claude in chain, "_call_claude must be in the fallback chain"
+        return chain_result
+
     monkeypatch.setattr(
         "orchestrator.agents.executor.providers._call_chain",
-        lambda chain, prompt, run_id: chain_result,
+        _mock_chain,
     )
 
     failed = [ToolResult(tool="ruff", passed=False, return_code=1, stderr="error")]
     summary, model = _summarize_errors(failed, "test-run")
-    assert model == "openrouter/free"
+    assert model == "openrouter"
     assert "openrouter summary" in summary
 
 
@@ -143,7 +148,7 @@ def test_summarizer_generic_exception_openrouter_fallback(monkeypatch):
 
     failed = [ToolResult(tool="ruff", passed=False, return_code=1, stderr="error")]
     summary, model = _summarize_errors(failed, "test-run")
-    assert model == "openrouter/free"
+    assert model == "openrouter"
     assert "openrouter summary" in summary
 
 
@@ -188,5 +193,5 @@ def test_summarizer_no_google_key_uses_openrouter(monkeypatch):
 
     failed = [ToolResult(tool="ruff", passed=False, return_code=1, stderr="error")]
     summary, model = _summarize_errors(failed, "test-run")
-    assert model == "openrouter/free"
+    assert model == "openrouter"
     assert "openrouter summary" in summary
