@@ -42,11 +42,11 @@ PROJECT_ROOT = Path(
 
 
 def _safe_log_event(
-    run_id: str, event: str, data: dict, logs_dir: Path, run_dir: Optional[Path]
+    trace_id: str, run_id: str, event: str, data: dict, logs_dir: Path, run_dir: Optional[Path]
 ) -> None:
     try:
         log_event(
-            trace_id=run_id,
+            trace_id=trace_id,
             run_id=run_id,
             source="executor",
             stage="executor",
@@ -67,6 +67,7 @@ def run(
     force_provider: Optional[str] = None,
     logs_dir: Optional[Path] = None,
     run_dir: Optional[Path] = None,
+    trace_id: Optional[str] = None,
 ) -> tuple[ExecutorOutput, dict]:
     if config is None:
         config = TargetConfig.load(target_path=PROJECT_ROOT)
@@ -75,6 +76,7 @@ def run(
 
     if run_id is None:
         run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:6]
+    effective_trace_id = trace_id or run_id
     file_logs_dir = config.workspace_path / "logs"
     project_root = config.target_path.resolve()
     if staging_dir is None:
@@ -104,6 +106,7 @@ def run(
     task_status_results: dict[str, TaskStatus] = {}
 
     _safe_log_event(
+        effective_trace_id,
         run_id,
         "executor_start",
         {"run_id": run_id, "task_count": len(tasks)},
@@ -116,6 +119,7 @@ def run(
             "[%s] Task %s | risk=%s | title=%s", run_id, task.task_id, task.risk_level, task.title
         )
         _safe_log_event(
+            effective_trace_id,
             run_id,
             "task_start",
             {"task_id": task.task_id, "title": task.title, "risk_level": task.risk_level},
@@ -140,6 +144,7 @@ def run(
                     dep_status,
                 )
                 _safe_log_event(
+                    effective_trace_id,
                     run_id,
                     "task_skipped",
                     {
@@ -175,6 +180,7 @@ def run(
         for file_relative in task.files_to_modify:
             single_file_task = task.model_copy(update={"files_to_modify": [file_relative]})
             _safe_log_event(
+                effective_trace_id,
                 run_id,
                 "file_start",
                 {"task_id": task.task_id, "file": file_relative},
@@ -185,6 +191,7 @@ def run(
                 single_file_task, run_id, project_root, staging_dir, force_provider=force_provider
             )
             _safe_log_event(
+                effective_trace_id,
                 run_id,
                 "file_end",
                 {
@@ -226,6 +233,7 @@ def run(
             task_status_results[task.task_id] = TaskStatus.NOOP
 
         _safe_log_event(
+            effective_trace_id,
             run_id,
             "task_end",
             {
@@ -247,6 +255,7 @@ def run(
     )
 
     _safe_log_event(
+        effective_trace_id,
         run_id,
         "executor_end",
         {

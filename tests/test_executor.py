@@ -628,6 +628,30 @@ def test_executor_log_event_failure_does_not_crash(tmp_path, monkeypatch):
 
 
 @pytest.mark.unit
+def test_executor_events_use_pipeline_trace_id_when_provided(tmp_path):
+    """Events must carry the caller's trace_id, distinct from run_id, when given."""
+    arch_out = ArchitectOutput(
+        validated_findings=[],
+        false_positives=[],
+        systemic_risks=[],
+        implementation_plan=[],
+        blockers=[],
+    )
+    workspace = tmp_path.parent / f"{tmp_path.name}-workspace"
+    config = TargetConfig(target_path=tmp_path, workspace_path=workspace)
+    run_dir = tmp_path.parent / f"{tmp_path.name}-rundir"
+    run_dir.mkdir()
+
+    run(arch_out, run_id="run-123", config=config, run_dir=run_dir, trace_id="trace-456")
+
+    events = _read_events(run_dir)
+    assert events
+    for e in events:
+        assert e["trace_id"] == "trace-456"
+        assert e["run_id"] == "run-123"
+
+
+@pytest.mark.unit
 def test_apply_task_skips_validation_for_non_python(tmp_path, monkeypatch):
     from orchestrator.agents.executor.applier import _apply_task
 

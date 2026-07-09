@@ -314,6 +314,7 @@ class Pipeline:
                 staging_dir=staging_dir,
                 logs_dir=self.config.workspace_path / "logs",
                 run_dir=self.workspace.run_dir(self.run.run_id),
+                trace_id=self.trace_id,
             )
             self.run.executor_meta = AgentMeta(status="success", latency_ms=_ms(t0), **meta)
             self._persist_stage_output("executor", result)
