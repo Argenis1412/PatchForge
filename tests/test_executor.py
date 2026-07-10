@@ -808,6 +808,18 @@ def test_new_file_diff_compatible_with_git_apply(tmp_path):
 
     subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
     subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=tmp_path,
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=tmp_path,
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
         ["git", "commit", "--allow-empty", "-m", "init"],
         cwd=tmp_path,
         capture_output=True,

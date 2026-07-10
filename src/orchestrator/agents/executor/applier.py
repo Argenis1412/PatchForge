@@ -154,7 +154,8 @@ def _apply_task(
         modified_content += original_content[-1]
 
     if relative_path.endswith(".py"):
-        syntax_error = validate_python_content(modified_content, original_content, relative_path)
+        validation_original = "# new file\n" if is_new_file else original_content
+        syntax_error = validate_python_content(modified_content, validation_original, relative_path)
         if syntax_error:
             _get_logger().error("[%s] Task %s — %s", run_id, task.task_id, syntax_error)
             return FileChange(
