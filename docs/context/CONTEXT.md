@@ -267,8 +267,10 @@ These must not change without a new ADR in `docs/adr/`:
   and staging, it sets `original_content=""`, uses a dedicated `_build_create_prompt()`, and
   generates `--- /dev/null` diffs via `_make_diff(is_new_file=True)` for `git apply`
   compatibility. Files already in staging from a prior task are treated as accumulated
-  modifications. Known limitation: `validate_python_content` skips syntax validation for
-  new `.py` files. 5 new tests including `git apply --check` integration.
+  modifications. Syntax validation for new `.py` files is correctly enforced via the
+  `"# new file\n"` stand-in passed to `validate_python_content()` (see corrected note
+  in `discoveries.md`, Dogfooding 007). 5 new tests including `git apply --check`
+  integration.
 - ✅ Issue #208 — Executor observability + `ci --force-provider` (2026-07-09): `executor_agent.run()` now
   accepts `logs_dir`/`run_dir` and emits a full lifecycle event trail (`executor_start`, `task_start`,
   `file_start`/`file_end`, `task_end`, `task_skipped`, `executor_end`) via `log_event()`, wrapped in a
