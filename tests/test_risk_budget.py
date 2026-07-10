@@ -6,10 +6,10 @@ from typer.testing import CliRunner
 
 from orchestrator.main import app
 from orchestrator.risk import (
-    _count_diff_files,
     _count_diff_lines,
     check_patch_gate,
     check_plan_gate,
+    parse_diff_files,
 )
 from orchestrator.schemas.architect_output import ArchitectOutput, Task
 from orchestrator.schemas.artifacts import RunMetadata
@@ -256,7 +256,7 @@ class TestCountDiffHelpers:
         )
         assert _count_diff_lines(diff) == 2
 
-    def test_count_diff_files(self):
+    def test_parse_diff_files(self):
         diff = (
             "diff --git a/a.py b/a.py\n"
             "--- a/a.py\n"
@@ -271,9 +271,9 @@ class TestCountDiffHelpers:
             "-x\n"
             "+y\n"
         )
-        assert _count_diff_files(diff) == 2
+        assert parse_diff_files(diff) == {"a.py", "b.py"}
 
-    def test_count_diff_files_new_file(self):
+    def test_parse_diff_files_new_file(self):
         diff = (
             "diff --git a/new.py b/new.py\n"
             "new file mode 100644\n"
@@ -282,11 +282,44 @@ class TestCountDiffHelpers:
             "@@ -0,0 +1 @@\n"
             "+hello\n"
         )
-        assert _count_diff_files(diff) == 1
+        assert parse_diff_files(diff) == {"new.py"}
+
+    def test_parse_diff_files_delete(self):
+        diff = (
+            "diff --git a/gone.py b/gone.py\n"
+            "deleted file mode 100644\n"
+            "--- a/gone.py\n"
+            "+++ /dev/null\n"
+            "@@ -1 +0,0 @@\n"
+            "-bye\n"
+        )
+        # b-side is the file path, not /dev/null — git diff puts the path
+        # in the header even for deletes; /dev/null only appears in ---/+++ lines
+        assert parse_diff_files(diff) == {"gone.py"}
+
+    def test_parse_diff_files_rename(self):
+        diff = (
+            "diff --git a/old.py b/new.py\n"
+            "similarity index 100%\n"
+            "rename from old.py\n"
+            "rename to new.py\n"
+        )
+        # Only b-side emitted; a-side no longer exists after git apply
+        assert parse_diff_files(diff) == {"new.py"}
+
+    def test_parse_diff_files_binary(self):
+        diff = (
+            "diff --git a/image.png b/image.png\nBinary files a/image.png and b/image.png differ\n"
+        )
+        assert parse_diff_files(diff) == {"image.png"}
+
+    def test_parse_diff_files_mode_only(self):
+        diff = "diff --git a/script.sh b/script.sh\nold mode 100644\nnew mode 100755\n"
+        assert parse_diff_files(diff) == {"script.sh"}
 
     def test_empty_diff(self):
         assert _count_diff_lines("") == 0
-        assert _count_diff_files("") == 0
+        assert parse_diff_files("") == set()
 
     def test_ignore_index_line(self):
         diff = (
