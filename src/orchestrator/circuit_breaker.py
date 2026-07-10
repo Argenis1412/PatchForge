@@ -278,12 +278,22 @@ class CircuitBreaker:
                 retry_after=retry_after_reject,
                 message="probe already in flight",
             )
+        _outcome_handled = False
         try:
             result = fn()
+            _outcome_handled = True
             self._on_success()
             return result
         except Exception as exc:
+            _outcome_handled = True
             self._on_failure(exc)  # always re-raises
+        finally:
+            # BaseException (KeyboardInterrupt, SystemExit, …) bypasses the
+            # except-Exception clause above — clear the flag so future probes
+            # are not permanently blocked after a non-Exception escape from fn().
+            if not _outcome_handled:
+                with self._lock:
+                    self._half_open_in_flight = False
 
     def _on_failure(self, exc: Exception) -> None:
         emit_log_msg: str | None = None
