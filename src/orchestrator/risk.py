@@ -145,16 +145,24 @@ def _count_diff_lines(diff_text: str) -> int:
     return count
 
 
-def _count_diff_files(diff_text: str) -> int:
-    files = set()
+def parse_diff_files(diff_text: str) -> set[str]:
+    """Extract file paths touched by a unified diff.
+
+    Emits only the b-side path from each ``diff --git a/X b/Y`` header.
+    Skips ``/dev/null`` (deletes — the file no longer exists on disk).
+    For renames the b-side is the destination; the a-side no longer exists
+    after ``git apply``, so emitting it would cause ``pathspec did not match``.
+    Binary and mode-only changes are included via header presence.
+    """
+    files: set[str] = set()
     for line in diff_text.splitlines():
         if line.startswith("diff --git"):
             parts = shlex.split(line)
             if len(parts) >= 4:
                 b_path = parts[3]
-                if b_path.startswith("b/"):
+                if b_path.startswith("b/") and b_path != "b//dev/null":
                     files.add(b_path[2:])
-    return len(files)
+    return files
 
 
 # ── Patch gate ────────────────────────────────────────────────────────────────
@@ -167,7 +175,7 @@ def check_patch_gate(
 ) -> RiskGateResult:
     reasons: list[str] = []
 
-    file_count = _count_diff_files(patch_diff)
+    file_count = len(parse_diff_files(patch_diff))
     if file_count > run_metadata.max_files:
         reasons.append(
             f"Patch modifies {file_count} file(s), exceeding max_files={run_metadata.max_files}."
