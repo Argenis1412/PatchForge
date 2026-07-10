@@ -407,6 +407,28 @@ class TestValidatePythonContent:
         assert result is not None
         assert "not valid Python" in result
 
+    @pytest.mark.unit
+    def test_new_file_invalid_content_returns_error(self):
+        """A literal empty-string original (the function's own new-file contract)
+        must not mask invalid modified content — ast.parse("") does not raise."""
+        from orchestrator.agents.executor.validation import validate_python_content
+
+        result = validate_python_content("<tool_call>bad</tool_call>", "", "new_file.py")
+        assert result is not None
+        assert "not valid Python" in result
+
+    @pytest.mark.unit
+    def test_new_file_stand_in_invalid_content_returns_error(self):
+        """The "# new file\\n" stand-in applier.py actually passes for new files
+        must not mask invalid modified content either."""
+        from orchestrator.agents.executor.validation import validate_python_content
+
+        result = validate_python_content(
+            "<tool_call>bad</tool_call>", "# new file\n", "new_file.py"
+        )
+        assert result is not None
+        assert "not valid Python" in result
+
 
 @pytest.mark.unit
 def test_apply_task_rejects_xml_output(tmp_path, monkeypatch):
@@ -713,6 +735,41 @@ def test_apply_task_creates_new_file(tmp_path, monkeypatch):
     assert (staging / "tests" / "test_new.py").exists()
     assert change.diff is not None
     assert "/dev/null" in change.diff
+
+
+@pytest.mark.unit
+def test_apply_task_rejects_invalid_new_file(tmp_path, monkeypatch):
+    """A new .py file with syntactically invalid LLM output must be rejected.
+
+    Regression test for the stale "known limitation" claim (corrected in
+    docs/context/discoveries.md): validate_python_content() is called with the
+    "# new file\\n" stand-in for new files, which correctly does not mask
+    invalid modified content.
+    """
+    from orchestrator.agents.executor.applier import _apply_task
+
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    task = Task(
+        task_id="t1",
+        title="create broken file",
+        description="write a new file",
+        files_to_modify=["broken_new.py"],
+        priority="high",
+        effort="low",
+        risk_level="low",
+        dependencies=[],
+    )
+
+    bad_content = "<tool_call>not python</tool_call>"
+    cb_gemini_mock = MagicMock()
+    cb_gemini_mock.call.side_effect = lambda fn: (bad_content, 10, 5)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini_mock)
+
+    change = _apply_task(task, "run_bad_new", tmp_path, staging)
+    assert change.status == "error"
+    assert not (staging / "broken_new.py").exists()
 
 
 @pytest.mark.unit
