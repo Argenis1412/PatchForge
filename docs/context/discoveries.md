@@ -329,6 +329,16 @@
   syntax validation for new `.py` files because `ast.parse("")` raises `SyntaxError`,
   making the function interpret "original was already broken." Consistent with existing
   design contract but a real coverage gap for new files.
+- **Correction [2026-07-10]:** This claim is invalid and was never true. `ast.parse("")`
+  does **not** raise `SyntaxError` — an empty string parses as a valid, empty module.
+  Moreover, `applier.py:157` never passes the literal empty string to
+  `validate_python_content()` for new files — it substitutes `"# new file\n"`
+  (`validation_original = "# new file\n" if is_new_file else original_content`), which
+  was added in the same PR (`fix(executor): configure git identity in test and enable
+  syntax validation for new .py files`, commit `11c3547`). Syntax validation for new
+  `.py` files works correctly today; this note went stale immediately after its own fix
+  landed and was never removed. See `tests/test_executor.py::test_apply_task_rejects_invalid_new_file`
+  for the regression test locking in this behavior.
 
 ### ✅ [2026-07-08] Dogfooding 007 — LLM adds new CB block instead of extending _call_chain (RESOLVED)
 
