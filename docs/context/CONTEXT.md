@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-07-09 | Session: Issue #208
+> Last updated: 2026-07-09 | Session: Issue #210
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 688 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 695 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3).
 
@@ -96,7 +96,7 @@ src/orchestrator/
 ├── validation_workspace.py
 └── workspace.py           # WorkspaceManager — disk layout
 
-tests/                     (27 test files, 688+ tests)
+tests/                     (27 test files, 695+ tests)
 ```
 
 ---
@@ -258,6 +258,13 @@ These must not change without a new ADR in `docs/adr/`:
 **P3 closure items remaining:** None — all P3 items complete.
 
 **Recent:**
+- ✅ Issue #210 — Executor new-file creation support (2026-07-09): `_apply_task()` no longer
+  rejects files that don't exist on disk. When a file is missing from both the project root
+  and staging, it sets `original_content=""`, uses a dedicated `_build_create_prompt()`, and
+  generates `--- /dev/null` diffs via `_make_diff(is_new_file=True)` for `git apply`
+  compatibility. Files already in staging from a prior task are treated as accumulated
+  modifications. Known limitation: `validate_python_content` skips syntax validation for
+  new `.py` files. 5 new tests including `git apply --check` integration.
 - ✅ Issue #208 — Executor observability + `ci --force-provider` (2026-07-09): `executor_agent.run()` now
   accepts `logs_dir`/`run_dir` and emits a full lifecycle event trail (`executor_start`, `task_start`,
   `file_start`/`file_end`, `task_end`, `task_skipped`, `executor_end`) via `log_event()`, wrapped in a

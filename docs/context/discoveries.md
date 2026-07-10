@@ -65,15 +65,16 @@
   handles all recoverable provider errors (CB open, 403, rate limits, etc.)
   across all risk levels.
 
-### [2026-06-14] Experiment 002 — Risk budget defaults too restrictive for multi-file refactors
+### ✅ [2026-06-14] Experiment 002 — Risk budget defaults too restrictive for multi-file refactors (RESOLVED)
 
 - **File:** `src/orchestrator/commands/scan.py:138-140`
 - **Debt:** `risk_budget="low"` and `max_files=2` block refactors of 3+ files.
   A pure refactor (code movement only, no logic change) should not require
   manual `run.json` editing.
 - **Discovered by:** Experiment 002 dogfooding
-- **Why deferred:** Out of scope of Experiment 002; requires a `--risk-budget` flag
-  or auto-escalation for no-logic-change refactors.
+- **Resolution:** Experiment 003 added `--risk-budget` flag to `patchforge scan`
+  (`scan.py:150-160`), mapping `low`/`medium`/`high` to `(max_files, max_diff_lines)`.
+  Tests in `tests/test_risk_budget.py`.
 
 ### [2026-06-11] Issue #77 — Pre-existing ruff formatting violations
 
@@ -292,7 +293,7 @@
 - **Known limitation:** Catches syntactically invalid content only. Semantically wrong
   but syntactically valid replacements remain undetected until ruff/pytest.
 
-### [2026-07-08] Dogfooding 007 — Executor cannot create new files
+### ✅ [2026-07-08] Dogfooding 007 — Executor cannot create new files (RESOLVED)
 
 - **File:** `src/orchestrator/agents/executor/` (general)
 - **Debt:** When `files_to_modify` in the plan lists a path that does not exist, the
@@ -301,7 +302,15 @@
   `test_executor_observability.py` in D-006) but the executor rejects them. New-file
   creation requires a dedicated executor code path (write from scratch vs. read-diff-apply).
 - **Discovered by:** Dogfooding 006 (T7), confirmed again in Dogfooding 007 (T2).
-- **Why deferred:** Non-trivial executor change outside dogfooding scope.
+- **Resolution:** [2026-07-09] Issue #210 — `_apply_task()` now detects missing files
+  (not on disk, not in staging) and treats them as new-file creation: sets
+  `original_content=""`, uses a dedicated `_build_create_prompt()`, and generates
+  `--- /dev/null` diffs via `_make_diff(is_new_file=True)` for `git apply` compatibility.
+  Files already in staging from a prior task are treated as accumulated modifications.
+- **Known limitation:** `validate_python_content(modified, "", filename)` silently skips
+  syntax validation for new `.py` files because `ast.parse("")` raises `SyntaxError`,
+  making the function interpret "original was already broken." Consistent with existing
+  design contract but a real coverage gap for new files.
 
 ### ✅ [2026-07-08] Dogfooding 007 — LLM adds new CB block instead of extending _call_chain (RESOLVED)
 
