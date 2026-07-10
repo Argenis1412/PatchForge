@@ -9,13 +9,13 @@ __all__ = [
 ]
 
 import json
-import os
 import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Union
 
+from orchestrator import paths as _paths
 from orchestrator.exceptions import SchedulerInvariantError
 from orchestrator.observability.events import log_event
 from orchestrator.schemas.architect_output import ArchitectOutput
@@ -32,9 +32,8 @@ from .scheduler import _build_dag, _topological_order
 # Configuration
 # ---------------------------------------------------------------------------
 
-PROJECT_ROOT = Path(
-    os.getenv("PROJECT_ROOT", str(Path(__file__).resolve().parent.parent.parent.parent))
-)
+# Re-export for compatibility; monkeypatch should target orchestrator.paths
+PROJECT_ROOT = _paths.PROJECT_ROOT
 
 # ---------------------------------------------------------------------------
 # Public Entrypoint
@@ -70,7 +69,7 @@ def run(
     trace_id: Optional[str] = None,
 ) -> tuple[ExecutorOutput, dict]:
     if config is None:
-        config = TargetConfig.load(target_path=PROJECT_ROOT)
+        config = TargetConfig.load(target_path=_paths.PROJECT_ROOT)
     elif isinstance(config, (str, Path)):
         config = TargetConfig.load(target_path=Path(config))
 
