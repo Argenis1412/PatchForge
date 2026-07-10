@@ -102,21 +102,23 @@
 - **Discovered by:** Implementation
 - **Why deferred:** Breaking the circular import requires moving `CircuitBreakerState` to a third module or having `exceptions.py` import from `circuit_breaker`. Outside the scope of T-07B.
 
-### [2026-06-11] Issue #71 — Exception hierarchy (T-07 Part A)
+### ✅ [2026-06-11] Issue #71 — Exception hierarchy (T-07 Part A) (RESOLVED)
 
-- **File:** `src/orchestrator/agents/scout.py:145`
+- **File:** `src/orchestrator/agents/scout.py:145` (stale path: now `scout/provider.py`)
 - **Debt:** Bare `raise` in `call_gemini()` except block propagates the original exception type instead of `ProviderError`, making downstream `except PatchForgeError` handlers unable to catch it. The `raise ProviderError("gemini", ...)` on line 147 is dead code — it never executes because the bare `raise` always exits before reaching it.
 - **Discovered by:** AI review bot during T-07 Part A implementation
-- **Why deferred:** Fix would be a behavioral change; explicitly out of scope for T-07 Part A (structural only). Deferred to T-07 Part C (#90) which explicitly preserved the bare-raise behavior as part of scout's error-surface contract. This design decision creates the debt documented above. Remains unresolved pending future issue.
+- **Resolution:** Scout was refactored into `scout/provider.py` with a full
+  `_call_chain`-based provider chain (`_SCOUT_CHAIN`). The bare-raise and dead
+  `ProviderError` code no longer exist. On chain exhaustion, `provider.py:89`
+  raises `ProviderError("provider_chain", ...)` cleanly.
 
 
-### [2026-06-25] Issue #145 — `force_provider` override not auditable via `log_event`
+### ✅ [2026-06-25] Issue #145 — `force_provider` override not auditable via `log_event` (RESOLVED)
 
 - **File:** `src/orchestrator/agents/executor/__init__.py:69`
 - **Debt:** `--force-provider` override is logged only to `executor.log` via `_get_logger().info()`. No `log_event()` is emitted to `pipeline.jsonl` because the executor does not receive `run_id`/`logs_dir` from the pipeline caller. Any future caller (test, API, new command) that passes `force_provider` without manually logging would create an audit hole.
 - **Discovered by:** Post-implementation audit
-- **Why deferred:** Fix requires adding optional `run_id`/`logs_dir` parameters to `executor_agent.run()` — a contract change outside the hardening sprint scope.
-- **Resolved:** [2026-07-09] Issue #208 — `executor_agent.run()` now accepts `logs_dir`/`run_dir` and emits a full lifecycle event trail (`executor_start`, `task_start`, `file_start`/`file_end`, `task_end`, `task_skipped`, `executor_end`) via `log_event()`.
+- **Resolution:** [2026-07-09] Issue #208 — `executor_agent.run()` now accepts `logs_dir`/`run_dir` and emits a full lifecycle event trail (`executor_start`, `task_start`, `file_start`/`file_end`, `task_end`, `task_skipped`, `executor_end`) via `log_event()`.
 
 ### ✅ [2026-06-15] Phase 4 — Provider clients lack consistent timeout (RESOLVED)
 
@@ -168,7 +170,7 @@
   to `git add` with explicit file paths from `affected_files`, which needs
   validation that the executor reports all modified files correctly.
 
-### [2026-06-30] Issue #183 — `force_provider` override not propagated to CI pipeline agents
+### ✅ [2026-06-30] Issue #183 — `force_provider` override not propagated to CI pipeline agents (RESOLVED)
 
 - **File:** `src/orchestrator/commands/ci.py`
 - **Debt:** `patchforge ci` does not expose a `--force-provider` flag. The executor
@@ -176,9 +178,7 @@
   `patchforge preview` supports `--force-provider` for debugging. Adding it to
   `ci` requires threading the parameter through all agent calls in `execute()`.
 - **Discovered by:** Post-implementation code review
-- **Why deferred:** CI runs are automated — provider override is a debugging tool
-  for interactive use. Not a functional gap for the primary use case.
-- **Resolved:** [2026-07-09] Issue #208 — `patchforge ci` now accepts `--force-provider`, forwards it to the executor, emits a symmetric `force_provider_override` event, and records it on `CiResult.force_provider`.
+- **Resolution:** [2026-07-09] Issue #208 — `patchforge ci` now accepts `--force-provider`, forwards it to the executor, emits a symmetric `force_provider_override` event, and records it on `CiResult.force_provider`.
 
 ### [2026-06-30] Issue #183 — `latest` Docker tag non-deterministic in workflow default
 
@@ -279,7 +279,7 @@
   10,000-char annotation budget prevents token bloat. Graceful degradation on `OSError`,
   `SyntaxError`, or `UnicodeDecodeError`. 17 new tests.
 
-### [2026-07-08] Dogfooding 006 — D-006: Executor writes tool-call markup as file content — RESOLVED
+### ✅ [2026-07-08] Dogfooding 006 — D-006: Executor writes tool-call markup as file content (RESOLVED)
 
 - **File:** `src/orchestrator/agents/executor/validation.py`, `applier.py`
 - **Debt:** When the executor's LLM output is non-Python content (XML tool-call markup,
@@ -344,7 +344,7 @@
   unscoped effort unrelated to the validator fallback fix. Out of scope per the
   Golden Rule (smallest correct change). Revisit as a dedicated docs/hardening issue.
 
-### [2026-06-14] Issue #100 — Agent fallback inconsistency
+### ✅ [2026-06-14] Issue #100 — Agent fallback inconsistency (RESOLVED)
 
 - **File:** `src/orchestrator/agents/validator/summarizer.py` (stale path: was `validator.py`)
 - **Debt:** The executor now uses a resilient, unified fallback chain via _call_chain().
@@ -352,9 +352,8 @@
   raw stderr) when Gemini is unavailable. This creates an architectural
   inconsistency and leaves the validation stage less resilient than the execution stage.
 - **Discovered by:** Implementation of Issue #100
-- **Why deferred:** Out of scope for Issue #100, which specifically targets the
-  executor pipeline. Correcting this requires extracting the chain logic into a
-  shared utility. D-007 confirms the minimal fix is: extend
-  `_call_chain([_call_openrouter], ...)` to `_call_chain([_call_openrouter, _call_claude], ...)`
-  in `summarizer.py` line ~81 — but the AC must explicitly name the construct to avoid
-  the D-007b pattern.
+- **Resolution:** `summarizer.py:89` now uses `_call_chain([_call_openrouter, _call_claude], ...)`
+  imported from `executor.providers` (PR #206). The raw-stderr fallback when the
+  circuit breaker is open is preserved intentionally — covered by
+  `test_validator_uses_raw_stderr_when_cb_open`. Residual minor debt: `_call_chain`
+  is a `_`-prefixed private symbol consumed cross-package; not a public API.
