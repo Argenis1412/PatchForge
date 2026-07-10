@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-07-09 | Session: Issue #210
+> Last updated: 2026-07-10 | Session: Issue #212
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 695 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 704 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3).
 
@@ -90,8 +90,9 @@ src/orchestrator/
 ├── lifecycle.py           # Patch lifecycle state machine
 ├── main.py                # CLI surface
 ├── pipeline.py            # Central orchestrator (Pipeline class)
+├── paths.py               # Centralized PROJECT_ROOT resolution
 ├── plan_validation.py     # Filesystem path validation for plans (D-001)
-├── risk.py                # Plan gate + patch gate logic
+├── risk.py                # Plan gate + patch gate + parse_diff_files
 ├── safety.py              # Path-safety validation utilities
 ├── validation_workspace.py
 └── workspace.py           # WorkspaceManager — disk layout
@@ -256,6 +257,9 @@ These must not change without a new ADR in `docs/adr/`:
 - ✅ Issue #176 — Provider fallback chain for architect, scout, and validator summarizer (#177)
 
 **P3 closure items remaining:** None — all P3 items complete.
+
+### Tech Debt Closure
+- ✅ Issue #212 — Close verified tech debt: 7 entries marked ✅, harden ci apply (`git add -A` → targeted staging via `parse_diff_files`), centralize `PROJECT_ROOT` in `orchestrator/paths.py`
 
 **Recent:**
 - ✅ Issue #210 — Executor new-file creation support (2026-07-09): `_apply_task()` no longer

@@ -147,28 +147,31 @@
 - **Discovered by:** Phase 4 dependency audit
 - **Resolution:** Removed `mock_openrouter` and `mock_subprocess` dead fixtures from conftest.py.
 
-### [2026-06-15] Phase 4 — `PROJECT_ROOT` depends on `__file__` — brittle on relocation
+### ✅ [2026-06-15] Phase 4 — `PROJECT_ROOT` depends on `__file__` — brittle on relocation (RESOLVED)
 
 - **File:** `src/orchestrator/agents/executor/__init__.py:25-27`
 - **Debt:** `PROJECT_ROOT` resolves via `Path(__file__).resolve().parent.parent.parent.parent`. This required an extra `.parent` when moving from `executor.py` to `executor/__init__.py`. Every time a module moves within the `agents/` tree, any `__file__`-based path constant silently breaks. Should use `PROJECT_ROOT` from a shared module or always via environment variable.
 - **Discovered by:** Phase 4 execution
-- **Why deferred:** Pre-existing behavior in scout, architect, validator. Do not change without a unified strategy for all 4 agents.
+- **Resolution:** [2026-07-10] Issue #212 — `PROJECT_ROOT` centralized in
+  `orchestrator/paths.py` with stable 2-parent resolution. Grep confirmed
+  only one live consumer (`executor/__init__.py`); the "unified strategy
+  for 4 agents" blocker was obsolete. Executor imports the module (not
+  the symbol) per `docs/import-convention.md`.
 
-### [2026-06-30] Issue #183 — `git add -A` in `ci.py` stages all untracked files
+### ✅ [2026-06-30] Issue #183 — `git add -A` in `ci.py` stages all untracked files (RESOLVED)
 
 - **File:** `src/orchestrator/commands/ci.py`
 - **Debt:** `git add -A` in the apply stage stages all untracked files in the repo.
   When `--allow-dirty` is used and the working tree has generated files (e.g.
   `orchestrator.json`, `.pyc` caches), they get committed.
 - **Discovered by:** Post-implementation code review
-- **Partial mitigation (2026-06-30, CodeRabbit review):** A clean-tree guard now
-  blocks the default path — `ci` returns `scan_failed` on a dirty tree unless
-  `--allow-dirty` is passed. The residual risk only applies when a caller
-  explicitly opts into `--allow-dirty`.
-- **Why deferred:** Matches existing pattern in `work_queue.py:405`. The CI
-  workflow doesn't pass `--allow-dirty`. A targeted fix would require switching
-  to `git add` with explicit file paths from `affected_files`, which needs
-  validation that the executor reports all modified files correctly.
+- **Resolution:** [2026-07-10] Issue #212 — Replaced `git add -A` with
+  `git add -- <files>` where the file list is derived from the applied patch's
+  `diff --git` headers via `parse_diff_files()` (refactored from `risk.py`).
+  Only b-side paths are emitted (renames emit destination only; deletes are
+  staged via git's implicit detection). Empty-parse guard returns `_apply_fail`
+  without rollback to preserve valid working-tree state. Integration tests
+  verify untracked files are excluded.
 
 ### ✅ [2026-06-30] Issue #183 — `force_provider` override not propagated to CI pipeline agents (RESOLVED)
 
