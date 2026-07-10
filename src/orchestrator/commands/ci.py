@@ -67,7 +67,7 @@ def execute(
     )
     from orchestrator.observability.events import log_event, log_failure
     from orchestrator.plan_validation import validate_plan_paths
-    from orchestrator.risk import check_patch_gate, check_plan_gate
+    from orchestrator.risk import check_patch_gate, check_plan_gate, parse_diff_files
     from orchestrator.scanners.python import scan
     from orchestrator.schemas.artifacts import ApplyResult, RunMetadata, generate_run_id
     from orchestrator.schemas.config import TargetConfig
@@ -537,12 +537,17 @@ def execute(
         rolled = _rollback()
         return _apply_fail(f"Patch apply failed: {apply_res.stderr}", rolled_back=rolled)
 
-    # Commit
+    # Stage only files touched by the patch (not untracked generated files)
+    patch_text = patch_path.read_text(encoding="utf-8")
+    staged_files = sorted(parse_diff_files(patch_text))
+    if not staged_files:
+        return _apply_fail("patch has no recognizable file headers — refusing blind staging")
+
     commit_msg = f"patchforge: apply {run_id}"
     if issue_number is not None:
         commit_msg += f" (issue #{issue_number})"
     ar = subprocess.run(
-        ["git", "-C", str(target_path), "add", "-A"],
+        ["git", "-C", str(target_path), "add", "--", *staged_files],
         capture_output=True,
         text=True,
         timeout=30,

@@ -118,7 +118,14 @@ def _make_arch_output():
 def _make_executor_output():
     mock = MagicMock()
     change = MagicMock()
-    change.diff = "--- a/hello.py\n+++ b/hello.py\n@@ -1 +1 @@\n-print('hello')\n+print('world')\n"
+    change.diff = (
+        "diff --git a/hello.py b/hello.py\n"
+        "--- a/hello.py\n"
+        "+++ b/hello.py\n"
+        "@@ -1 +1 @@\n"
+        "-print('hello')\n"
+        "+print('world')\n"
+    )
     mock.applied = [change]
     mock.pending_review = []
     mock.errors = []
@@ -955,3 +962,117 @@ class TestCiExecute:
 
         assert result.status == "preview_failed"
         assert "empty patch" in (result.error or "").lower()
+
+
+# ── Integration: targeted staging (no mock on subprocess.run) ──────────
+
+
+class TestTargetedStaging:
+    """Verify git add uses parsed patch files, not -A."""
+
+    def test_stages_only_patch_files_not_untracked(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_repo(repo)
+
+        # Untracked file that git add -A would have staged
+        (repo / "generated.log").write_text("noise\n", encoding="utf-8")
+
+        patch_text = (
+            "diff --git a/hello.py b/hello.py\n"
+            "--- a/hello.py\n"
+            "+++ b/hello.py\n"
+            "@@ -1 +1 @@\n"
+            "-print('hello')\n"
+            "+print('updated')\n"
+        )
+        patch_path = repo / "patch.diff"
+        patch_path.write_text(patch_text, encoding="utf-8", newline="")
+
+        from orchestrator.risk import parse_diff_files
+
+        staged = sorted(parse_diff_files(patch_text))
+        assert staged == ["hello.py"]
+
+        # Let git apply modify the file (don't write it manually)
+        subprocess.run(
+            ["git", "-C", str(repo), "apply", str(patch_path)],
+            check=True,
+            capture_output=True,
+        )
+
+        subprocess.run(
+            ["git", "-C", str(repo), "checkout", "-b", "test-branch"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "add", "--", *staged],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "commit", "-m", "apply patch"],
+            check=True,
+            capture_output=True,
+        )
+
+        result = subprocess.run(
+            ["git", "-C", str(repo), "show", "--name-only", "--format="],
+            capture_output=True,
+            text=True,
+        )
+        committed_files = result.stdout.strip().splitlines()
+        assert "hello.py" in committed_files
+        assert "generated.log" not in committed_files
+
+    def test_stages_new_file_from_patch(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_repo(repo)
+
+        new_content = "print('brand new')\n"
+        (repo / "brand_new.py").write_text(new_content, encoding="utf-8")
+
+        patch_text = (
+            "diff --git a/brand_new.py b/brand_new.py\n"
+            "new file mode 100644\n"
+            "--- /dev/null\n"
+            "+++ b/brand_new.py\n"
+            "@@ -0,0 +1 @@\n"
+            "+print('brand new')\n"
+        )
+
+        from orchestrator.risk import parse_diff_files
+
+        staged = sorted(parse_diff_files(patch_text))
+        assert staged == ["brand_new.py"]
+
+        subprocess.run(
+            ["git", "-C", str(repo), "checkout", "-b", "test-new-file"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "add", "--", *staged],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "commit", "-m", "add new file"],
+            check=True,
+            capture_output=True,
+        )
+
+        result = subprocess.run(
+            ["git", "-C", str(repo), "show", "--name-only", "--format="],
+            capture_output=True,
+            text=True,
+        )
+        committed_files = result.stdout.strip().splitlines()
+        assert "brand_new.py" in committed_files
+
+    def test_empty_parse_guard(self):
+        from orchestrator.risk import parse_diff_files
+
+        assert parse_diff_files("no diff headers here\njust text\n") == set()
