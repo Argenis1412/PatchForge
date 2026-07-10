@@ -22,6 +22,7 @@ State machine:
 
 from __future__ import annotations
 
+import threading
 import time
 from enum import Enum
 from typing import Callable, TypeVar
@@ -63,9 +64,35 @@ class CircuitBreaker:
     """
     Single-provider circuit breaker.
 
-    Thread safety: no locking is used (consistent with project convention
-    of no-threading + GIL protection in CPython). Check-then-set without
-    lock is acceptable here.
+    Thread safety: a single ``threading.Lock`` (``self._lock``) serializes
+    all mutations of instance state (``_state``, ``_consecutive_failures``,
+    ``_last_failure_time``, ``_recovery_timeout``, ``_half_open_in_flight``)
+    and their persistence via ``_persist_state()``. The caller-supplied
+    ``fn()`` is ALWAYS executed with the lock released — network calls must
+    not block other threads' state transitions.
+
+    Documented limitations (NOT closed by this lock):
+
+    1. ``SqliteCircuitBreakerStore`` thread-affinity: the underlying
+       ``sqlite3.Connection`` is created via ``_sqlite_connect()`` without
+       ``check_same_thread=False``. SQLite raises ``ProgrammingError`` on
+       any access from a thread other than the creator, regardless of any
+       Python-level lock. A CircuitBreaker backed by the production
+       SQLite store is safe only when called from the store's creator
+       thread.
+    2. ``fn()``-masking window: because ``fn()`` runs unlocked, a
+       concurrent thread's outcome handler (``_on_success``/``_on_failure``)
+       can transition state between one thread's ``fn()`` returning and
+       that thread acquiring the lock in its own outcome handler. One
+       outcome can therefore mask another (e.g. a success can reset
+       counters just incremented by a concurrent failure). This lock
+       provides atomicity of individual transitions, not linearizability
+       of concurrent outcomes.
+    3. ``circuit_breaker_for()`` registry race: the module-level
+       ``_registry`` check-then-set is unguarded. Two threads racing the
+       same never-seen provider can construct two distinct instances,
+       each with its own lock — the two locks provide no mutual exclusion
+       against each other.
 
     Internal invariant: _half_open_in_flight is ALWAYS False when
     _state is CLOSED or OPEN. It is only True transiently when
@@ -97,6 +124,15 @@ class CircuitBreaker:
         self._state: CircuitBreakerState = CircuitBreakerState.CLOSED
         # Process-level guard against concurrent probes in the same worker.
         self._half_open_in_flight: bool = False
+
+        # Serializes state mutations. Lock (not RLock): the call graph is
+        # a tree (call → _execute_* → _on_* → _persist_state) with no
+        # re-entrancy — _reload_state calls store.get_state which is a
+        # plain SQLite read / dict lookup, never re-enters call().
+        # Must NEVER be held while fn() runs (fn is a network call).
+        # See class docstring for documented limitations this lock does
+        # not close (SQLite thread-affinity, fn()-masking, registry race).
+        self._lock = threading.Lock()
 
         self._load_state()
 
@@ -159,36 +195,51 @@ class CircuitBreaker:
                 elapsed, or if a HALF_OPEN probe is already in flight.
             Exception: whatever fn() raises — propagated as-is (never wrapped).
         """
-        self._reload_state()
-        now = time.time()
+        go_closed = False
+        go_half_open = False
+        retry_after_reject: float | None = None
 
-        if self._state == CircuitBreakerState.CLOSED:
+        with self._lock:
+            self._reload_state()
+            now = time.time()
+
+            if self._state == CircuitBreakerState.CLOSED:
+                go_closed = True
+            elif self._state == CircuitBreakerState.OPEN:
+                retry_after = self._last_failure_time + self._recovery_timeout
+                if now < retry_after:
+                    retry_after_reject = retry_after
+                else:
+                    # Timeout elapsed — transition to HALF_OPEN and probe.
+                    self._state = CircuitBreakerState.HALF_OPEN
+                    self._persist_state()
+                    go_half_open = True
+            else:
+                # HALF_OPEN
+                go_half_open = True
+
+        # Lock released — never hold the lock across fn().
+        if retry_after_reject is not None:
+            raise CircuitBreakerOpenError(
+                provider=self._provider_name,
+                state=CircuitBreakerState.OPEN,
+                retry_after=retry_after_reject,
+            )
+        if go_closed:
             return self._execute_closed(fn)
-
-        if self._state == CircuitBreakerState.OPEN:
-            retry_after = self._last_failure_time + self._recovery_timeout
-            if now < retry_after:
-                # Still within cooldown — fast-reject.
-                raise CircuitBreakerOpenError(
-                    provider=self._provider_name,
-                    state=self._state,
-                    retry_after=retry_after,
-                )
-            # Timeout elapsed — transition to HALF_OPEN and probe.
-            self._state = CircuitBreakerState.HALF_OPEN
-            self._persist_state()
+        if go_half_open:
             return self._execute_half_open(fn)
-
-        # _state == HALF_OPEN
-        return self._execute_half_open(fn)
+        # Unreachable — all three branches set exactly one flag.
+        raise AssertionError("CircuitBreaker.call: no dispatch flag set")
 
     def reset(self) -> None:
         """Force the CB back to CLOSED. Intended for tests only."""
-        self._state = CircuitBreakerState.CLOSED
-        self._consecutive_failures = 0
-        self._last_failure_time = 0.0
-        self._half_open_in_flight = False
-        self._persist_state()
+        with self._lock:
+            self._state = CircuitBreakerState.CLOSED
+            self._consecutive_failures = 0
+            self._last_failure_time = 0.0
+            self._half_open_in_flight = False
+            self._persist_state()
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -203,20 +254,30 @@ class CircuitBreaker:
             self._on_failure(exc)  # always re-raises
 
     def _execute_half_open(self, fn: Callable[[], T]) -> T:
-        if self._half_open_in_flight:
-            # A probe is already running — reject this call.
-            # Note: this flag is process-local. Cross-worker HALF_OPEN
-            # contention is not prevented — multiple workers may probe
-            # simultaneously. This is an accepted relaxation: the first
-            # successful probe resets to CLOSED, and others see the
-            # updated state on their next _reload_state().
+        with self._lock:
+            if self._half_open_in_flight:
+                # A probe is already running — reject this call.
+                # Note: this flag is process-local. Cross-worker HALF_OPEN
+                # contention is not prevented — multiple workers may probe
+                # simultaneously. This is an accepted relaxation: the first
+                # successful probe resets to CLOSED, and others see the
+                # updated state on their next _reload_state().
+                retry_after_reject = self._last_failure_time + self._recovery_timeout
+                current_state = self._state
+                probe_taken = False
+            else:
+                self._half_open_in_flight = True
+                probe_taken = True
+                retry_after_reject = 0.0
+                current_state = self._state
+
+        if not probe_taken:
             raise CircuitBreakerOpenError(
                 provider=self._provider_name,
-                state=self._state,
-                retry_after=self._last_failure_time + self._recovery_timeout,
+                state=current_state,
+                retry_after=retry_after_reject,
                 message="probe already in flight",
             )
-        self._half_open_in_flight = True
         try:
             result = fn()
             self._on_success()
@@ -225,53 +286,66 @@ class CircuitBreaker:
             self._on_failure(exc)  # always re-raises
 
     def _on_failure(self, exc: Exception) -> None:
-        self._consecutive_failures += 1
-        # CRITICAL: Always reset in-flight flag before state transition.
-        # If CB was in HALF_OPEN and the probe call failed, this flag
-        # must be False before moving to OPEN. Otherwise, after
-        # recovery_timeout elapses and CB re-enters HALF_OPEN, the stale
-        # flag permanently blocks recovery.
-        self._half_open_in_flight = False
-        if self._consecutive_failures >= self._failure_threshold:
-            previous_state = self._state
-            self._state = CircuitBreakerState.OPEN
-            self._last_failure_time = time.time()
-            # Exponential backoff: index = (consecutive-1) // threshold, capped.
-            backoff_index = min(
-                (self._consecutive_failures - 1) // self._failure_threshold,
-                len(RECOVERY_BACKOFF) - 1,
-            )
-            self._recovery_timeout = RECOVERY_BACKOFF[backoff_index]
-            # Differentiate message: first opening vs re-opening after a probe.
-            if previous_state == CircuitBreakerState.HALF_OPEN:
-                log_msg = (
-                    f"CircuitBreaker for '{self._provider_name}' re-opened after "
-                    f"probe failure (was HALF_OPEN)."
+        emit_log_msg: str | None = None
+        failures_snapshot = 0
+        with self._lock:
+            self._consecutive_failures += 1
+            # CRITICAL: Always reset in-flight flag before state transition.
+            # If CB was in HALF_OPEN and the probe call failed, this flag
+            # must be False before moving to OPEN. Otherwise, after
+            # recovery_timeout elapses and CB re-enters HALF_OPEN, the stale
+            # flag permanently blocks recovery.
+            self._half_open_in_flight = False
+            if self._consecutive_failures >= self._failure_threshold:
+                previous_state = self._state
+                self._state = CircuitBreakerState.OPEN
+                self._last_failure_time = time.time()
+                # Exponential backoff: index = (consecutive-1) // threshold, capped.
+                backoff_index = min(
+                    (self._consecutive_failures - 1) // self._failure_threshold,
+                    len(RECOVERY_BACKOFF) - 1,
                 )
-            else:
-                log_msg = (
-                    f"CircuitBreaker for '{self._provider_name}' opened after "
-                    f"{self._consecutive_failures} consecutive failures."
-                )
-            # Auto-observability: emit only on transition to OPEN.
+                self._recovery_timeout = RECOVERY_BACKOFF[backoff_index]
+                # Capture failures snapshot inside the lock so the log
+                # message and data.failures cannot drift under concurrency.
+                failures_snapshot = self._consecutive_failures
+                # Differentiate message: first opening vs re-opening after a probe.
+                if previous_state == CircuitBreakerState.HALF_OPEN:
+                    emit_log_msg = (
+                        f"CircuitBreaker for '{self._provider_name}' re-opened after "
+                        f"probe failure (was HALF_OPEN)."
+                    )
+                else:
+                    emit_log_msg = (
+                        f"CircuitBreaker for '{self._provider_name}' opened after "
+                        f"{failures_snapshot} consecutive failures."
+                    )
+            self._persist_state()
+
+        if emit_log_msg is not None:
+            # Auto-observability: emit only on transition to OPEN. Outside
+            # the lock — log I/O must not block other threads' transitions.
             log_failure(
                 trace_id="circuit_breaker",
                 run_id=self._provider_name,
                 stage="circuit_breaker",
                 error_type=FailureType.CIRCUIT_BREAKER_OPEN,
-                message=log_msg,
+                message=emit_log_msg,
                 source="circuit_breaker",
-                data={"provider": self._provider_name, "failures": self._consecutive_failures},
+                data={"provider": self._provider_name, "failures": failures_snapshot},
             )
-        self._persist_state()
         raise exc  # always re-raise the original exception
 
     def _on_success(self) -> None:
-        previous_state = self._state
-        self._consecutive_failures = 0
-        self._half_open_in_flight = False  # safety: clear if was HALF_OPEN
-        self._state = CircuitBreakerState.CLOSED
-        self._persist_state()
+        with self._lock:
+            # Capture inside the lock: a stale pre-lock read could otherwise
+            # let a concurrent transition suppress or spuriously emit the
+            # circuit_recovered event.
+            previous_state = self._state
+            self._consecutive_failures = 0
+            self._half_open_in_flight = False  # safety: clear if was HALF_OPEN
+            self._state = CircuitBreakerState.CLOSED
+            self._persist_state()
         if previous_state != CircuitBreakerState.CLOSED:
             # Auto-observability: emit only on transition to CLOSED from another state.
             log_event(
