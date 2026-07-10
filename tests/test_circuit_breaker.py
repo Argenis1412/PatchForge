@@ -10,7 +10,9 @@ No network calls are made.
 from __future__ import annotations
 
 import contextlib
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock
 
 import pytest
@@ -38,7 +40,6 @@ def make_cb(
         store = MagicMock(spec=CircuitBreakerStore)
         store.get_state.return_value = None
         store.set_state.return_value = None
-        store.atomic_update.return_value = {}
     return CircuitBreaker(
         "test_provider", store, failure_threshold=threshold, recovery_timeout=timeout
     )
@@ -468,3 +469,124 @@ def test_cross_worker_state_sharing(tmp_path):
 
     fn.assert_not_called()
     assert cb2.state is CircuitBreakerState.OPEN
+
+
+# ---------------------------------------------------------------------------
+# Test 14 — Concurrent HALF_OPEN admits exactly one probe
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_concurrent_half_open_exactly_one_probe(monkeypatch):
+    """Under N concurrent calls into a HALF_OPEN CB, exactly one fn() runs.
+
+    Regression test for the _half_open_in_flight TOCTOU race fixed by
+    self._lock in _execute_half_open. The winning probe blocks in fn()
+    so we can observe the losers rejecting under a stable in_flight=True
+    state; without the lock, two or more threads could all observe
+    in_flight=False and race into fn().
+    """
+    cb = make_cb(threshold=2, timeout=60.0)
+
+    base_time = 1000.0
+    current_time = [base_time]
+    monkeypatch.setattr(time, "time", lambda: current_time[0])
+
+    # Open the CB.
+    for _ in range(2):
+        with pytest.raises(ValueError):
+            cb.call(lambda: (_ for _ in ()).throw(ValueError("x")))  # type: ignore[misc]
+
+    # Advance past recovery_timeout so call() will transition OPEN → HALF_OPEN.
+    current_time[0] = base_time + 61.0
+
+    n_threads = 8
+    start_barrier = threading.Barrier(n_threads)
+    probe_started = threading.Event()
+    probe_can_finish = threading.Event()
+
+    fn_run_count = 0
+    fn_run_lock = threading.Lock()
+
+    def probe_fn():
+        nonlocal fn_run_count
+        with fn_run_lock:
+            fn_run_count += 1
+        probe_started.set()
+        # Block until the test releases the winner. Uses threading.Event
+        # timing (monotonic clock), unaffected by the time.time monkeypatch.
+        assert probe_can_finish.wait(timeout=5.0), "probe_can_finish never set"
+        return "ok"
+
+    results: list[str] = []
+    errors: list[BaseException] = []
+    results_lock = threading.Lock()
+
+    def worker():
+        start_barrier.wait(timeout=5.0)
+        try:
+            r = cb.call(probe_fn)
+        except CircuitBreakerOpenError as e:
+            with results_lock:
+                errors.append(e)
+        else:
+            with results_lock:
+                results.append(r)
+
+    threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+    for t in threads:
+        t.start()
+
+    # Wait for the winning probe to enter fn().
+    assert probe_started.wait(timeout=5.0), "no thread reached probe_fn"
+
+    # Losers see _half_open_in_flight=True and raise immediately, so they
+    # finish quickly. Wait until only the winner remains alive before
+    # releasing the winner — this pins the CB in HALF_OPEN with
+    # in_flight=True for the entire loser-rejection window.
+    deadline = time.monotonic() + 5.0
+    while sum(1 for t in threads if t.is_alive()) > 1 and time.monotonic() < deadline:
+        time.sleep(0.001)
+
+    probe_can_finish.set()
+    for t in threads:
+        t.join(timeout=5.0)
+
+    assert fn_run_count == 1, f"expected exactly 1 fn() run, got {fn_run_count}"
+    assert results == ["ok"]
+    assert len(errors) == n_threads - 1
+    assert cb.state is CircuitBreakerState.CLOSED
+    assert cb._half_open_in_flight is False
+
+
+# ---------------------------------------------------------------------------
+# Test 15 — Concurrent failures increment counter without lost updates
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_concurrent_failures_consistent_count():
+    """N threads concurrently failing produce exactly N counter increments.
+
+    Regression test for the multi-field state-mutation race in _on_failure
+    fixed by self._lock. Threshold is set high enough that the CB stays
+    CLOSED throughout, isolating the lost-update scenario from the
+    OPEN-transition logic.
+    """
+    n_threads = 20
+    cb = make_cb(threshold=n_threads + 1)
+
+    def fail():
+        raise ValueError("x")
+
+    def worker():
+        with contextlib.suppress(ValueError):
+            cb.call(fail)
+
+    with ThreadPoolExecutor(max_workers=n_threads) as pool:
+        futures = [pool.submit(worker) for _ in range(n_threads)]
+        for f in futures:
+            f.result()
+
+    assert cb._consecutive_failures == n_threads
+    assert cb.state is CircuitBreakerState.CLOSED

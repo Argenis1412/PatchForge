@@ -19,6 +19,20 @@
 
 ## Log
 
+### [2026-07-10] Issue #214 — `SqliteCircuitBreakerStore` thread-affinity
+
+- **File:** `src/orchestrator/storage/__init__.py:30` (`_sqlite_connect()`) and `src/orchestrator/storage/lock.py:41` (`SqliteCircuitBreakerStore.__init__`)
+- **Debt:** `_sqlite_connect()` calls `sqlite3.connect()` without `check_same_thread=False`. SQLite's default `check_same_thread=True` raises `ProgrammingError` on any access from a thread other than the connection's creator, regardless of any Python-level lock. Consequence: a `CircuitBreaker` backed by the production `SqliteCircuitBreakerStore` (used by `providers.py`, `work_queue.py`) will still crash if `call()` is invoked from a thread other than the one that constructed the store, even after Issue #214's `self._lock` fix. The Python lock serializes access but does not change which OS thread is calling `.execute()`.
+- **Discovered by:** Adversarial review during Issue #214 planning
+- **Why deferred:** Out of scope for #214 (which fixes in-process instance-state races, not the SQLite connection contract). Fixing this requires either passing `check_same_thread=False` (and re-auditing all `_sqlite_connect()` call sites for concurrent-access safety, including `repo_lock` helpers and the coordination DB used by `worker_loop`) or switching to a per-thread connection pool. Blocker for any future in-process multi-threaded executor that would call through `_cb_gemini` / `_cb_openrouter` / `_cb_claude`.
+
+### [2026-07-10] Issue #214 — `circuit_breaker_for()` registry check-then-set race
+
+- **File:** `src/orchestrator/circuit_breaker.py:388` (`circuit_breaker_for()`) and `src/orchestrator/providers.py:_init_circuit_breakers()`
+- **Debt:** The module-level `_registry[provider_name]` check-then-set in `circuit_breaker_for()` is unguarded. Two threads racing the same never-seen provider can each pass the `if provider_name not in _registry:` check and construct two distinct `CircuitBreaker` objects, each with its **own** `self._lock`. Two different lock objects provide no mutual exclusion against each other, so Issue #214's per-instance lock guarantee does not hold across that window. The same pattern manifests in production at `providers._init_circuit_breakers()`, which uses an unguarded check-then-set on the `_coord_store` / `_cb_gemini` / `_cb_openrouter` / `_cb_claude` module globals.
+- **Discovered by:** Adversarial review during Issue #214 planning
+- **Why deferred:** Out of scope for #214 (object-identity bug, not instance-state mutation). Fix requires a module-level `threading.Lock` around registry mutation in `circuit_breaker_for()` and a parallel guard in `providers._init_circuit_breakers()`. Dormant today because no in-process call site is multi-threaded, but must be closed before any concurrent-in-process executor is introduced.
+
 ### ✅ [2026-06-15] Phase 3 — `run_ruff()` mutates caller `cmd_override` (RESOLVED)
 
 - **File:** `src/orchestrator/agents/validator/runners.py:130`
@@ -96,6 +110,7 @@
 - **Debt:** `CircuitBreaker._consecutive_failures` and `_half_open_in_flight` lack thread-safe protection. Consistent with the existing pattern in `clients/*.py` (no locks, GIL-dependent), but if P3 introduces threading or async workers, it will be a race condition.
 - **Discovered by:** Adversarial audit during issue design
 - **Why deferred:** No-threading is a project invariant in V1. Revisit with P3 (async workers).
+- **Resolution [2026-07-10, Issue #214]:** ✅ RESOLVED for in-process instance-state races. A single `threading.Lock` (`self._lock`) now serializes all mutations of `_state`, `_consecutive_failures`, `_last_failure_time`, `_recovery_timeout`, `_half_open_in_flight`, and their persistence via `_persist_state()`. The lock is released while `fn()` executes (never held across a network call). Scope explicitly does NOT cover: (a) cross-process coordination (already an accepted relaxation via `SqliteCircuitBreakerStore`); (b) `SqliteCircuitBreakerStore` thread-affinity (`check_same_thread=True` default — see separate entry below); (c) the `circuit_breaker_for()` registry race (see separate entry below); (d) the inherent `fn()`-masking window (concurrent outcome handlers can mask each other because `fn()` runs unlocked — documented in the class docstring).
 
 - **File:** `src/orchestrator/exceptions.py:101`
 - **Debt:** `CircuitBreakerOpenError.state` has type hint `object` instead of `CircuitBreakerState` to avoid a circular import between `circuit_breaker.py` and `exceptions.py`. Does not affect runtime.
