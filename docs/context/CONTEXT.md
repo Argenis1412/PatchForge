@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-07-10 | Session: Issue #212
+> Last updated: 2026-07-11 | Session: Issue #219
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,9 +15,9 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 704 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 714 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
-**Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3).
+**Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3). `SqliteCircuitBreakerStore` is now thread-safe (issue #219).
 
 ---
 
@@ -259,6 +259,7 @@ These must not change without a new ADR in `docs/adr/`:
 **P3 closure items remaining:** None — all P3 items complete.
 
 ### Tech Debt Closure
+- ✅ Issue #219 — CB thread-safety gaps pre-P3 (#219): `_sqlite_connect()` opt-in `check_same_thread=False` + `SqliteCircuitBreakerStore._conn_lock`; `_registry_lock` in `circuit_breaker_for()`; `_init_lock` in `providers._init_circuit_breakers()`. Lock ordering documented. 2 regression tests.
 - ✅ Issue #212 — Close verified tech debt: 7 entries marked ✅, harden ci apply (`git add -A` → targeted staging via `parse_diff_files`), centralize `PROJECT_ROOT` in `orchestrator/paths.py`
 
 **Recent:**
