@@ -53,19 +53,19 @@
 - **Why deferred:** `--workspace` docs are a small, separate CLI issue; non-determinism is
   inherent to LLM sampling and lower priority.
 
-### [2026-07-10] Issue #214 — `SqliteCircuitBreakerStore` thread-affinity
+### ✅ [2026-07-10] Issue #214 — `SqliteCircuitBreakerStore` thread-affinity (RESOLVED #219)
 
 - **File:** `src/orchestrator/storage/__init__.py:30` (`_sqlite_connect()`) and `src/orchestrator/storage/lock.py:41` (`SqliteCircuitBreakerStore.__init__`)
 - **Debt:** `_sqlite_connect()` calls `sqlite3.connect()` without `check_same_thread=False`. SQLite's default `check_same_thread=True` raises `ProgrammingError` on any access from a thread other than the connection's creator, regardless of any Python-level lock. Consequence: a `CircuitBreaker` backed by the production `SqliteCircuitBreakerStore` (used by `providers.py`, `work_queue.py`) will still crash if `call()` is invoked from a thread other than the one that constructed the store, even after Issue #214's `self._lock` fix. The Python lock serializes access but does not change which OS thread is calling `.execute()`.
 - **Discovered by:** Adversarial review during Issue #214 planning
-- **Why deferred:** Out of scope for #214 (which fixes in-process instance-state races, not the SQLite connection contract). Fixing this requires either passing `check_same_thread=False` (and re-auditing all `_sqlite_connect()` call sites for concurrent-access safety, including `repo_lock` helpers and the coordination DB used by `worker_loop`) or switching to a per-thread connection pool. Blocker for any future in-process multi-threaded executor that would call through `_cb_gemini` / `_cb_openrouter` / `_cb_claude`.
+- **Resolution:** Added opt-in `check_same_thread` parameter to `_sqlite_connect()` (default `True` to preserve safety net for other callers). `SqliteCircuitBreakerStore` passes `False` and serializes all connection access with `self._conn_lock`. Regression test: `test_sqlite_store_cross_thread`.
 
-### [2026-07-10] Issue #214 — `circuit_breaker_for()` registry check-then-set race
+### ✅ [2026-07-10] Issue #214 — `circuit_breaker_for()` registry check-then-set race (RESOLVED #219)
 
 - **File:** `src/orchestrator/circuit_breaker.py:388` (`circuit_breaker_for()`) and `src/orchestrator/providers.py:_init_circuit_breakers()`
 - **Debt:** The module-level `_registry[provider_name]` check-then-set in `circuit_breaker_for()` is unguarded. Two threads racing the same never-seen provider can each pass the `if provider_name not in _registry:` check and construct two distinct `CircuitBreaker` objects, each with its **own** `self._lock`. Two different lock objects provide no mutual exclusion against each other, so Issue #214's per-instance lock guarantee does not hold across that window. The same pattern manifests in production at `providers._init_circuit_breakers()`, which uses an unguarded check-then-set on the `_coord_store` / `_cb_gemini` / `_cb_openrouter` / `_cb_claude` module globals.
 - **Discovered by:** Adversarial review during Issue #214 planning
-- **Why deferred:** Out of scope for #214 (object-identity bug, not instance-state mutation). Fix requires a module-level `threading.Lock` around registry mutation in `circuit_breaker_for()` and a parallel guard in `providers._init_circuit_breakers()`. Dormant today because no in-process call site is multi-threaded, but must be closed before any concurrent-in-process executor is introduced.
+- **Resolution:** Added `_registry_lock = threading.Lock()` guarding the check-then-set in `circuit_breaker_for()`. Added `_init_lock` with the same pattern in `providers._init_circuit_breakers()`. Lock ordering documented in `CircuitBreaker` docstring. Regression test: `test_registry_singleton_under_contention`.
 
 ### ✅ [2026-06-15] Phase 3 — `run_ruff()` mutates caller `cmd_override` (RESOLVED)
 

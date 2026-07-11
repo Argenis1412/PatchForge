@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,7 +47,6 @@ _PROVIDER_CHAIN: dict[str, list] = {
 # ---------------------------------------------------------------------------
 # Shared circuit breakers — backed by coordination.db (SQLite).
 # State persists across restarts and is visible to all workers on the same host.
-# Single-threaded use only: SqliteCircuitBreakerStore is not thread-safe.
 # _half_open_in_flight is process-local; multiple workers may probe simultaneously
 # in HALF_OPEN — acceptable since a successful probe closes the CB for everyone.
 # ---------------------------------------------------------------------------
@@ -55,19 +55,21 @@ _coord_store: SqliteCircuitBreakerStore | None = None
 _cb_gemini: CircuitBreaker | None = None
 _cb_openrouter: CircuitBreaker | None = None
 _cb_claude: CircuitBreaker | None = None
+_init_lock = threading.Lock()
 
 
 def _init_circuit_breakers() -> None:
     """Lazy-init shared store + circuit breakers on first use (not at import time)."""
     global _coord_store, _cb_gemini, _cb_openrouter, _cb_claude  # noqa: PLW0603
-    if _coord_store is not None:
-        return
-    db_dir_env = os.getenv("PATCHFORGE_DATA_DIR")
-    coord_db_dir = Path(db_dir_env) if db_dir_env is not None else Path.home() / ".patchforge"
-    _coord_store = SqliteCircuitBreakerStore(coord_db_dir)
-    _cb_gemini = circuit_breaker_for("gemini", store=_coord_store)
-    _cb_openrouter = circuit_breaker_for("openrouter", store=_coord_store)
-    _cb_claude = circuit_breaker_for("claude", store=_coord_store)
+    with _init_lock:
+        if _coord_store is not None:
+            return
+        db_dir_env = os.getenv("PATCHFORGE_DATA_DIR")
+        coord_db_dir = Path(db_dir_env) if db_dir_env is not None else Path.home() / ".patchforge"
+        _coord_store = SqliteCircuitBreakerStore(coord_db_dir)
+        _cb_gemini = circuit_breaker_for("gemini", store=_coord_store)
+        _cb_openrouter = circuit_breaker_for("openrouter", store=_coord_store)
+        _cb_claude = circuit_breaker_for("claude", store=_coord_store)
 
 
 # ---------------------------------------------------------------------------
