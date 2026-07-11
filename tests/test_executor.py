@@ -612,6 +612,15 @@ def test_executor_emits_task_skipped(tmp_path, monkeypatch):
     cb_gemini_mock = MagicMock()
     cb_gemini_mock.call.side_effect = lambda fn: (_ for _ in ()).throw(Exception("boom"))
     monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini_mock)
+
+    cb_openrouter_mock = MagicMock()
+    cb_openrouter_mock.call.side_effect = lambda fn: (_ for _ in ()).throw(Exception("boom"))
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_openrouter", cb_openrouter_mock)
+
+    cb_claude_mock = MagicMock()
+    cb_claude_mock.call.side_effect = lambda fn: (_ for _ in ()).throw(Exception("boom"))
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_claude", cb_claude_mock)
+
     monkeypatch.setattr(
         "orchestrator.agents.executor.providers._recoverable_exceptions",
         lambda: (Exception,),
