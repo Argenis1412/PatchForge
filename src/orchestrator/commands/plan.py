@@ -84,6 +84,7 @@ def execute(
         log_event(
             trace_id=run_id,
             run_id=run_id,
+            level="info",
             source="plan",
             stage="architect",
             event="force_provider_override",

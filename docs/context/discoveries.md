@@ -52,11 +52,6 @@
 - **Discovered by:** Dogfooding 008 (`docs/experiments/dogfooding-008.md`)
 - **Why deferred:** `--workspace` docs are a small, separate CLI issue; non-determinism is
   inherent to LLM sampling and lower priority.
-  module-level circuit-breaker state leaking between tests without a full reset.
-- **Discovered by:** Dogfooding 008 full-suite QA run (`docs/experiments/dogfooding-008.md`),
-  reproduced twice
-- **Why deferred:** Unrelated to the `doctor.py` change under test in that dogfooding run.
-  Needs its own investigation into circuit-breaker test isolation/fixtures.
 
 ### [2026-07-10] Issue #214 — `SqliteCircuitBreakerStore` thread-affinity
 
