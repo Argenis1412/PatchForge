@@ -267,6 +267,38 @@ class TestArchitectProviderChain:
         with pytest.raises(ProviderError):
             arch_provider.call_claude("prompt", "architect")
 
+    @pytest.mark.unit
+    def test_force_provider_builds_single_provider_chain(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        from orchestrator.agents.architect import provider as arch_provider
+        from orchestrator.agents.executor.providers import (
+            ProviderChainResult,
+            _call_gemini,
+        )
+
+        chain_result = ProviderChainResult(
+            success=(_CLEAN_JSON, 100, 50, 0.0),
+            provider_name="gemini",
+        )
+        mock_call_chain = MagicMock(return_value=chain_result)
+        monkeypatch.setattr(arch_provider, "_call_chain", mock_call_chain)
+        monkeypatch.setattr(arch_provider, "log_call", lambda *a, **kw: None)
+
+        arch_provider.call_claude("prompt", "architect", force_provider="gemini")
+
+        chain_arg = mock_call_chain.call_args[0][0]
+        assert len(chain_arg) == 1
+        assert chain_arg[0] is _call_gemini
+
+    @pytest.mark.unit
+    def test_force_provider_invalid_raises_provider_error(self):
+        from orchestrator.agents.architect import provider as arch_provider
+        from orchestrator.exceptions import ProviderError
+
+        with pytest.raises(ProviderError):
+            arch_provider.call_claude("prompt", "architect", force_provider="nonexistent")
+
 
 # ---------------------------------------------------------------------------
 # Target files injection tests (D-001 root cause)
