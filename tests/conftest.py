@@ -26,13 +26,9 @@ def _reset_circuit_breakers(tmp_path):
     yield
     try:
         from orchestrator import circuit_breaker
-        from orchestrator.circuit_breaker import CircuitBreakerState
 
         for cb in list(circuit_breaker._registry.values()):
-            cb._state = CircuitBreakerState.CLOSED
-            cb._consecutive_failures = 0
-            cb._last_failure_time = 0.0
-            cb._half_open_in_flight = False
+            cb.reset()
     except (ImportError, AttributeError):
         pass
 

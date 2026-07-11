@@ -27,6 +27,7 @@ def run(
     *,
     trace_id: str | None = None,
     run_id: str | None = None,
+    force_provider: str | None = None,
 ) -> tuple[ArchitectOutput, dict]:
     logs_dir: Optional[Path] = None
     if config is not None:
@@ -41,7 +42,8 @@ def run(
     print(
         f"[Architect] Target files: {len(paths)} of {total} paths injected (truncated={truncated})"
     )
-    print(f"[Architect] Asking {MODEL} to structure the implementation plan...")
+    display_model = force_provider or MODEL
+    print(f"[Architect] Asking {display_model} to structure the implementation plan...")
 
     raw_response, tokens, cost, model_used = call_claude(
         ARCHITECT_PROMPT.format(scout_data=scout_data, target_files=target_files_block),
@@ -51,6 +53,7 @@ def run(
         run_id=run_id,
         stage="architect",
         span_id="architect",
+        force_provider=force_provider,
     )
 
     print(f"[Architect] Done | model={model_used} | tokens: {tokens} | cost: ${cost:.5f}")
@@ -100,6 +103,7 @@ def run_from_issue(
     *,
     trace_id: str | None = None,
     run_id: str | None = None,
+    force_provider: str | None = None,
 ) -> tuple[ArchitectOutput, dict]:
     """Run the Architect agent from a human-written issue file.
 
@@ -129,7 +133,8 @@ def run_from_issue(
         body=_escape(issue_input.body),
         target_files=_escape(target_files_block),
     )
-    print(f"[Architect] Asking {MODEL} to structure the implementation plan...")
+    display_model = force_provider or MODEL
+    print(f"[Architect] Asking {display_model} to structure the implementation plan...")
 
     raw_response, tokens, cost, model_used = call_claude(
         issue_data,
@@ -139,6 +144,7 @@ def run_from_issue(
         run_id=run_id,
         stage="architect",
         span_id="architect-issue",
+        force_provider=force_provider,
     )
 
     print(f"[Architect] Done | model={model_used} | tokens: {tokens} | cost: ${cost:.5f}")

@@ -10,6 +10,7 @@ from orchestrator.agents.executor.providers import (
     _call_claude,
     _call_gemini,
     _call_openrouter,
+    _provider_by_name,
 )
 from orchestrator.exceptions import ProviderError
 from orchestrator.observability.events import FailureType, log_failure
@@ -41,11 +42,24 @@ def call_claude(
     run_id: str | None = None,
     stage: str | None = None,
     span_id: str | None = None,
+    force_provider: str | None = None,
 ) -> tuple[str, dict, float, str]:
     """Call the architect provider chain. Returns (raw, tokens, cost, model_used)."""
     call_started = time.monotonic()
 
-    chain_result: ProviderChainResult = _call_chain(_ARCHITECT_CHAIN, prompt, run_id or "")
+    if force_provider:
+        by_name = _provider_by_name()
+        provider = by_name.get(force_provider)
+        if provider is None:
+            raise ProviderError(
+                "provider_chain",
+                f"Unknown provider: {force_provider}. Available: {tuple(sorted(by_name))}",
+            )
+        chain = [provider]
+    else:
+        chain = _ARCHITECT_CHAIN
+
+    chain_result: ProviderChainResult = _call_chain(chain, prompt, run_id or "")
 
     if chain_result.success is None:
         latency_ms = int((time.monotonic() - call_started) * 1000)

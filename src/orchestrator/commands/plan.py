@@ -33,6 +33,7 @@ def execute(
     workspace: Optional[Path] = None,
     env_file: Optional[Path] = None,
     issue_file: Optional[Path] = None,
+    force_provider: Optional[str] = None,
 ) -> None:
     console.print(
         Panel(
@@ -79,6 +80,20 @@ def execute(
         run_dir=run_dir,
     )
 
+    if force_provider is not None:
+        log_event(
+            trace_id=run_id,
+            run_id=run_id,
+            level="info",
+            source="plan",
+            stage="architect",
+            event="force_provider_override",
+            data={"provider": force_provider, "source": "cli"},
+            logs_dir=logs_dir,
+            run_dir=run_dir,
+        )
+        console.print(f"[yellow]Override activo: architect usará {force_provider}[/yellow]")
+
     # 4. Architect input: issue file or Scout findings
     goal: str
 
@@ -116,7 +131,11 @@ def execute(
             task = progress.add_task("[green]Planning from issue...", total=None)
             try:
                 output, meta = architect_agent.run_from_issue(
-                    issue_input, config=config, trace_id=run_id, run_id=run_id
+                    issue_input,
+                    config=config,
+                    trace_id=run_id,
+                    run_id=run_id,
+                    force_provider=force_provider,
                 )
                 for plan_task in output.implementation_plan:
                     if plan_task.risk_level == "high":
@@ -185,7 +204,11 @@ def execute(
             task = progress.add_task("[green]Planning implementation steps...", total=None)
             try:
                 output, meta = architect_agent.run(
-                    scout_output, config=config, trace_id=run_id, run_id=run_id
+                    scout_output,
+                    config=config,
+                    trace_id=run_id,
+                    run_id=run_id,
+                    force_provider=force_provider,
                 )
                 for plan_task in output.implementation_plan:
                     if plan_task.risk_level == "high":

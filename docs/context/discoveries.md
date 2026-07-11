@@ -19,31 +19,39 @@
 
 ## Log
 
-### [2026-07-10] Dogfooding 008 — `plan` CLI gaps and non-determinism
+### ✅ [2026-07-10] Dogfooding 008 — `plan` CLI gaps and non-determinism (PARTIALLY RESOLVED)
 
-- **File:** `src/orchestrator/cli.py` (`plan` command)
-- **Debt:** `plan` does not accept `--force-provider` (unlike `preview`/`ci`), always using
-  the default Architect model. It also requires an explicit `--workspace` matching `scan`'s
-  computed workspace hash or it fails with "Run ... does not exist" — undocumented in
-  `--help`. Separately, running `plan` twice with identical inputs produced different
-  outcomes (one attempt failed with "empty files_to_modify", a retry succeeded) — Architect
-  output is not deterministic run-to-run.
+- **File:** `src/orchestrator/main.py`, `src/orchestrator/commands/plan.py`, `src/orchestrator/agents/architect/`
+- **Debt:** `plan` did not accept `--force-provider` (unlike `preview`/`ci`), always using
+  the default Architect model. Additionally, `ci --force-provider` only forced the executor,
+  not the architect step within ci, creating a silent cost inconsistency.
 - **Discovered by:** Dogfooding 008 (`docs/experiments/dogfooding-008.md`)
-- **Why deferred:** Out of scope for the `doctor.py` config-read fix being dogfooded. Fixing
-  `--force-provider` on `plan` and documenting `--workspace` requirements would be small,
-  separate CLI issues; the non-determinism is inherent LLM sampling variance and lower
-  priority.
+- **Resolution:** Added `--force-provider` to `plan` and wired it through to the architect
+  provider chain. Also fixed `ci` to forward `force_provider` to the architect calls.
+  Remaining open items: `--workspace` requirement is still undocumented in `--help`;
+  Architect output non-determinism is inherent LLM sampling variance (not fixable here).
 
-### [2026-07-10] `test_executor_emits_task_skipped` is order-dependent
+### ✅ [2026-07-10] `test_executor_emits_task_skipped` is order-dependent (RESOLVED)
 
-- **File:** `tests/test_executor.py`
-- **Debt:** Fails when run as part of the full suite (`assert 0 == 1`, expects a
-  `task_skipped` event that never fires) but passes reliably in isolation. Likely shared
-  module-level circuit-breaker state leaking between tests without a full reset.
-- **Discovered by:** Dogfooding 008 full-suite QA run (`docs/experiments/dogfooding-008.md`),
-  reproduced twice
-- **Why deferred:** Unrelated to the `doctor.py` change under test in that dogfooding run.
-  Needs its own investigation into circuit-breaker test isolation/fixtures.
+- **File:** `tests/conftest.py`
+- **Debt:** Failed when run as part of the full suite but passed in isolation. Root cause:
+  the `_reset_circuit_breakers` fixture reset CB state in-memory only (direct attribute
+  assignment) but never persisted to SQLite. Subsequent tests' CB `_reload_state()` loaded
+  stale OPEN state from the store, overwriting the fixture's reset.
+- **Discovered by:** Dogfooding 008 full-suite QA run
+- **Resolution:** Replaced direct attribute mutations with `cb.reset()` which does the same
+  mutations AND calls `_persist_state()`.
+
+### [2026-07-10] Dogfooding 008 — `plan --workspace` undocumented requirement
+
+- **File:** `src/orchestrator/commands/plan.py`
+- **Debt:** `plan` requires an explicit `--workspace` matching `scan`'s computed workspace
+  hash or it fails with "Run ... does not exist" — undocumented in `--help`. Separately,
+  running `plan` twice with identical inputs produced different outcomes (non-deterministic
+  Architect output from LLM sampling variance).
+- **Discovered by:** Dogfooding 008 (`docs/experiments/dogfooding-008.md`)
+- **Why deferred:** `--workspace` docs are a small, separate CLI issue; non-determinism is
+  inherent to LLM sampling and lower priority.
 
 ### [2026-07-10] Issue #214 — `SqliteCircuitBreakerStore` thread-affinity
 
