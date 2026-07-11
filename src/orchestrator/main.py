@@ -149,11 +149,24 @@ def plan(
     workspace: Optional[Path] = typer.Option(
         None, "--workspace", help="Path to the workspace directory"
     ),
+    force_provider: Optional[str] = typer.Option(
+        None,
+        "--force-provider",
+        help="Force a specific LLM ('gemini'|'openrouter'|'claude') for the architect, "
+        "ignoring the default fallback chain.",
+    ),
 ) -> None:
     """Run the Architect agent to generate an implementation plan for a run."""
     from orchestrator.commands.plan import execute as execute_plan
 
-    execute_plan(run_id=run_id, workspace=workspace, env_file=env_file, issue_file=issue_file)
+    _validate_force_provider(force_provider)
+    execute_plan(
+        run_id=run_id,
+        workspace=workspace,
+        env_file=env_file,
+        issue_file=issue_file,
+        force_provider=force_provider,
+    )
 
 
 def _validate_force_provider(force_provider: Optional[str]) -> None:

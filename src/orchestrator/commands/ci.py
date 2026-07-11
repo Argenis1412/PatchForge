@@ -205,7 +205,11 @@ def execute(
             issue_input = parse_issue_markdown(raw)
             workspace_mgr.write_artifact(run_id, "issue.md", raw)
             arch_output, arch_meta = architect_agent.run_from_issue(
-                issue_input, config=config, trace_id=run_id, run_id=run_id
+                issue_input,
+                config=config,
+                trace_id=run_id,
+                run_id=run_id,
+                force_provider=force_provider,
             )
             goal = issue_input.title
         else:
@@ -214,7 +218,11 @@ def execute(
             findings_content = workspace_mgr.read_artifact(run_id, "findings.json")
             scout_output = ScoutOutput.model_validate_json(findings_content)
             arch_output, arch_meta = architect_agent.run(
-                scout_output, config=config, trace_id=run_id, run_id=run_id
+                scout_output,
+                config=config,
+                trace_id=run_id,
+                run_id=run_id,
+                force_provider=force_provider,
             )
             goal = scout_output.summary
     except Exception as exc:
