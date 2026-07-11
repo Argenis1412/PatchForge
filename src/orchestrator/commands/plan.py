@@ -91,9 +91,7 @@ def execute(
             logs_dir=logs_dir,
             run_dir=run_dir,
         )
-        console.print(
-            f"[yellow]Override activo: architect usará {force_provider}[/yellow]"
-        )
+        console.print(f"[yellow]Override activo: architect usará {force_provider}[/yellow]")
 
     # 4. Architect input: issue file or Scout findings
     goal: str
