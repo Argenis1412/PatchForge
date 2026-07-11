@@ -568,6 +568,31 @@ class TestCheck:
         after = set(repo.iterdir())
         assert before == after
 
+    def test_reads_orchestrator_config_once(self, tmp_path: Path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        _make_pyproject(repo)
+        (repo / "tests").mkdir()
+
+        def fake_check(cmd):
+            return (True, "ok")
+
+        from unittest.mock import patch
+
+        import orchestrator.doctor as doctor_module
+
+        with (
+            patch("orchestrator.doctor.check_command_available", fake_check),
+            patch(
+                "orchestrator.doctor._read_orchestrator_config",
+                wraps=doctor_module._read_orchestrator_config,
+            ) as read_config,
+        ):
+            check(repo)
+
+        assert read_config.call_count == 1
+
 
 # ---------------------------------------------------------------------------
 # CLI

@@ -135,7 +135,7 @@ def check_git(path: Path) -> tuple[CheckResult, Optional[str], Optional[str], Op
     )
 
 
-def check_workspace(path: Path) -> tuple[CheckResult, Optional[str]]:
+def check_workspace(path: Path, config: Optional[dict] = None) -> tuple[CheckResult, Optional[str]]:
     """Validate the workspace path is outside the target repository.
 
     Looks up workspace_path in orchestrator.json first.
@@ -143,7 +143,7 @@ def check_workspace(path: Path) -> tuple[CheckResult, Optional[str]]:
     """
     from orchestrator.schemas.config import default_workspace_path, validate_workspace_path
 
-    cfg = _read_orchestrator_config(path)
+    cfg = config if config is not None else _read_orchestrator_config(path)
     raw_ws = cfg.get("workspace_path")
 
     if raw_ws is not None:
@@ -262,10 +262,10 @@ def check_pyproject(path: Path) -> tuple[CheckResult, Optional[dict]]:
     )
 
 
-def check_ruff(path: Path) -> CheckResult:
+def check_ruff(path: Path, config: Optional[dict] = None) -> CheckResult:
     """Check Ruff is available or explicitly configured."""
-    config = _read_orchestrator_config(path)
-    lint_command = config.get("lint_command")
+    cfg = config if config is not None else _read_orchestrator_config(path)
+    lint_command = cfg.get("lint_command")
 
     if lint_command is not None and isinstance(lint_command, list) and len(lint_command) > 0:
         return CheckResult(
@@ -292,10 +292,12 @@ def check_ruff(path: Path) -> CheckResult:
     )
 
 
-def check_pytest(path: Path, pyproject: Optional[dict] = None) -> CheckResult:
+def check_pytest(
+    path: Path, pyproject: Optional[dict] = None, config: Optional[dict] = None
+) -> CheckResult:
     """Check Pytest is available and a test suite is detectable."""
-    config = _read_orchestrator_config(path)
-    test_command = config.get("test_command")
+    cfg = config if config is not None else _read_orchestrator_config(path)
+    test_command = cfg.get("test_command")
 
     if test_command is not None and isinstance(test_command, list) and len(test_command) > 0:
         if detect_test_suite(path, pyproject):
@@ -392,6 +394,8 @@ def check(path: str | Path) -> DoctorResult:
     git_head: Optional[str] = None
     is_dirty: Optional[bool] = None
 
+    orchestrator_config = _read_orchestrator_config(target)
+
     git_result, branch, head, dirty = check_git(target)
     checks.append(git_result)
     git_branch = branch
@@ -412,7 +416,7 @@ def check(path: str | Path) -> DoctorResult:
             )
         )
 
-    ws_result, ws_path = check_workspace(target)
+    ws_result, ws_path = check_workspace(target, config=orchestrator_config)
     checks.append(ws_result)
     if ws_path is not None:
         workspace_path = ws_path
@@ -420,8 +424,8 @@ def check(path: str | Path) -> DoctorResult:
     pyproject_result, pyproject_data = check_pyproject(target)
     checks.append(pyproject_result)
 
-    checks.append(check_ruff(target))
-    checks.append(check_pytest(target, pyproject_data))
+    checks.append(check_ruff(target, config=orchestrator_config))
+    checks.append(check_pytest(target, pyproject_data, config=orchestrator_config))
     checks.extend(check_api_keys())
 
     if _detect_typescript(target):

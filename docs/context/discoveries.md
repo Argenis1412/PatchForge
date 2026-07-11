@@ -19,6 +19,32 @@
 
 ## Log
 
+### [2026-07-10] Dogfooding 008 — `plan` CLI gaps and non-determinism
+
+- **File:** `src/orchestrator/cli.py` (`plan` command)
+- **Debt:** `plan` does not accept `--force-provider` (unlike `preview`/`ci`), always using
+  the default Architect model. It also requires an explicit `--workspace` matching `scan`'s
+  computed workspace hash or it fails with "Run ... does not exist" — undocumented in
+  `--help`. Separately, running `plan` twice with identical inputs produced different
+  outcomes (one attempt failed with "empty files_to_modify", a retry succeeded) — Architect
+  output is not deterministic run-to-run.
+- **Discovered by:** Dogfooding 008 (`docs/experiments/dogfooding-008.md`)
+- **Why deferred:** Out of scope for the `doctor.py` config-read fix being dogfooded. Fixing
+  `--force-provider` on `plan` and documenting `--workspace` requirements would be small,
+  separate CLI issues; the non-determinism is inherent LLM sampling variance and lower
+  priority.
+
+### [2026-07-10] `test_executor_emits_task_skipped` is order-dependent
+
+- **File:** `tests/test_executor.py`
+- **Debt:** Fails when run as part of the full suite (`assert 0 == 1`, expects a
+  `task_skipped` event that never fires) but passes reliably in isolation. Likely shared
+  module-level circuit-breaker state leaking between tests without a full reset.
+- **Discovered by:** Dogfooding 008 full-suite QA run (`docs/experiments/dogfooding-008.md`),
+  reproduced twice
+- **Why deferred:** Unrelated to the `doctor.py` change under test in that dogfooding run.
+  Needs its own investigation into circuit-breaker test isolation/fixtures.
+
 ### [2026-07-10] Issue #214 — `SqliteCircuitBreakerStore` thread-affinity
 
 - **File:** `src/orchestrator/storage/__init__.py:30` (`_sqlite_connect()`) and `src/orchestrator/storage/lock.py:41` (`SqliteCircuitBreakerStore.__init__`)
