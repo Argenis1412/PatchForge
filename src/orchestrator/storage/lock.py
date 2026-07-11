@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
+import threading
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -34,11 +35,18 @@ class CircuitBreakerStore(ABC):
 
 
 class SqliteCircuitBreakerStore(CircuitBreakerStore):
-    """Shared SQLite-backed store. State persists across worker restarts."""
+    """Shared SQLite-backed store. State persists across worker restarts.
+
+    Thread-safe: _conn_lock serializes all SQLite access. The connection is
+    opened with check_same_thread=False so it can be used from any thread.
+    Lock ordering: CB._lock → store._conn_lock (never reversed)."""
 
     def __init__(self, db_dir: Path) -> None:
         db_dir.mkdir(parents=True, exist_ok=True)
-        self._conn: sqlite3.Connection = _sqlite_connect(db_dir / "coordination.db")
+        self._conn_lock = threading.Lock()
+        self._conn: sqlite3.Connection = _sqlite_connect(
+            db_dir / "coordination.db", check_same_thread=False
+        )
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS cb_state ("
             "provider TEXT PRIMARY KEY,"
@@ -55,54 +63,57 @@ class SqliteCircuitBreakerStore(CircuitBreakerStore):
         )
 
     def get_state(self, provider: str) -> dict | None:
-        row = self._conn.execute(
-            "SELECT state, failures, last_failure_at, recovery_timeout "
-            "FROM cb_state WHERE provider = ?",
-            (provider,),
-        ).fetchone()
-        return dict(row) if row else None
-
-    def set_state(self, provider: str, state: dict) -> None:
-        self._conn.execute(
-            "INSERT OR REPLACE INTO cb_state "
-            "(provider, state, failures, last_failure_at, recovery_timeout) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (
-                provider,
-                state["state"],
-                state.get("failures", 0),
-                state.get("last_failure_at"),
-                state.get("recovery_timeout"),
-            ),
-        )
-
-    def atomic_update(self, provider: str, txn: Callable[[dict], dict]) -> dict:
-        """Run txn(current_state) → new_state atomically. Re-raises on any error."""
-        try:
-            self._conn.execute("BEGIN IMMEDIATE")
+        with self._conn_lock:
             row = self._conn.execute(
                 "SELECT state, failures, last_failure_at, recovery_timeout "
                 "FROM cb_state WHERE provider = ?",
                 (provider,),
             ).fetchone()
-            new_state = txn(dict(row) if row else {})
+        return dict(row) if row else None
+
+    def set_state(self, provider: str, state: dict) -> None:
+        with self._conn_lock:
             self._conn.execute(
                 "INSERT OR REPLACE INTO cb_state "
                 "(provider, state, failures, last_failure_at, recovery_timeout) "
                 "VALUES (?, ?, ?, ?, ?)",
                 (
                     provider,
-                    new_state["state"],
-                    new_state.get("failures", 0),
-                    new_state.get("last_failure_at"),
-                    new_state.get("recovery_timeout"),
+                    state["state"],
+                    state.get("failures", 0),
+                    state.get("last_failure_at"),
+                    state.get("recovery_timeout"),
                 ),
             )
-            self._conn.execute("COMMIT")
-            return new_state
-        except Exception:
-            self._conn.execute("ROLLBACK")
-            raise
+
+    def atomic_update(self, provider: str, txn: Callable[[dict], dict]) -> dict:
+        """Run txn(current_state) → new_state atomically. Re-raises on any error."""
+        with self._conn_lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                row = self._conn.execute(
+                    "SELECT state, failures, last_failure_at, recovery_timeout "
+                    "FROM cb_state WHERE provider = ?",
+                    (provider,),
+                ).fetchone()
+                new_state = txn(dict(row) if row else {})
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO cb_state "
+                    "(provider, state, failures, last_failure_at, recovery_timeout) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (
+                        provider,
+                        new_state["state"],
+                        new_state.get("failures", 0),
+                        new_state.get("last_failure_at"),
+                        new_state.get("recovery_timeout"),
+                    ),
+                )
+                self._conn.execute("COMMIT")
+                return new_state
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
 
 
 class _InMemoryCircuitBreakerStore(CircuitBreakerStore):

@@ -590,3 +590,38 @@ def test_concurrent_failures_consistent_count():
 
     assert cb._consecutive_failures == n_threads
     assert cb.state is CircuitBreakerState.CLOSED
+
+
+# ---------------------------------------------------------------------------
+# Test 16 — SqliteCircuitBreakerStore cross-thread access
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_sqlite_store_cross_thread(tmp_path):
+    """Store created on main thread is safely used from worker threads.
+
+    Regression test for the check_same_thread=False + _conn_lock fix.
+    Before the fix, any worker-thread call to get_state()/set_state()
+    raised sqlite3.ProgrammingError.
+    """
+    from orchestrator.storage.lock import SqliteCircuitBreakerStore
+
+    store = SqliteCircuitBreakerStore(tmp_path)
+    errors: list[Exception] = []
+
+    def worker(i: int) -> None:
+        try:
+            store.set_state(f"p{i}", {"state": "CLOSED", "failures": i})
+            result = store.get_state(f"p{i}")
+            assert result is not None
+            assert result["failures"] == i
+        except Exception as exc:
+            errors.append(exc)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [pool.submit(worker, i) for i in range(4)]
+        for f in futures:
+            f.result()
+
+    assert errors == [], f"cross-thread store access raised: {errors}"
