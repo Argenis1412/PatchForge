@@ -15,7 +15,7 @@ Repository → Scan → Plan → Patch → Validation → Apply
 - [README](../README.md) - Project overview and quickstart
 - [Product Thesis](./product-thesis-v2.md) - Product definition, artifact contract, and non-goals (post-adversarial)
 - [Roadmap](./planning/roadmap.md) - Live PatchForge Core roadmap (P4–P5)
-- [Scout Vision](./planning/scout-vision.md) - Long-term vision for the second product line (frozen)
+- [Scout Vision](./planning/scout-vision.md) - Long-term vision for Scout as a separate future product line (frozen) — not the internal Scout pipeline stage below
 - [Issue Registry](./planning/issue-registry.md) - Tracked issues with ACs, priorities, and dependencies
 - [ADR-0003: Product Contract](./adr/ADR-0003-product-contract.md) - Binding repository safety contract and patch lifecycle
 - [Quality Gate](./QUALITY_GATE.md) - Pre-merge checklist

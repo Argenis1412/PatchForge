@@ -42,7 +42,7 @@ Scout **does not detect problems**. It **understands problems**. Detection belon
 
 ### Architecture (conceptual)
 
-```
+```text
 Repository
     │
     ▼
@@ -77,7 +77,7 @@ These cuts came out of the adversarial review of the initial Scout proposal. The
 
 Scout's real long-term value is not analyzing the *current state* of a repo — every scanner does that. It's analyzing the *historical behavior* of the repo. Every Core run leaves data. Over time an accumulated ledger of per-file behavior becomes something no static scanner can compete with:
 
-```
+```text
 providers.py
   changed        34 times
   failures       5
