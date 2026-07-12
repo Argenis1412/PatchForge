@@ -27,6 +27,10 @@ Resolve these during the Clarifier step before writing the ADR — do not pre-de
 
 - **Relationship to `IssueInput`:** does `IssueContract` subsume `IssueInput`, compose it, or coexist alongside it as a separate abstraction layer? `IssueInput` is markdown-frontmatter-specific (title, severity, labels, body, raw); `IssueContract` is meant to be source-agnostic. The ADR must decide this explicitly.
 - **Versioning:** ADR-0004 restricts `schema_version: int` to `RunMetadata` only — intermediate/inter-stage schemas are explicitly out of scope for that field (see `docs/context/CONTEXT.md` Invariant #3, and ADR-0004 §2 "Which schemas carry it"). `IssueContract` does **not** get a `schema_version` field unless ADR-0005 explicitly extends ADR-0004's scope — which is itself a decision the ADR must make consciously, not by default.
+- **Source-neutrality (mandatory constraint for ADR-0005):** `IssueContract` must achieve representational completeness across markdown / GitHub API / Scout **without encoding source in the DTO**. This is required to preserve Invariant #9 (meaning equals representation; provenance and meaning are orthogonal — see CONTEXT.md L206).
+  - **Prohibited:** any field like `source: Literal["markdown", "github", "scout"]` or any equivalent origin discriminator. A `source` field would make the same DTO shape mean different things depending on which producer emitted it — precisely what Invariant #9 forbids.
+  - **Permitted:** optional fields whose semantics is "this datum may not exist for this work item". **Not permitted:** optional fields whose semantics is "this datum absent because it came from source X".
+  - **Effort caveat:** Roadmap estimates 2–3d. Re-estimate at issue opening if the source-neutrality resolution forces more than one hosted schema (e.g., adapter types outside `IssueContract` itself).
 
 ## Preconditions
 
