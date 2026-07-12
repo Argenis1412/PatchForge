@@ -31,7 +31,7 @@ Post-P3 we recognize two distinct products that share the pipeline but answer di
 
 ## Design Pattern: Determinism First, AI Interprets
 
-The strongest Core ideas share a shape: **deterministic infrastructure with LLMs reserved for interpretation, never for control flow.** Provider Registry, Ledger, Audit Bundle, Approval Provenance, Test Selection — none require an LLM. Risk Gates use LLMs minimally. Only Feedback Loop and AC Compiler admit LLM juicio, and both are structured so a deterministic path always exists.
+The strongest Core ideas share a shape: **deterministic infrastructure with LLMs reserved for interpretation, never for control flow.** Provider Registry, Ledger, Audit Bundle, Approval Provenance, Test Selection — none require an LLM. Risk Gates use LLMs minimally. Only Feedback Loop and AC Compiler admit LLM judgment, and both are structured so a deterministic path always exists.
 
 This is not a preference — it's how PatchForge stays auditable at enterprise scale.
 
@@ -87,8 +87,8 @@ Full issue inventory in `docs/planning/issue-registry.md`. Full timeline in `doc
 - **Goal:** Two additive `RunMetadata` fields — `triggered_by` and `approved_by` — captured from `github.actor` in CI and `git config user.*` locally. PR body includes the provenance line.
 - **Impact:** Medium-high for enterprise (separation of duties). Formalizes the human gate the thesis already requires.
 - **Effort:** 3–5 days.
-- **Risk:** Aditivo con default (no schema-version bump per ADR-0004). Refuerza la tesis en vez de tocarla.
-- **Cuts:** Registro, no policy. Autorización (quién *puede* aprobar) es territorio de GitHub branch protection / CODEOWNERS.
+- **Risk:** Additive with default (no schema-version bump per ADR-0004). Reinforces the thesis rather than modifying it.
+- **Cuts:** Record only, not policy. Authorization (who *may* approve) is GitHub branch protection / CODEOWNERS territory.
 
 ---
 
@@ -110,7 +110,7 @@ Full issue inventory in `docs/planning/issue-registry.md`. Full timeline in `doc
 - **Impact:** High friction reduction. Preview cost for a 1-file change: ~150s → <30s.
 - **Effort:** 1–2 weeks.
 - **Risk:** Highest of P5. The full suite must remain the gate for anything ending in apply/PR (thesis constraint). Mitigation: pre-filter opt-in only.
-- **Cuts:** Deterministic import graph only (no LLM, no coverage history, no ML). Conservative degradation: conftest tocado / imports dinámicos / archivos no-Python → full suite automática.
+- **Cuts:** Deterministic import graph only (no LLM, no coverage history, no ML). Conservative degradation: touched conftest / dynamic imports / non-Python files → automatic full suite.
 
 ### 3. Executor Feedback Loop (idea 3)
 - **Goal:** `ExecutorDiagnosis` DTO per failed task, classifying the failure into a typed enum. V1 emits deterministic types only.
