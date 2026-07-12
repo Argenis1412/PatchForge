@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-07-11 | Session: Issue #221 (post-P3 roadmap consolidation)
+> Last updated: 2026-07-12 | Session: Issue #223 (validator PATH fix)
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 714 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 719 passed, 1 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3). `SqliteCircuitBreakerStore` is now thread-safe (issue #219).
 
@@ -167,6 +167,7 @@ tests/                     (27 test files, 695+ tests)
 | 151 | Validator timeout config + feedback | CLI `--validator-timeout`, env var, per-tool spinner, `timed_out` field |
 | 159 | Fix empty `patch.diff` on re-execution of `preview` | Staging cleanup + empty-patch guard (#160) |
 | 006 | `safety.py` docstrings | Module + private helper docstrings (#161) |
+| 223 | Validator: resolve ruff/pytest via `sys.executable -m` | Fixes PATH lookup failure on Windows without `.venv` |
 
 ---
 
@@ -240,6 +241,7 @@ These must not change without a new ADR in `docs/adr/`:
 - ✅ Issue #159 — Fix empty `patch.diff` on re-execution of `preview` (#160)
 - ✅ Exp 006 — `safety.py` docstrings (#161)
 - ✅ Formalize Experiment Schema (debt P2→P3)
+- ✅ Issue #223 — Validator PATH resolution via `sys.executable -m` (#224)
 
 ### P3 — Async Workers & CI/CD Integration
 - ✅ B6 — Risk Gate Audit Trail (#118)
@@ -266,6 +268,12 @@ These must not change without a new ADR in `docs/adr/`:
 - ✅ Issue #212 — Close verified tech debt: 7 entries marked ✅, harden ci apply (`git add -A` → targeted staging via `parse_diff_files`), centralize `PROJECT_ROOT` in `orchestrator/paths.py`
 
 **Recent:**
+- ✅ Issue #223 — Validator PATH resolution via `sys.executable -m` (2026-07-12, PR #224): `run_ruff()`/`run_pytest()`
+  defaults in `runners.py` changed from bare `["ruff", ...]`/`["pytest", ...]` to `[sys.executable, "-m", "ruff", ...]`/
+  `[sys.executable, "-m", "pytest", ...]`. Fixes `VALIDATION_FAILED` false negatives on Windows clones without a
+  `.venv`, where the system `PATH` lacks Python's `Scripts\` dir. `cmd_override` and existing venv auto-discovery
+  (`_build_env_with_venv`, Issue #155) are unaffected — the guard now naturally skips venv-PATH injection since
+  `sys.executable` is always absolute. Verified end-to-end via Dogfooding 009 (fresh clone, no `.venv`, Windows).
 - ✅ Issue #210 — Executor new-file creation support (2026-07-09): `_apply_task()` no longer
   rejects files that don't exist on disk. When a file is missing from both the project root
   and staging, it sets `original_content=""`, uses a dedicated `_build_create_prompt()`, and
