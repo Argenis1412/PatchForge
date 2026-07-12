@@ -3,6 +3,7 @@
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -23,6 +24,8 @@ IGNORE_DIRS = [
     ".ruff_cache",
     ".pytest_cache",
 ]
+
+_PYTEST_DEFAULT = [sys.executable, "-m", "pytest", ".", "--tb=short", "-q"]
 
 
 def _resolve_cmd(cmd_override: list[str] | None, default: list[str]) -> list[str]:
@@ -157,11 +160,11 @@ def run_ruff(
     if staging_dir is not None and staging_dir.is_dir():
         staged_files = _collect_staged_files(staging_dir)
         if staged_files:
-            cmd = _resolve_cmd(cmd_override, ["ruff", "check"])
+            cmd = _resolve_cmd(cmd_override, [sys.executable, "-m", "ruff", "check"])
             cmd.extend(str(sf) for sf in staged_files)
             env = _build_env_with_venv(project_root) if not Path(cmd[0]).is_absolute() else None
             return _run(cmd, project_root, "ruff", run_id, timeout=timeout, env=env)
-    cmd = _resolve_cmd(cmd_override, ["ruff", "check", "."])
+    cmd = _resolve_cmd(cmd_override, [sys.executable, "-m", "ruff", "check", "."])
     if ignore_dirs:
         for d in ignore_dirs:
             cmd.append(f"--extend-exclude={d}")
@@ -187,13 +190,13 @@ def run_pytest(
             overlay_root = _create_overlay(
                 project_root, staging_dir, effective_ignore, Path(tmpdir)
             )
-            cmd = _resolve_cmd(cmd_override, ["pytest", ".", "--tb=short", "-q"])
+            cmd = _resolve_cmd(cmd_override, _PYTEST_DEFAULT)
             if ignore_dirs:
                 for d in ignore_dirs:
                     cmd.append(f"--ignore={d}")
             env = _build_env_with_venv(project_root) if not Path(cmd[0]).is_absolute() else None
             return _run(cmd, overlay_root, "pytest", run_id, timeout=timeout, env=env)
-    cmd = _resolve_cmd(cmd_override, ["pytest", ".", "--tb=short", "-q"])
+    cmd = _resolve_cmd(cmd_override, _PYTEST_DEFAULT)
     if ignore_dirs:
         for d in ignore_dirs:
             cmd.append(f"--ignore={d}")

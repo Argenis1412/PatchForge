@@ -38,7 +38,7 @@ Most AI coding tools optimize for speed. PatchForge optimizes for trust — chan
 ## Current Status
 
 - **Phase:** P4 — Trust & Configuration (P0/P1/P2/P3 complete)
-- **QA:** pytest 714 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+- **QA:** pytest 716 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 - [Roadmap](./docs/planning/roadmap.md) | [Full project context](./docs/context/CONTEXT.md)
 
 ## Quickstart

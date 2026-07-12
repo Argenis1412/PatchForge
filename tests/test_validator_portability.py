@@ -148,7 +148,8 @@ def test_run_pytest_no_ignore_when_ignore_dirs_empty(tmp_path):
 
 
 @pytest.mark.unit
-def test_run_ruff_injects_venv_env_bare_cmd(tmp_path):
+def test_run_ruff_no_venv_injection_with_default_cmd(tmp_path):
+    """Default cmd uses sys.executable (absolute), so venv injection is skipped."""
     venv_bin = tmp_path / ".venv" / "bin"
     venv_bin.mkdir(parents=True)
     captured = {}
@@ -159,6 +160,23 @@ def test_run_ruff_injects_venv_env_bare_cmd(tmp_path):
 
     with patch("subprocess.run", side_effect=fake_run):
         run_ruff("r1", tmp_path)
+
+    assert captured["env"] is None
+
+
+@pytest.mark.unit
+def test_run_ruff_injects_venv_env_bare_cmd_override(tmp_path):
+    """A bare (non-absolute) cmd_override still gets venv injection."""
+    venv_bin = tmp_path / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    captured = {}
+
+    def fake_run(cmd, cwd, capture_output, text, timeout, env=None):
+        captured["env"] = env
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    with patch("subprocess.run", side_effect=fake_run):
+        run_ruff("r1", tmp_path, cmd_override=["ruff", "check", "."])
 
     assert captured["env"] is not None
     assert str(venv_bin) in captured["env"]["PATH"]
@@ -182,7 +200,8 @@ def test_run_ruff_no_venv_injection_with_absolute_cmd(tmp_path):
 
 
 @pytest.mark.unit
-def test_run_pytest_injects_venv_env_bare_cmd(tmp_path):
+def test_run_pytest_no_venv_injection_with_default_cmd(tmp_path):
+    """Default cmd uses sys.executable (absolute), so venv injection is skipped."""
     venv_bin = tmp_path / ".venv" / "bin"
     venv_bin.mkdir(parents=True)
     captured = {}
@@ -193,6 +212,23 @@ def test_run_pytest_injects_venv_env_bare_cmd(tmp_path):
 
     with patch("subprocess.run", side_effect=fake_run):
         run_pytest("r1", tmp_path)
+
+    assert captured["env"] is None
+
+
+@pytest.mark.unit
+def test_run_pytest_injects_venv_env_bare_cmd_override(tmp_path):
+    """A bare (non-absolute) cmd_override still gets venv injection."""
+    venv_bin = tmp_path / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    captured = {}
+
+    def fake_run(cmd, cwd, capture_output, text, timeout, env=None):
+        captured["env"] = env
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    with patch("subprocess.run", side_effect=fake_run):
+        run_pytest("r1", tmp_path, cmd_override=["pytest", ".", "--tb=short", "-q"])
 
     assert captured["env"] is not None
     assert str(venv_bin) in captured["env"]["PATH"]
@@ -221,7 +257,8 @@ def test_run_pytest_no_venv_injection_with_absolute_cmd(tmp_path):
 
 
 @pytest.mark.unit
-def test_run_ruff_staging_injects_venv_env(tmp_path):
+def test_run_ruff_staging_no_venv_injection_with_default_cmd(tmp_path):
+    """sys.executable is absolute, so venv injection is skipped in staging."""
     venv_bin = tmp_path / ".venv" / "bin"
     venv_bin.mkdir(parents=True)
     staging_dir = tmp_path / "staging"
@@ -236,8 +273,7 @@ def test_run_ruff_staging_injects_venv_env(tmp_path):
     with patch("subprocess.run", side_effect=fake_run):
         run_ruff("r1", tmp_path, staging_dir=staging_dir)
 
-    assert captured["env"] is not None
-    assert str(venv_bin) in captured["env"]["PATH"]
+    assert captured["env"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -266,7 +302,8 @@ def test_run_pytest_overlay_forwards_ignore_dirs(tmp_path):
 
 
 @pytest.mark.unit
-def test_run_pytest_overlay_injects_venv_env(tmp_path):
+def test_run_pytest_overlay_no_venv_injection_with_default_cmd(tmp_path):
+    """sys.executable is absolute, so venv injection is skipped in overlay."""
     venv_bin = tmp_path / ".venv" / "bin"
     venv_bin.mkdir(parents=True)
     staging_dir = tmp_path / "staging"
@@ -282,8 +319,7 @@ def test_run_pytest_overlay_injects_venv_env(tmp_path):
     with patch("subprocess.run", side_effect=fake_run):
         run_pytest("r1", tmp_path, staging_dir=staging_dir)
 
-    assert captured["env"] is not None
-    assert str(venv_bin) in captured["env"]["PATH"]
+    assert captured["env"] is None
 
 
 # ---------------------------------------------------------------------------
