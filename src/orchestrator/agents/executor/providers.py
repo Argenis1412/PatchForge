@@ -55,14 +55,15 @@ _coord_store: SqliteCircuitBreakerStore | None = None
 _cb_gemini: CircuitBreaker | None = None
 _cb_openrouter: CircuitBreaker | None = None
 _cb_claude: CircuitBreaker | None = None
+_cb_initialized: bool = False
 _init_lock = threading.Lock()
 
 
 def _init_circuit_breakers() -> None:
     """Lazy-init shared store + circuit breakers on first use (not at import time)."""
-    global _coord_store, _cb_gemini, _cb_openrouter, _cb_claude  # noqa: PLW0603
+    global _coord_store, _cb_gemini, _cb_openrouter, _cb_claude, _cb_initialized  # noqa: PLW0603
     with _init_lock:
-        if _coord_store is not None:
+        if _cb_initialized:
             return
         db_dir_env = os.getenv("PATCHFORGE_DATA_DIR")
         coord_db_dir = Path(db_dir_env) if db_dir_env is not None else Path.home() / ".patchforge"
@@ -70,6 +71,7 @@ def _init_circuit_breakers() -> None:
         _cb_gemini = circuit_breaker_for("gemini", store=_coord_store)
         _cb_openrouter = circuit_breaker_for("openrouter", store=_coord_store)
         _cb_claude = circuit_breaker_for("claude", store=_coord_store)
+        _cb_initialized = True
 
 
 # ---------------------------------------------------------------------------
