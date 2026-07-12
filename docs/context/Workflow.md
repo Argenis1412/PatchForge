@@ -18,13 +18,7 @@ git commit -m "<type>(<scope>): <message>"
 git checkout -b <type>/issue-<N>-<slug>
 ```
 
-## Current Project Status (Jun 8, 2026)
-
-- **V1 complete:** 16/16 issues implemented
-- **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
-- **Commands:** `doctor` ✅ · `scan` ✅ · `plan` ✅ · `preview` ✅ · `apply` ✅ · `run` ❌ deprecated
-- **QA:** `ruff check .` → 0 errors · `pytest` → 481 pass, 2 skip
-- **Next:** Phase 2 blockers (T-01 through T-07)
+> Live project status lives in [CONTEXT.md](CONTEXT.md). This document covers process only.
 
 ---
 
@@ -62,6 +56,9 @@ Rules:
 7. Run **AI: Adversarial Reviewer**
 8. Wait for approval
 9. Create branch: `git checkout -b <type>/issue-<N>-<slug>`
+
+> **Phase docs:** Before opening a GitHub issue for a P4/P5 item, start from the per-item doc under `docs/planning/p4/` (or `p5/` when available).
+
 10. Implement
 11. Run **AI: Diff Reviewer**
 12. Add/update tests if needed
@@ -224,10 +221,10 @@ Before each commit run:
 ```bash
 ruff check .                     # must return 0 errors
 ruff format --check .            # must return clean
-pytest -v                        # 481 passed, 2 skipped
+pytest -v
 ```
 
-Current status: `ruff check .` → **0 errors** across the entire repository. `pytest` → **481 passed, 2 skipped**. Keep it that way.
+All three commands must pass before any commit. Do not create commits if QA fails.
 
 Report format:
 

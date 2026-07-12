@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-07-12 | Session: Issue #223 (validator PATH fix)
+> Last updated: 2026-07-12
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -262,6 +262,7 @@ These must not change without a new ADR in `docs/adr/`:
 
 ### Planning
 - ✅ Issue #221 — Post-P3 roadmap consolidation (2026-07-11): new `docs/planning/roadmap.md` (Core P4–P5 with agreed cuts + explicit Deferred section) and `docs/planning/scout-vision.md` (Scout frozen as second product line). Live docs (index, README, CLAUDE.md, CONTEXT.md, thesis) repointed; obsolete P3 sprint prompts and superseded roadmaps removed.
+- ✅ P4 planning scaffold (2026-07-12): `docs/planning/p4/` created with README + 5 per-item docs (steps, difficulty, scope, branch/commit).
 
 ### Tech Debt Closure
 - ✅ Issue #219 — CB thread-safety gaps pre-P3 (#219): `_sqlite_connect()` opt-in `check_same_thread=False` + `SqliteCircuitBreakerStore._conn_lock`; `_registry_lock` in `circuit_breaker_for()`; `_init_lock` in `providers._init_circuit_breakers()`. Lock ordering documented. 2 regression tests.
@@ -362,6 +363,7 @@ PatchForge ships a reusable GitHub Actions workflow (`workflow_call`) that any r
 | `docs/context/discoveries.md` | Technical debt discovered during implementation |
 | `docs/planning/issue-registry.md` | Full issue inventory (P0–P5) with status, scope, and acceptance criteria |
 | `docs/planning/roadmap.md` | Live PatchForge Core roadmap (P4–P5) with strategic rationale |
+| `docs/planning/p4/` | Per-item planning docs for P4 (scope, difficulty, steps, branch/commit) |
 | `docs/planning/scout-vision.md` | Long-term vision for Scout as a second product line (frozen) |
 | `docs/product-thesis-v2.md` | Product definition, non-goals, artifact contract |
 
