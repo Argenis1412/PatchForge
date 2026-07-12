@@ -1,8 +1,10 @@
-# Issue Registry — PatchForge Phase 2 & Beyond
+# Issue Registry — PatchForge Core
 
-> **Date:** 2026-06-30
-> **Source:** Roadmap decomposition (`roadmap-phase2.md`) + adversarial audit (`adversarial-audit.md`)
-> **Total:** 22 issues (18 completed, 0 specified, 2 scoped but needing detailed ACs)
+> **Date:** 2026-07-11
+> **Source:** `docs/planning/roadmap.md` (Core P4–P5) + `docs/planning/adversarial-audit.md` (P0–P2 provenance)
+> Live inventory of PatchForge Core issues with status, priority, and preconditions. P4/P5 entries are terse — full ACs are written when each becomes a GitHub issue.
+
+> **Note on historical entries:** `Source:` lines on completed issues point at the doc that was live when the issue was created. Some of those docs have been retired (`roadmap-phase2.md`, `dogfooding-vision.md`, `issue-a-design.md`) — the references stay verbatim as historical record. Only new entries reference the current `roadmap.md`.
 
 ---
 
@@ -521,62 +523,114 @@ ADR-0004 must answer exactly five questions:
 | 2 | No `--force-provider` in `ci` command | `ci.py` | Low — debugging tool for interactive use, not needed for automated CI runs |
 | 3 | `latest` Docker tag in workflow default | `patchforge-pipeline.yml:26` | Low — callers can pin via `patchforge-image` input; version-tagged publishing a separate issue |
 
-### Asymmetric Risk Gates (Light)
-- **Priority:** P3 | **Status:** 📐 Scoped
-- **Goal:** Low-risk changes (`.md`, templates) → auto-PR; high-risk changes (schemas, core logic) → manual approval.
+### ✅ Issue #198 — Asymmetric Risk Gates (Light)
+- **Priority:** P3 | **Status:** ✅ **Completed** | **PR:** #199
+- **Goal:** Informational `auto_apply_eligible` field on `RunMetadata` computed via shared `compute_auto_apply_eligible()` in `artifacts.py`. Low-risk changes flagged as auto-PR eligible; high-risk require manual review. `DEFAULT_TIMEOUT` bumped 300→450s (D-004 remediation).
 - **Source:** `roadmap-phase2.md`
-- **Precondition:** CI/CD Integration complete
+
+### ✅ Issue #171 — GitHub Actions Pipeline Workflow
+- **Priority:** P3 | **Status:** ✅ **Completed**
+- **Goal:** `.github/workflows/patchforge-pipeline.yml` reusable `workflow_call` + `patchforge-on-label.yml` thin caller for PatchForge's own repo.
+
+### ✅ Issue #212 — Tech Debt Closure + CI Apply Hardening
+- **Priority:** P3 | **Status:** ✅ **Completed**
+- **Goal:** Close 7 verified `discoveries.md` entries; replace `git add -A` in ci.py with targeted staging via `parse_diff_files()`; centralize `PROJECT_ROOT` in `orchestrator/paths.py`.
+
+### ✅ Issue #219 — CB Thread-Safety Gaps Pre-P3
+- **Priority:** P3 tech-debt closure | **Status:** ✅ **Completed** | **PR:** #220
+- **Goal:** `_sqlite_connect()` opt-in `check_same_thread=False` + `SqliteCircuitBreakerStore._conn_lock`; `_registry_lock` in `circuit_breaker_for()`; `_init_lock` in `providers._init_circuit_breakers()`. Lock ordering documented. 2 regression tests.
 
 ---
 
-## P4 — Advanced Guardrails
+## P4 — Trust & Configuration
 
-### Qualitative Risk Gates
+> Order of implementation defined in `docs/planning/roadmap.md`. Each entry becomes a full-AC GitHub issue at pickup time.
+
+### Qualitative Risk Gates (idea 2)
 - **Priority:** P4 | **Status:** 📐 Scoped
-- **Goal:** Classify risks by file type (e.g., `schemas/` = HIGH, `tests/` = LOW). Connect to async worker flow.
-- **Source:** `roadmap-phase2.md`
-- **Precondition:** Asymmetric Risk Gates complete
+- **Goal:** Extend `check_plan_gate()` with a file-semantic taxonomy (`schemas/*` = HIGH, `tests/*` = LOW, etc.) so `auto_apply_eligible` uses richer criteria than `DANGEROUS_PATTERNS`.
+- **Source:** `docs/planning/roadmap.md`
+- **Precondition:** None (extends #198 asymmetric risk gates).
+- **Non-goals:** No auto-merge/auto-apply real execution; no code semantics interpretation (Scout territory); no `pipeline.py` changes.
+
+### IssueContract ADR (idea 6)
+- **Priority:** P4 | **Status:** 📐 Scoped
+- **Goal:** ADR-0005 + `IssueContract` schema in `schemas/issue.py` defining the canonical issue representation across all three sources (human markdown, GitHub API, future Scout). Round-trip stable, DTO pure. No pipeline consumer changes in this issue.
+- **Source:** `docs/planning/roadmap.md`
+- **Precondition:** None.
+- **Non-goals:** No adapter implementation (GitHub Issue → IssueContract) yet; no Scout code; no pipeline consumption.
+
+### Provider Registry (idea 9)
+- **Priority:** P4 | **Status:** 📐 Scoped
+- **Goal:** Make the models in `providers.py` configurable via a `providers` section in `orchestrator.json`, with current constants as defaults. Model appears in `run.json` for audit.
+- **Source:** `docs/planning/roadmap.md`
+- **Precondition:** None.
+- **Non-goals:** No new providers or custom endpoints; no multi-model cost table; no changes to fallback chain or risk-level routing. Override of Claude records `cost_llm: null` + warning rather than a wrong number.
+
+### Audit Bundle Export (idea 7)
+- **Priority:** P4 | **Status:** 📐 Scoped
+- **Goal:** `patchforge export-audit <run_id>` produces `audit-<run_id>.tar.gz` + `manifest.json` with SHA-256 of every artifact, PatchForge version, `schema_version`, providers used, `commit_anchor`, timestamp. Optional GPG signing via `--sign`. `--verify` recomputes hashes.
+- **Source:** `docs/planning/roadmap.md`
+- **Precondition:** Provider Registry complete (audit manifest must record the exact model used).
+- **Non-goals:** No upload to external services (S3, artifact registries); no multi-run chain of custody; no RFC 3161 timestamping.
+
+### Approval Provenance (idea 10)
+- **Priority:** P4 | **Status:** 📐 Scoped
+- **Goal:** Two additive `RunMetadata` fields — `triggered_by` and `approved_by` — captured from `github.actor` in CI and `git config user.*` locally. PR body includes the provenance line. Additive with default per ADR-0004 (no `schema_version` bump).
+- **Source:** `docs/planning/roadmap.md`
+- **Precondition:** None (independent; strong synergy with Audit Bundle).
+- **Non-goals:** No authorization policy or role checks; no multi-person approval flow; no cryptographic identity verification (GPG on commits already covers that per Invariant #6).
 
 ---
 
-## P5 — Formalization
+## P5 — Learning Pipeline
 
-### Experiment Framework & Metrics
+### Experiment Ledger (idea 4)
 - **Priority:** P5 | **Status:** 📐 Scoped
-- **Goal:** Track success rates, diff accuracy, and failure modes over multiple experiments.
-- **Source:** `roadmap-phase2.md`
-- **Precondition:** Experiment 001 complete
+- **Goal:** Persist an `ExperimentRecord` per run in `experiments.db` (SQLite via `_sqlite_connect()`). `patchforge stats [--last N]` reports success rate, top failure types, avg cost, avg duration.
+- **Source:** `docs/planning/roadmap.md`
+- **Precondition:** None. Append-only; `failure_types` field stays empty until Feedback Loop lands.
+- **Non-goals:** No dashboards or graphical visualization; no external metric services (Prometheus, Datadog); no trend analysis or prediction (deferred as analytics half of Experiment Framework).
 
-### Defense in Depth (Auto-seeding)
+### Impacted-Test Selection (idea 8)
 - **Priority:** P5 | **Status:** 📐 Scoped
+- **Goal:** Two-level validation. `preview --fast-validation` runs only tests importing the changed files (via deterministic reverse import graph). `apply` and `ci` always run the full suite. `validation.json` records `scope: "impacted"` and the selected subset.
+- **Source:** `docs/planning/roadmap.md`
+- **Precondition:** None.
+- **Non-goals:** No replacement of the full suite on any path ending in apply/PR (thesis guarantee); no coverage history or ML-based selection — deterministic import graph only; no pytest parallelization (single-threaded validator invariant preserved).
+
+### Executor Feedback Loop (idea 3)
+- **Priority:** P5 | **Status:** 📐 Scoped
+- **Goal:** `ExecutorDiagnosis` DTO per failed task, classifying via a typed enum. V1 emits deterministic types (`SYNTAX_INVALID`, `FILE_NOT_FOUND`, `PROVIDER_UNAVAILABLE`) + `UNCLASSIFIED` for the rest. Full 6-value enum defined for future LLM classifier.
+- **Source:** `docs/planning/roadmap.md`
+- **Precondition:** Ledger (feeds `failure_types`).
+- **Non-goals:** No automatic retry logic — classifies only; no LLM classifier in V1; no `suggested_ac_refinement` field; no changes to the Architect contract.
+
+### AC Compiler (idea 5)
+- **Priority:** P5 | **Status:** 📐 Scoped
+- **Goal:** Enrich `IssueInput` ACs with file/symbol anchors resolved deterministically via `ast.parse()` and symbol search, producing a `CompiledIssue` that *composes* `IssueContract`.
+- **Source:** `docs/planning/roadmap.md`
+- **Precondition:** IssueContract ADR complete (`CompiledIssue` composes it).
+- **Non-goals:** Deterministic-only in V1 — only anchors ACs that literally name a symbol or path; no semantic prose→construct mapping (that's Scout territory, not a future extension); no auto-generated DO-NOT constraints; no linting or rejection of vague issues.
+
+---
+
+## Deferred (with explicit conditions)
+
+### TypeScript Support Spike (idea 11)
+- **Priority:** Deferred | **Status:** 📐 Spike-scoped
+- **Goal:** 1–2 page inventory of every pipeline point that assumes Python + one manual E2E run against a small TS repo via `--issue-file`. Go/no-go decision based on the spike.
+- **Precondition:** All of P4/P5 complete.
+- **Non-goals:** No implementation commitment from the spike itself; no scanner TS support in any case (scan stays Python-only); no other languages until TS validates the generalization path.
+
+### Defense in Depth (Auto-seeding characterization tests)
+- **Priority:** Deferred | **Status:** 📐 Scoped
 - **Goal:** Auto-seed characterization tests for uncovered code; shadow patching for untestable legacy functions.
-- **Source:** `roadmap-phase2.md`
-- **Precondition:** Empirical evidence from dogfooding reveals real failure modes
+- **Source:** `docs/planning/roadmap.md` (Deferred section; preserves the original deferral documented since P2)
+- **Precondition:** Empirical evidence from dogfooding of a real test-zero legacy repo reveals concrete failure modes. Not driven by intuition.
 
----
-
-## Appendix: Dependency Chain
-
-```
-P0                     P1           P2 entry              P2              P3            P4       P5
-───                    ──           ────────              ──              ──            ──       ──
-T-02 ──────────────────────────────────────────────────────────────────────────────────────────
-T-01 ──────────────────────────────────────────────────────────────────────────────────────────
-T-07 ──────────────────────────────────────────────────────────────────────────────────────────
-Issue A ─────────────> Issue B ──> ADR-01/1 ─> ADR-01/2 ─> ADR-01/3 ─>
-                                    │                       │
-                                    │                       └──> Exp Schema ──> Exp 001 ──>
-                                    │                                       │
-                                    │                                       └──> Formalize Experiment ──>
-                                    │
-                                    └──> (Known debt: "RunMetadata only" expires at P3)
-                                                                             │
-                                                                             └──> Docker ──> CI/CD ──> Risk Gates ──>
-                                                                                                                      │
-                                                                                                                      └──> Qual Risk Gates ──>
-                                                                                                                                           │
-                                                                                                                                           └──> Exp Framework ──> Defense in Depth
-```
-
-**Sequential constraint:** A → B means B requires A as input, precondition, or dependency.
-**Unconstrained items** (T-02, T-01, T-07) are independent and may be implemented in any order.
+### Experiment Framework & Metrics — analytics half
+- **Priority:** Deferred | **Status:** 📐 Scoped
+- **Goal:** Trend tracking, prediction, dashboarding over the `experiments.db` ledger. Half of the original P5 Experiment Framework whose persistence + CLI-reporting half ships as the Ledger (P5-1).
+- **Source:** `docs/planning/roadmap.md` (Deferred section; supersedes the original P5 Experiment Framework entry)
+- **Precondition:** Ledger complete + enough historical runs accumulated to justify the investment.

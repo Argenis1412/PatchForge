@@ -14,8 +14,9 @@ Repository → Scan → Plan → Patch → Validation → Apply
 
 - [README](../README.md) - Project overview and quickstart
 - [Product Thesis](./product-thesis-v2.md) - Product definition, artifact contract, and non-goals (post-adversarial)
-- [Product Roadmap](./ROADMAP.md) - Phased plan toward the reviewable patch workflow
-- [Issue Registry](./planning/issue-registry.md) - Tracked issues with ACs, priorities, and dependencies (ADR-01 decomposed)
+- [Roadmap](./planning/roadmap.md) - Live PatchForge Core roadmap (P4–P5)
+- [Scout Vision](./planning/scout-vision.md) - Long-term vision for Scout as a separate future product line (frozen) — not the internal Scout pipeline stage below
+- [Issue Registry](./planning/issue-registry.md) - Tracked issues with ACs, priorities, and dependencies
 - [ADR-0003: Product Contract](./adr/ADR-0003-product-contract.md) - Binding repository safety contract and patch lifecycle
 - [Quality Gate](./QUALITY_GATE.md) - Pre-merge checklist
 
@@ -70,12 +71,12 @@ Design and architecture decisions are documented in Architecture Decision Record
 
 ## Current Status
 
-- V1 complete: 5 commands (`doctor`, `scan`, `plan`, `preview`, `apply`).
-- Current phase: P2 Dogfooding & Hardening.
-- QA: pytest 481 passed, 2 skipped | ruff 0 errors.
+- V1, P0, P1, P2, P3 complete.
+- Current phase: P4 — Trust & Configuration.
+- QA: pytest 714 passed, 2 skipped | ruff 0 errors.
 
-See [Phase 2 Roadmap](./planning/roadmap-phase2.md) for current priorities and
-[Product Roadmap](./ROADMAP.md) for the full phased plan.
+See the [Roadmap](./planning/roadmap.md) for current priorities and
+[Scout Vision](./planning/scout-vision.md) for the long-term second product line.
 
 ## Getting Started
 
