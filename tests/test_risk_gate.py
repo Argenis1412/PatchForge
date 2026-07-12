@@ -19,6 +19,7 @@ from orchestrator.risk import (
     DANGEROUS_PATTERNS,
     _is_code_gen,
     _is_dangerous,
+    _taxonomy_risk,
     check_patch_gate,
     check_plan_gate,
 )
@@ -498,3 +499,109 @@ class TestCodeGenRiskFloor:
         assert task.risk_level == "medium"
         assert result.passed is False
         assert any("medium-risk" in r for r in result.reasons)
+
+
+# ── File-semantic taxonomy (issue #226) ─────────────────────────────────────
+
+
+class TestTaxonomyRisk:
+    def test_schemas_classified_high(self):
+        assert _taxonomy_risk("schemas/user.py") == "high"
+
+    def test_nested_schemas_classified_high(self):
+        assert _taxonomy_risk("src/orchestrator/schemas/config.py") == "high"
+
+    def test_migrations_classified_high(self):
+        assert _taxonomy_risk("migrations/0001_initial.py") == "high"
+
+    def test_tests_classified_low(self):
+        assert _taxonomy_risk("tests/test_foo.py") == "low"
+
+    def test_nested_tests_classified_low(self):
+        assert _taxonomy_risk("tests/unit/test_bar.py") == "low"
+
+    def test_docs_classified_low(self):
+        assert _taxonomy_risk("docs/readme.md") == "low"
+
+    def test_config_classified_medium(self):
+        assert _taxonomy_risk("config/settings.py") == "medium"
+
+    def test_scripts_classified_medium(self):
+        assert _taxonomy_risk("scripts/deploy.sh") == "medium"
+
+    def test_unclassified_returns_none(self):
+        assert _taxonomy_risk("src/main.py") is None
+
+    def test_windows_backslash_normalized(self):
+        assert _taxonomy_risk("tests\\unit\\test_foo.py") == "low"
+
+
+class TestTaxonomyPlanGate:
+    def test_taxonomy_high_escalates_low_task(self):
+        meta = _run_meta(risk_budget="medium")
+        task = _task(files=["schemas/user.py"], risk_level="low")
+        arch = _arch_output([task])
+        result = check_plan_gate(meta, arch)
+        assert task.risk_level == "high"
+        assert result.passed is False
+        assert any("taxonomy:" in r and "high" in r for r in result.reasons)
+
+    def test_taxonomy_medium_escalates_low_task(self):
+        meta = _run_meta(risk_budget="medium")
+        task = _task(files=["config/settings.yaml"], risk_level="low")
+        arch = _arch_output([task])
+        check_plan_gate(meta, arch)
+        assert task.risk_level == "medium"
+
+    def test_taxonomy_low_does_not_downgrade_high(self):
+        meta = _run_meta(risk_budget="medium")
+        task = _task(files=["tests/Dockerfile"], risk_level="low")
+        arch = _arch_output([task])
+        result = check_plan_gate(meta, arch)
+        assert task.risk_level == "high"
+        assert result.passed is False
+
+    def test_taxonomy_does_not_change_unclassified_files(self):
+        meta = _run_meta(risk_budget="medium")
+        task = _task(files=["src/main.py"], risk_level="low")
+        arch = _arch_output([task])
+        check_plan_gate(meta, arch)
+        assert task.risk_level == "medium"  # code-gen floor, not taxonomy
+
+    def test_backward_compat_dangerous_patterns_unchanged(self):
+        """All DANGEROUS_PATTERNS files produce identical results with taxonomy."""
+        for pattern in DANGEROUS_PATTERNS:
+            path = pattern + "ci.yml" if pattern.endswith("/") else pattern
+            meta = _run_meta(risk_budget="medium")
+            task = _task(files=[path], risk_level="low")
+            arch = _arch_output([task])
+            result = check_plan_gate(meta, arch)
+            assert task.risk_level == "high", f"Expected high for {path}"
+            assert result.passed is False, f"Expected blocked for {path}"
+
+    def test_mutation_persists_after_gate_returns(self):
+        meta = _run_meta(risk_budget="medium")
+        task = _task(files=["schemas/models.py"], risk_level="low")
+        arch = _arch_output([task])
+        check_plan_gate(meta, arch)
+        assert arch.implementation_plan[0].risk_level == "high"
+
+    def test_audit_trail_reason_includes_taxonomy_source(self):
+        meta = _run_meta(risk_budget="medium")
+        task = _task(files=["schemas/user.py"], risk_level="low")
+        arch = _arch_output([task])
+        result = check_plan_gate(meta, arch)
+        taxonomy_reasons = [r for r in result.reasons if r.startswith("taxonomy:")]
+        assert len(taxonomy_reasons) >= 1
+        assert "schemas/user.py" in taxonomy_reasons[0]
+        assert "high" in taxonomy_reasons[0]
+
+    def test_composition_taxonomy_low_plus_dangerous_pattern(self):
+        """tests/Dockerfile: taxonomy says LOW (tests/), DANGEROUS_PATTERNS says HIGH."""
+        meta = _run_meta(risk_budget="medium")
+        task = _task(files=["tests/Dockerfile"], risk_level="low")
+        arch = _arch_output([task])
+        result = check_plan_gate(meta, arch)
+        assert task.risk_level == "high"
+        infra_reasons = [r for r in result.reasons if "infrastructure" in r]
+        assert len(infra_reasons) == 1

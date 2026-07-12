@@ -33,6 +33,35 @@ DANGEROUS_PATTERNS: set[str] = {
 }
 
 
+# ── File-semantic taxonomy (P4 — qualitative risk gates) ────────────────────
+
+_RISK_ORDER = {"low": 0, "medium": 1, "high": 2}
+
+FILE_TAXONOMY: dict[str, str] = {
+    "schemas/": "high",
+    "migrations/": "high",
+    "alembic/": "high",
+    "src/orchestrator/schemas/": "high",
+    "config/": "medium",
+    "scripts/": "medium",
+    "tests/": "low",
+    "docs/": "low",
+}
+
+
+def _taxonomy_risk(path: str) -> str | None:
+    """Return the taxonomy risk tier for *path*, or None if no rule matches.
+
+    Uses normalized forward-slash prefix matching, consistent with
+    ``_is_dangerous()`` path handling.
+    """
+    normalized = path.replace("\\", "/")
+    for prefix, tier in FILE_TAXONOMY.items():
+        if normalized.startswith(prefix) or f"/{prefix}" in f"/{normalized}":
+            return tier
+    return None
+
+
 def _is_dangerous(path: str) -> bool:
     """Return True if *path* matches a known infrastructure file or directory.
 
@@ -73,6 +102,15 @@ def check_plan_gate(
             if _is_dangerous(f):
                 task.risk_level = "high"
                 reasons.append(f"File {f} is infrastructure — escalated to high risk")
+
+    # File-semantic taxonomy — escalate if taxonomy tier is higher than current
+    for task in architect_output.implementation_plan:
+        for f in task.files_to_modify:
+            tier = _taxonomy_risk(f)
+            if tier and _RISK_ORDER.get(tier, 0) > _RISK_ORDER.get(task.risk_level, 0):
+                old = task.risk_level
+                task.risk_level = tier
+                reasons.append(f"taxonomy: {f} → {tier} (was {old})")
 
     # Code-gen floor — low-risk code tasks escalate to medium
     for task in architect_output.implementation_plan:
