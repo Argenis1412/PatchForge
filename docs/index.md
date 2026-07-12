@@ -17,6 +17,7 @@ Repository → Scan → Plan → Patch → Validation → Apply
 - [Roadmap](./planning/roadmap.md) - Live PatchForge Core roadmap (P4–P5)
 - [Scout Vision](./planning/scout-vision.md) - Long-term vision for Scout as a separate future product line (frozen) — not the internal Scout pipeline stage below
 - [Issue Registry](./planning/issue-registry.md) - Tracked issues with ACs, priorities, and dependencies
+- [P4 Planning Docs](./planning/p4/README.md) - Per-item scope, difficulty, steps for P4 items
 - [ADR-0003: Product Contract](./adr/ADR-0003-product-contract.md) - Binding repository safety contract and patch lifecycle
 - [Quality Gate](./QUALITY_GATE.md) - Pre-merge checklist
 
