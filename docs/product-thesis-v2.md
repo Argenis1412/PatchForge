@@ -87,7 +87,7 @@ The innovation is not autonomy — it is that **the same pipeline used by users 
 | Non-goal | Why |
 |---|---|
 | **Autonomous self-improvement without human review** | The pipeline requires human diff review before apply. This is not a technical limitation — it is the product thesis. |
-| **Execution on repositories without tests** | PatchForge validates against `pytest`. Without tests, there is no validation. Defense in Depth (auto-seeding characterization tests) is P4 on the roadmap but does not exist today. |
+| **Execution on repositories without tests** | PatchForge validates against `pytest`. Without tests, there is no validation. Defense in Depth (auto-seeding characterization tests) is Deferred on the current roadmap pending empirical evidence from a real test-zero legacy repo. |
 | **Monolithic `run` command** | No command chains plan+apply automatically. The separation is intentional: the human must approve the plan before any diff is generated. |
 | **Natural language Issue interpretation** | Issue Contracts with structured ACs (Issue B) are P1 on the roadmap. Today PatchForge operates on files, not free text. |
 | **Cross-version artifact compatibility without ADR** | ADR-01 must be resolved before P2. Until then, artifacts are only valid within the same PatchForge version that produced them. |
