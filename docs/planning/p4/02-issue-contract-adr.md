@@ -52,7 +52,7 @@ None.
 3. Add `IssueContract` schema in `schemas/issue.py`. Pure DTO — no `schema_version` field unless the ADR explicitly decided otherwise in step 1.
 4. Round-trip stability test in `tests/test_issue_schema.py`: `IssueContract.model_validate_json(m.model_dump_json()) == m` for a validly-constructed instance (per Invariant #2 in CONTEXT.md).
 5. Update `docs/index.md` Decision Records table with the ADR-0005 entry.
-6. Confirm zero pipeline consumer wiring — no other file should import or reference `IssueContract` yet.
+6. Confirm zero pipeline/runtime consumer wiring — no file outside the ADR, schema definition, tests, and docs should import or reference `IssueContract`.
 
 ## Branch & commit
 
@@ -63,8 +63,9 @@ Suggested commit prefix: `docs(adr): …` for the ADR, `feat(schemas): …` for 
 
 Full ACs written in GitHub issue at pickup time (Clarifier → AC Challenger → Adversarial Reviewer flow).
 Minimum bar before merge:
-- Roadmap Cuts respected (no adapter, no Scout code, no consumer wiring).
+- Roadmap Cuts respected (no adapter, no Scout code, no pipeline/runtime consumer wiring).
 - ADR explicitly resolves the IssueContract/IssueInput relationship and the versioning scope question.
+- Source-neutrality enforced: `IssueContract` represents markdown, GitHub API, and Scout inputs without an origin discriminator field. A test verifies no `source` field or equivalent source-specific semantics are introduced.
 - QA gate green (`ruff check .` + `ruff format --check .` + `pytest`).
 - Round-trip stability test passes.
 - `docs/context/CONTEXT.md` "Completed" section updated in same PR.

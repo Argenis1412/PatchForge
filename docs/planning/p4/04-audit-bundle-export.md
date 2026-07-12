@@ -14,7 +14,7 @@ No tool in this space produces a compliance-grade export of a run's provenance. 
 - Manifest: **structural mirror of `RunMetadata`** (embeds full `RunMetadata.model_dump()` output — see architectural note below) + bundle-native metadata: SHA-256 of every artifact in `runs/<run_id>/`, PatchForge version, `commit_anchor`, UTC timestamp.
 - Optional GPG signing.
 
-**Precondition on run state (audit-grade property):** `export-audit` rejects runs whose `RunMetadata.lifecycle_state` is not terminal. Terminal candidates: `applied`, `failed`, `rolled_back` (final list decided at Clarifier). Non-terminal runs exit with a specific error code. **No repo lock is acquired** — Invariant #3 already guarantees per-artifact atomicity via WAL; the terminality precondition is what closes the gap for "audit-grade" (a run mid-flight can still have artifacts being rewritten between the first and last read of the export). This is the contract that makes the audit-grade property enforceable rather than aspirational.
+**Precondition on run state (audit-grade property):** `export-audit` rejects runs that are not in a terminal state. Note: `RunMetadata.lifecycle_state` is `PatchLifecycleState` (values: `VALID`, `REBASEABLE`, `CONFLICT`, `STALE`) — these classify the **patch**, not the **run**. Run completion is tracked by `apply_status: Optional[str]` (a free-form string today). The terminality check must use the run-level state fields (`apply_status` and/or a combination of existing fields), not `lifecycle_state` alone. Terminal conditions to accept (e.g., `apply_status` in `{"applied", "failed", "rolled_back"}`) must be defined during Clarifier once the existing `apply_status` values are enumerated from actual run data. Non-terminal runs exit with a specific error code. **No repo lock is acquired** — Invariant #3 already guarantees per-artifact atomicity via WAL; the terminality precondition is what closes the gap for "audit-grade" (a run mid-flight can still have artifacts being rewritten between the first and last read of the export). This is the contract that makes the audit-grade property enforceable rather than aspirational.
 
 See `roadmap.md` §P4-4 for the full Goal/Impact/Cuts text.
 
@@ -55,7 +55,7 @@ The manifest embeds the full `RunMetadata.model_dump()` output rather than enume
 
 1. Confirm item 3 (Provider Registry) has landed — the manifest's `RunMetadata` mirror will include the per-role model tracking automatically (see architectural note above).
 2. New CLI command `patchforge export-audit <run_id>` in `commands/export_audit.py`.
-3. Check `RunMetadata.lifecycle_state` for the target run — abort with a specific error code if it is not terminal (see precondition in Scope).
+3. Check run-level terminal state (via `apply_status` and/or other run-state fields — see precondition in Scope) — abort with a specific error code if the run is not complete.
 4. Define the manifest wrapper: bundle-native metadata (SHA-256 of every artifact in `runs/<run_id>/`, PatchForge version, `commit_anchor`, UTC timestamp) + full `RunMetadata.model_dump()` embed. **Do not** enumerate individual RunMetadata fields — the mirror pattern is the point.
 5. Produce `audit-<run_id>.tar.gz` containing the run's artifacts + `manifest.json`.
 6. Optional `--sign` flag: GPG detached signature on `manifest.json`.

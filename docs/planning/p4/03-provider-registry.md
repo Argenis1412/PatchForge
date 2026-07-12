@@ -21,11 +21,11 @@ See `roadmap.md` §P4-3 for the full Goal/Impact/Cuts text.
 - No new providers or custom endpoints (roadmap: "Model field only — no custom endpoints, no plugin providers").
 - No multi-model cost table.
 - No changes to the fallback chain logic or risk-level routing (`_PROVIDER_CHAIN` selection by risk stays as-is — only the model names inside become overridable).
-- Overriding Claude records `cost_llm: null` + a warning rather than computing a wrong cost number (roadmap Cuts, verbatim).
+- Overriding Claude's model must not record a wrong cost number. The roadmap says "records `cost_llm: null` + a warning" — but `cost_llm` does not exist today (see Open questions). The normative behavior depends on how `cost_llm` is resolved during Clarifier.
 
 ## Open questions
 
-- **`cost_llm` field:** confirmed absent from the codebase as of this writing (no matches in `src/`) — it does not currently exist as a field anywhere, not just on `RunMetadata`. The roadmap's "records `cost_llm: null`" cut implies this field needs to be added as part of this item, or the cut needs to be re-scoped. Resolve during Clarifier: is `cost_llm` a new field, and if so, where does it live and does it require a schema_version consideration under ADR-0004?
+- **`cost_llm` field contract (must resolve before implementation):** confirmed absent from the codebase as of this writing (no matches in `src/`). The roadmap's "records `cost_llm: null`" cut implies this field must be added. Resolve during Clarifier: (a) where does it live (`RunMetadata`? a per-role record?), (b) does adding it require a `schema_version` bump under ADR-0004 (answer: no, if additive with default `None`), and (c) is adding it in-scope for this item or a precondition to define separately? Until resolved, the Claude-override implementation steps (step 7) and related test assertions are blocked on this decision.
 - Config schema location: `TargetConfig` in `src/orchestrator/schemas/config.py` (confirmed to exist at line 72) is the most likely owner of the `providers` section, but confirm during Clarifier whether `orchestrator.json` maps to `TargetConfig` directly or through another layer.
 
 ## Preconditions
@@ -50,7 +50,7 @@ None.
 5. Update `providers.py` so the enumerated constants become fallback values — every import site now resolves through config first, falling back to the hardcoded default.
 6. Record the chosen model per role in `RunMetadata` for audit (this is what item 4's manifest reads).
 7. Cost-attribution edge case: overriding Claude's model records `cost_llm: null` + a warning rather than a wrong number — implement per the open question above's resolution.
-8. Tests: default path (no `providers` key in config → current behavior unchanged), explicit override (config model wins), Claude-override warning path.
+8. Tests: default path (no `providers` key in config → current behavior unchanged, assert per-role model values in `RunMetadata` match hardcoded defaults), explicit override (config model wins, assert per-role model values in `RunMetadata` reflect the override), Claude-override warning path (per `cost_llm` resolution).
 
 ## Branch & commit
 

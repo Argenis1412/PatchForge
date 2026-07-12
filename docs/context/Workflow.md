@@ -221,7 +221,7 @@ Before each commit run:
 ```bash
 ruff check .                     # must return 0 errors
 ruff format --check .            # must return clean
-pytest -v                        # 481 passed, 2 skipped
+pytest -v
 ```
 
 All three commands must pass before any commit. Do not create commits if QA fails.

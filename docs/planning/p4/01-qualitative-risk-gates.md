@@ -10,9 +10,9 @@
 
 ## Scope
 
-- File-semantic taxonomy: a mapping from path patterns to risk tiers (HIGH/MEDIUM/LOW), configurable, with sensible defaults matching the roadmap examples (`schemas/*` = HIGH, `tests/*` = LOW).
+- File-semantic taxonomy: a mapping from path patterns to risk tiers (HIGH/MEDIUM/LOW), configurable. The taxonomy is only active when configuration is explicitly provided — there are no hardcoded defaults that fire without user opt-in.
 - `check_plan_gate()` consults the taxonomy in addition to `DANGEROUS_PATTERNS` — additive, not a replacement.
-- Backward compatibility: no taxonomy config present → current gate behavior is byte-identical.
+- Backward compatibility: no taxonomy config present → no taxonomy classification runs → gate behavior is byte-identical to current.
 
 See `roadmap.md` §P4-1 for the full Goal/Impact/Cuts text.
 
@@ -21,7 +21,7 @@ See `roadmap.md` §P4-1 for the full Goal/Impact/Cuts text.
 - No `pipeline.py` changes (roadmap: "touches `risk.py`... but not `pipeline.py`").
 - No ADR required (roadmap: "No ADR needed").
 - No semantic code interpretation (that's Scout territory, not Core — see `roadmap.md` "Two Product Lines").
-- No auto-merge or auto-apply execution change — this only affects the informational classification, not what the pipeline does with it.
+- No auto-merge or auto-apply execution change — however, taxonomy escalation mutates `task.risk_level` and adds failure reasons via `check_plan_gate()`, which can change gate outcomes and downstream lifecycle behavior. This item does not modify `compute_auto_apply_eligible()` itself, but elevated risk_levels flow through to it indirectly.
 
 ## Open questions
 
