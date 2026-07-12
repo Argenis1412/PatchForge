@@ -25,6 +25,8 @@ IGNORE_DIRS = [
     ".pytest_cache",
 ]
 
+_PYTEST_DEFAULT = [sys.executable, "-m", "pytest", ".", "--tb=short", "-q"]
+
 
 def _resolve_cmd(cmd_override: list[str] | None, default: list[str]) -> list[str]:
     cmd = list(cmd_override) if cmd_override is not None else list(default)
@@ -188,15 +190,13 @@ def run_pytest(
             overlay_root = _create_overlay(
                 project_root, staging_dir, effective_ignore, Path(tmpdir)
             )
-            default = [sys.executable, "-m", "pytest", ".", "--tb=short", "-q"]
-            cmd = _resolve_cmd(cmd_override, default)
+            cmd = _resolve_cmd(cmd_override, _PYTEST_DEFAULT)
             if ignore_dirs:
                 for d in ignore_dirs:
                     cmd.append(f"--ignore={d}")
             env = _build_env_with_venv(project_root) if not Path(cmd[0]).is_absolute() else None
             return _run(cmd, overlay_root, "pytest", run_id, timeout=timeout, env=env)
-    default = [sys.executable, "-m", "pytest", ".", "--tb=short", "-q"]
-    cmd = _resolve_cmd(cmd_override, default)
+    cmd = _resolve_cmd(cmd_override, _PYTEST_DEFAULT)
     if ignore_dirs:
         for d in ignore_dirs:
             cmd.append(f"--ignore={d}")
