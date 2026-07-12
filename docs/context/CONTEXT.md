@@ -260,6 +260,11 @@ These must not change without a new ADR in `docs/adr/`:
 
 **P3 closure items remaining:** None — all P3 items complete.
 
+### P4 — Trust & Configuration
+- ✅ Issue #226 — Qualitative Risk Gates (2026-07-12): file-semantic taxonomy in `check_plan_gate()` classifies
+  files by path-prefix (`schemas/*` = HIGH, `tests/*` = LOW, etc.) as additive layer on `DANGEROUS_PATTERNS`.
+  Taxonomy tiers only escalate (never downgrade). Audit trail reasons include escalation source. 18 new tests.
+
 ### Planning
 - ✅ Issue #221 — Post-P3 roadmap consolidation (2026-07-11): new `docs/planning/roadmap.md` (Core P4–P5 with agreed cuts + explicit Deferred section) and `docs/planning/scout-vision.md` (Scout frozen as second product line). Live docs (index, README, CLAUDE.md, CONTEXT.md, thesis) repointed; obsolete P3 sprint prompts and superseded roadmaps removed.
 - ✅ P4 planning scaffold (2026-07-12): `docs/planning/p4/` created with README + 5 per-item docs (steps, difficulty, scope, branch/commit).
