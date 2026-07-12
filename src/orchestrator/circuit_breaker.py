@@ -71,15 +71,14 @@ class CircuitBreaker:
     ``fn()`` is ALWAYS executed with the lock released — network calls must
     not block other threads' state transitions.
 
-    Documented limitations (NOT closed by this lock):
+    Lock ordering (must always be acquired in this order to prevent deadlock):
+        _init_lock → _registry_lock → CB._lock → store._conn_lock
 
-    1. ``SqliteCircuitBreakerStore`` thread-affinity: the underlying
-       ``sqlite3.Connection`` is created via ``_sqlite_connect()`` without
-       ``check_same_thread=False``. SQLite raises ``ProgrammingError`` on
-       any access from a thread other than the creator, regardless of any
-       Python-level lock. A CircuitBreaker backed by the production
-       SQLite store is safe only when called from the store's creator
-       thread.
+    Documented limitations:
+
+    1. ``SqliteCircuitBreakerStore`` thread-affinity: RESOLVED (issue #219).
+       The store now passes ``check_same_thread=False`` to ``_sqlite_connect()``
+       and serializes all connection access with ``store._conn_lock``.
     2. ``fn()``-masking window: because ``fn()`` runs unlocked, a
        concurrent thread's outcome handler (``_on_success``/``_on_failure``)
        can transition state between one thread's ``fn()`` returning and
@@ -87,12 +86,10 @@ class CircuitBreaker:
        outcome can therefore mask another (e.g. a success can reset
        counters just incremented by a concurrent failure). This lock
        provides atomicity of individual transitions, not linearizability
-       of concurrent outcomes.
-    3. ``circuit_breaker_for()`` registry race: the module-level
-       ``_registry`` check-then-set is unguarded. Two threads racing the
-       same never-seen provider can construct two distinct instances,
-       each with its own lock — the two locks provide no mutual exclusion
-       against each other.
+       of concurrent outcomes. Accepted by design.
+    3. ``circuit_breaker_for()`` registry race: RESOLVED (issue #219).
+       The module-level ``_registry`` check-then-set is now guarded by
+       ``_registry_lock``, ensuring a single instance per provider name.
 
     Internal invariant: _half_open_in_flight is ALWAYS False when
     _state is CLOSED or OPEN. It is only True transiently when
@@ -377,6 +374,7 @@ class CircuitBreaker:
 # ---------------------------------------------------------------------------
 
 _registry: dict[str, CircuitBreaker] = {}
+_registry_lock = threading.Lock()
 
 
 def circuit_breaker_for(
@@ -395,11 +393,12 @@ def circuit_breaker_for(
     When store is None an in-process _InMemoryCircuitBreakerStore is used
     (backwards-compatible behaviour for callers that predate B4).
     """
-    if provider_name not in _registry:
-        _registry[provider_name] = CircuitBreaker(
-            provider_name,
-            store if store is not None else _InMemoryCircuitBreakerStore(),
-            failure_threshold,
-            recovery_timeout,
-        )
-    return _registry[provider_name]
+    with _registry_lock:
+        if provider_name not in _registry:
+            _registry[provider_name] = CircuitBreaker(
+                provider_name,
+                store if store is not None else _InMemoryCircuitBreakerStore(),
+                failure_threshold,
+                recovery_timeout,
+            )
+        return _registry[provider_name]

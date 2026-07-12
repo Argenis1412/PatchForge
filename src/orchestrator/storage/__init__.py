@@ -24,10 +24,20 @@ from .artifact_store import ArtifactStore, DurabilityLevel, WriteResult
 from .local_store import LocalArtifactStore
 
 
-def _sqlite_connect(db_path: Path, *, timeout: float = 30.0) -> sqlite3.Connection:
+def _sqlite_connect(
+    db_path: Path, *, timeout: float = 30.0, check_same_thread: bool = True
+) -> sqlite3.Connection:
     """Canonical SQLite connection factory. Always enables WAL mode and autocommit.
-    Never call sqlite3.connect() directly — always use this factory."""
-    conn = sqlite3.connect(str(db_path), timeout=timeout, isolation_level=None)
+    Never call sqlite3.connect() directly — always use this factory.
+
+    Pass check_same_thread=False only for long-lived connections that will be
+    accessed from multiple threads AND are protected by a Python-level lock."""
+    conn = sqlite3.connect(
+        str(db_path),
+        timeout=timeout,
+        isolation_level=None,
+        check_same_thread=check_same_thread,
+    )
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=30000")

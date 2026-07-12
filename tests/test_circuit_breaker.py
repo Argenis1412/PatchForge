@@ -590,3 +590,75 @@ def test_concurrent_failures_consistent_count():
 
     assert cb._consecutive_failures == n_threads
     assert cb.state is CircuitBreakerState.CLOSED
+
+
+# ---------------------------------------------------------------------------
+# Test 16 — SqliteCircuitBreakerStore cross-thread access
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_sqlite_store_cross_thread(tmp_path):
+    """Store created on main thread is safely used from worker threads.
+
+    Regression test for the check_same_thread=False + _conn_lock fix.
+    Before the fix, any worker-thread call to get_state()/set_state()
+    raised sqlite3.ProgrammingError.
+    """
+    from orchestrator.storage.lock import SqliteCircuitBreakerStore
+
+    store = SqliteCircuitBreakerStore(tmp_path)
+    errors: list[Exception] = []
+
+    def worker(i: int) -> None:
+        try:
+            store.set_state(f"p{i}", {"state": "CLOSED", "failures": i})
+            result = store.get_state(f"p{i}")
+            assert result is not None
+            assert result["failures"] == i
+        except Exception as exc:
+            errors.append(exc)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [pool.submit(worker, i) for i in range(4)]
+        for f in futures:
+            f.result()
+
+    assert errors == [], f"cross-thread store access raised: {errors}"
+
+
+# ---------------------------------------------------------------------------
+# Test 17 — circuit_breaker_for() returns the same instance under contention
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_registry_singleton_under_contention():
+    """8 threads racing circuit_breaker_for() for the same provider all get the same instance.
+
+    Regression test for the _registry_lock fix. Before the fix, two threads
+    could each pass the 'not in _registry' check and create two distinct
+    CircuitBreaker objects with independent locks.
+    """
+    import orchestrator.circuit_breaker as cb_module
+
+    provider = "test-provider-race"
+    results: list[int] = []
+
+    def worker() -> None:
+        cb = cb_module.circuit_breaker_for(provider)
+        results.append(id(cb))
+
+    try:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = [pool.submit(worker) for _ in range(8)]
+            for f in futures:
+                f.result()
+
+        assert len(set(results)) == 1, (
+            f"expected 1 unique instance, got {len(set(results))}: {set(results)}"
+        )
+        assert provider in cb_module._registry
+    finally:
+        with cb_module._registry_lock:
+            cb_module._registry.pop(provider, None)

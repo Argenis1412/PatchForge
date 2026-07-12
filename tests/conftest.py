@@ -22,6 +22,7 @@ def _reset_circuit_breakers(tmp_path):
         providers._cb_gemini = circuit_breaker_for("gemini", store=providers._coord_store)
         providers._cb_openrouter = circuit_breaker_for("openrouter", store=providers._coord_store)
         providers._cb_claude = circuit_breaker_for("claude", store=providers._coord_store)
+        providers._cb_initialized = True
 
     yield
     try:
