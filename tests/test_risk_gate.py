@@ -535,6 +535,16 @@ class TestTaxonomyRisk:
     def test_windows_backslash_normalized(self):
         assert _taxonomy_risk("tests\\unit\\test_foo.py") == "low"
 
+    def test_overlapping_prefixes_resolve_to_max_tier(self):
+        """tests/config/settings.py matches both tests/ (low) and config/
+        (medium) — the result must be the higher tier regardless of
+        FILE_TAXONOMY dict insertion order."""
+        assert _taxonomy_risk("tests/config/settings.py") == "medium"
+
+    def test_overlapping_prefixes_high_wins_over_low(self):
+        """tests/schemas/foo.py matches tests/ (low) and schemas/ (high)."""
+        assert _taxonomy_risk("tests/schemas/foo.py") == "high"
+
 
 class TestTaxonomyPlanGate:
     def test_taxonomy_high_escalates_low_task(self):
@@ -605,3 +615,28 @@ class TestTaxonomyPlanGate:
         assert task.risk_level == "high"
         infra_reasons = [r for r in result.reasons if "infrastructure" in r]
         assert len(infra_reasons) == 1
+
+    def test_multiple_files_at_same_max_tier_each_recorded(self):
+        """Two files independently matching the HIGH tier within one task
+        must each produce their own audit-trail reason, not just the first."""
+        meta = _run_meta(risk_budget="medium")
+        task = _task(files=["schemas/user.py", "migrations/0001_initial.py"], risk_level="low")
+        arch = _arch_output([task])
+        result = check_plan_gate(meta, arch)
+        assert task.risk_level == "high"
+        taxonomy_reasons = [r for r in result.reasons if r.startswith("taxonomy:")]
+        assert len(taxonomy_reasons) == 2
+        assert any("schemas/user.py" in r for r in taxonomy_reasons)
+        assert any("migrations/0001_initial.py" in r for r in taxonomy_reasons)
+
+    def test_lower_tier_match_not_logged_when_already_at_higher_tier(self):
+        """A file matching a lower taxonomy tier than another file in the same
+        task must not produce a misleading 'downgrade' reason."""
+        meta = _run_meta(risk_budget="medium")
+        task = _task(files=["schemas/user.py", "tests/helper.py"], risk_level="low")
+        arch = _arch_output([task])
+        result = check_plan_gate(meta, arch)
+        assert task.risk_level == "high"
+        taxonomy_reasons = [r for r in result.reasons if r.startswith("taxonomy:")]
+        assert len(taxonomy_reasons) == 1
+        assert "tests/helper.py" not in taxonomy_reasons[0]
