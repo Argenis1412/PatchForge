@@ -556,7 +556,7 @@ ADR-0004 must answer exactly five questions:
 
 ### ✅ Issue #228: IssueContract ADR (idea 6)
 - **Priority:** P4 | **Status:** ✅ **Completed**
-- **PR:** _pending_
+- **PR:** #229
 - **Goal:** ADR-0005 + `IssueContract` schema in `schemas/issue.py` defining the canonical issue representation across all three sources (human markdown, GitHub API, future Scout). Round-trip stable, DTO pure. No pipeline consumer changes in this issue.
 - **Source:** `docs/planning/roadmap.md`
 - **Precondition:** None.
