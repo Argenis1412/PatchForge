@@ -264,6 +264,10 @@ These must not change without a new ADR in `docs/adr/`:
 - ✅ Issue #226 — Qualitative Risk Gates (2026-07-12): file-semantic taxonomy in `check_plan_gate()` classifies
   files by path-prefix (`schemas/*` = HIGH, `tests/*` = LOW, etc.) as additive layer on `DANGEROUS_PATTERNS`.
   Taxonomy tiers only escalate (never downgrade). Audit trail reasons include escalation source. 18 new tests.
+- ✅ Issue #228 — IssueContract ADR (2026-07-13): ADR-0005 defines `IssueContract`, the canonical
+  source-agnostic issue schema for future GitHub API and Scout sources. Coexists with `IssueInput`
+  (no adapter/pipeline wiring). `extra="forbid"`, no origin discriminator or free-form metadata dict,
+  no defaults on semantic fields, `schema_version` deferred as Known Debt. 6 new tests.
 
 ### Planning
 - ✅ Issue #221 — Post-P3 roadmap consolidation (2026-07-11): new `docs/planning/roadmap.md` (Core P4–P5 with agreed cuts + explicit Deferred section) and `docs/planning/scout-vision.md` (Scout frozen as second product line). Live docs (index, README, CLAUDE.md, CONTEXT.md, thesis) repointed; obsolete P3 sprint prompts and superseded roadmaps removed.
