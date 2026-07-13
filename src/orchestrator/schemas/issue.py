@@ -7,13 +7,14 @@ Frontmatter uses a naive YAML-subset parser — no external dependencies.
 from __future__ import annotations
 
 __all__ = [
+    "IssueContract",
     "IssueInput",
     "parse_issue_markdown",
 ]
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class IssueInput(BaseModel):
@@ -22,6 +23,21 @@ class IssueInput(BaseModel):
     labels: list[str] = []
     body: str
     raw: str
+
+
+class IssueContract(BaseModel):
+    """Canonical, source-agnostic issue representation. See ADR-0005.
+
+    Coexists with ``IssueInput`` (the markdown-parser output type); no
+    adapter or pipeline wiring exists yet.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    description: str
+    severity: Literal["low", "medium", "high"]
+    labels: list[str] = []
 
 
 def parse_issue_markdown(content: str) -> IssueInput:

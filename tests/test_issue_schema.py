@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from orchestrator.schemas.issue import IssueInput, parse_issue_markdown
+from orchestrator.schemas.issue import IssueContract, IssueInput, parse_issue_markdown
 
 
 class TestParseIssueMarkdown:
@@ -148,3 +148,76 @@ class TestIssueInputSchema:
     def test_rejects_invalid_severity(self):
         with pytest.raises(ValidationError):
             IssueInput(body="test", raw="test", severity="critical")  # type: ignore
+
+
+class TestIssueContractSchema:
+    """See ADR-0005: source-neutrality and fail-loud constraints on IssueContract."""
+
+    def _sample(self) -> IssueContract:
+        return IssueContract(
+            title="Fix connection pooling",
+            description="Connections leak under load.",
+            severity="high",
+            labels=["bug", "performance"],
+        )
+
+    def test_extra_field_rejected(self):
+        with pytest.raises(ValidationError):
+            IssueContract(
+                title="t",
+                description="d",
+                severity="low",
+                source="github",  # type: ignore[call-arg]
+            )
+
+    def test_no_source_discriminator_field(self):
+        blacklist = {"source", "origin", "producer", "channel", "from_", "feed_type"}
+        assert blacklist.isdisjoint(IssueContract.model_fields.keys())
+
+    def test_roundtrip_stability(self):
+        inst = self._sample()
+        assert IssueContract.model_validate_json(inst.model_dump_json()) == inst
+
+    def test_no_json_incompatible_types(self):
+        import typing
+
+        json_native_origins = {list, dict, typing.Literal}
+        json_native_leaves = {str, int, float, bool, type(None)}
+
+        def is_json_compatible(annotation) -> bool:
+            origin = typing.get_origin(annotation)
+            if origin is None:
+                return annotation in json_native_leaves
+            if origin not in json_native_origins:
+                return False
+            if origin is typing.Literal:
+                return all(type(arg) in json_native_leaves for arg in typing.get_args(annotation))
+            return all(is_json_compatible(arg) for arg in typing.get_args(annotation))
+
+        for name, field in IssueContract.model_fields.items():
+            assert is_json_compatible(field.annotation), (
+                f"field {name!r} has non-JSON-native annotation {field.annotation!r}"
+            )
+
+    def test_title_has_no_default(self):
+        with pytest.raises(ValidationError):
+            IssueContract(description="d", severity="low")  # type: ignore[call-arg]
+
+    def test_input_representable_as_contract(self):
+        issue_input = IssueInput(
+            title="Fix connection pooling",
+            severity="high",
+            labels=["bug", "performance"],
+            body="Connections leak under load.",
+            raw="---\ntitle: Fix connection pooling\n---\nConnections leak under load.",
+        )
+        contract = IssueContract(
+            title=issue_input.title,
+            description=issue_input.body,
+            severity=issue_input.severity,
+            labels=issue_input.labels,
+        )
+        assert contract.title == issue_input.title
+        assert contract.description == issue_input.body
+        assert contract.severity == issue_input.severity
+        assert contract.labels == issue_input.labels
