@@ -546,9 +546,10 @@ ADR-0004 must answer exactly five questions:
 
 > Order of implementation defined in `docs/planning/roadmap.md`. Each entry becomes a full-AC GitHub issue at pickup time.
 
-### Qualitative Risk Gates (idea 2)
-- **Priority:** P4 | **Status:** 📐 Scoped
-- **Goal:** Extend `check_plan_gate()` with a file-semantic taxonomy (`schemas/*` = HIGH, `tests/*` = LOW, etc.) so `auto_apply_eligible` uses richer criteria than `DANGEROUS_PATTERNS`.
+### ✅ Issue #226: Qualitative Risk Gates (idea 2)
+- **Priority:** P4 | **Status:** ✅ **Completed**
+- **PR:** #227
+- **Goal:** Extend `check_plan_gate()` with a file-semantic taxonomy (`schemas/*` = HIGH, `tests/*` = LOW, etc.) so risk classification uses richer criteria than `DANGEROUS_PATTERNS`.
 - **Source:** `docs/planning/roadmap.md`
 - **Precondition:** None (extends #198 asymmetric risk gates).
 - **Non-goals:** No auto-merge/auto-apply real execution; no code semantics interpretation (Scout territory); no `pipeline.py` changes.

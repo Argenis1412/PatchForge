@@ -33,6 +33,38 @@ DANGEROUS_PATTERNS: set[str] = {
 }
 
 
+# ── File-semantic taxonomy (P4 — qualitative risk gates) ────────────────────
+
+_RISK_ORDER = {"low": 0, "medium": 1, "high": 2}
+
+FILE_TAXONOMY: dict[str, str] = {
+    "schemas/": "high",
+    "migrations/": "high",
+    "alembic/": "high",
+    "src/orchestrator/schemas/": "high",
+    "config/": "medium",
+    "scripts/": "medium",
+    "tests/": "low",
+    "docs/": "low",
+}
+
+
+def _taxonomy_risk(path: str) -> str | None:
+    """Return the highest taxonomy risk tier for *path*, or None if no rule matches.
+
+    Uses normalized forward-slash prefix matching, consistent with
+    ``_is_dangerous()`` path handling. All matching prefixes are considered —
+    the result is the highest tier among them, independent of dict insertion
+    order (e.g. ``tests/config/settings.py`` matches both ``tests/`` and
+    ``config/``; the higher tier, ``medium``, wins).
+    """
+    normalized = "/" + path.replace("\\", "/")
+    matched_tiers = [tier for prefix, tier in FILE_TAXONOMY.items() if f"/{prefix}" in normalized]
+    if not matched_tiers:
+        return None
+    return max(matched_tiers, key=lambda t: _RISK_ORDER[t])
+
+
 def _is_dangerous(path: str) -> bool:
     """Return True if *path* matches a known infrastructure file or directory.
 
@@ -73,6 +105,23 @@ def check_plan_gate(
             if _is_dangerous(f):
                 task.risk_level = "high"
                 reasons.append(f"File {f} is infrastructure — escalated to high risk")
+
+    # File-semantic taxonomy — escalate to the highest taxonomy tier among the
+    # task's files, if that tier outranks the current risk_level. All files
+    # that matched the escalating tier are recorded (not just the first),
+    # consistent with the DANGEROUS_PATTERNS loop above.
+    for task in architect_output.implementation_plan:
+        matches = [(f, _taxonomy_risk(f)) for f in task.files_to_modify]
+        matches = [(f, tier) for f, tier in matches if tier is not None]
+        if not matches:
+            continue
+        max_tier = max((tier for _, tier in matches), key=lambda t: _RISK_ORDER[t])
+        if _RISK_ORDER[max_tier] > _RISK_ORDER.get(task.risk_level, 0):
+            old = task.risk_level
+            task.risk_level = max_tier
+            for f, tier in matches:
+                if tier == max_tier:
+                    reasons.append(f"taxonomy: {f} → {max_tier} (was {old})")
 
     # Code-gen floor — low-risk code tasks escalate to medium
     for task in architect_output.implementation_plan:
