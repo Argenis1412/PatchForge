@@ -32,6 +32,7 @@ def _reset_circuit_breakers(tmp_path):
             cb.reset()
     except (ImportError, AttributeError):
         pass
+    providers._resolved_models = {}
 
 
 @pytest.fixture
