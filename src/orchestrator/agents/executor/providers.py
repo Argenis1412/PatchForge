@@ -7,6 +7,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from orchestrator.circuit_breaker import (
     CircuitBreaker,
@@ -20,6 +21,9 @@ from orchestrator.storage.lock import SqliteCircuitBreakerStore
 
 from .logging import _get_logger
 
+if TYPE_CHECKING:
+    from orchestrator.schemas.config import TargetConfig
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -32,6 +36,41 @@ COST_PER_1M_INPUT_CLAUDE = 3.00
 COST_PER_1M_OUTPUT_CLAUDE = 15.00
 
 MAX_RETRIES = 1
+
+_DEFAULT_MODELS: dict[str, str] = {
+    "gemini": MODEL_GEMINI,
+    "openrouter": MODEL_OPENROUTER,
+    "claude": MODEL_CLAUDE,
+}
+
+_resolved_models: dict[str, str] = {}
+
+
+def init_provider_models(config: TargetConfig | None) -> dict[str, str]:
+    """Resolve models from config, falling back to hardcoded defaults. Call once per run."""
+    global _resolved_models  # noqa: PLW0603
+    if config is None or not hasattr(config, "providers"):
+        _resolved_models = dict(_DEFAULT_MODELS)
+        return _resolved_models
+    resolved = {}
+    for name, default in _DEFAULT_MODELS.items():
+        provider_cfg = getattr(config.providers, name, None)
+        if provider_cfg and provider_cfg.model:
+            resolved[name] = provider_cfg.model
+        else:
+            resolved[name] = default
+    _resolved_models = resolved
+    return _resolved_models
+
+
+def _get_model(provider_name: str) -> str:
+    """Return resolved model for a provider. Falls back to default if init not called."""
+    if not _resolved_models:
+        if provider_name in _DEFAULT_MODELS:
+            _get_logger().debug("provider models not initialized — using defaults")
+        return _DEFAULT_MODELS.get(provider_name, provider_name)
+    return _resolved_models.get(provider_name, _DEFAULT_MODELS.get(provider_name, provider_name))
+
 
 # Provider fallback chain per risk level.
 # Each list is tried in order; the first provider to return a valid
@@ -93,8 +132,17 @@ def _is_valid_provider_response(raw: str) -> bool:
     return bool(raw and raw.strip())
 
 
-def _compute_cost(provider, input_tokens: int, output_tokens: int) -> float:
+def _compute_cost(
+    provider, input_tokens: int, output_tokens: int, resolved_model: str = ""
+) -> float | None:
     if provider is _call_claude:
+        if resolved_model and resolved_model != MODEL_CLAUDE:
+            _get_logger().warning(
+                "Claude model overridden to %s — cost_llm will be null (cost table is for %s)",
+                resolved_model,
+                MODEL_CLAUDE,
+            )
+            return None
         return (input_tokens / 1_000_000) * COST_PER_1M_INPUT_CLAUDE + (
             output_tokens / 1_000_000
         ) * COST_PER_1M_OUTPUT_CLAUDE
@@ -109,13 +157,14 @@ def _compute_cost(provider, input_tokens: int, output_tokens: int) -> float:
 def _do_gemini_call(prompt: str, run_id: str) -> tuple[str, int, int]:
     from google.genai import types
 
+    model = _get_model("gemini")
     client = get_gemini_client()
     log = _get_logger()
-    log.debug("[%s] Gemini request | model=%s | prompt_chars=%d", run_id, MODEL_GEMINI, len(prompt))
+    log.debug("[%s] Gemini request | model=%s | prompt_chars=%d", run_id, model, len(prompt))
 
     t0 = time.perf_counter()
     response = client.models.generate_content(
-        model=MODEL_GEMINI, contents=prompt, config=types.GenerateContentConfig(temperature=0.0)
+        model=model, contents=prompt, config=types.GenerateContentConfig(temperature=0.0)
     )
     elapsed = time.perf_counter() - t0
 
@@ -142,6 +191,7 @@ def _call_gemini(prompt: str, run_id: str) -> tuple[str, int, int]:
 
 
 def _do_openrouter_call(prompt: str, run_id: str) -> tuple[str, int, int]:
+    model = _get_model("openrouter")
     log = _get_logger()
     client = get_openrouter_client()
     headers = {
@@ -149,7 +199,7 @@ def _do_openrouter_call(prompt: str, run_id: str) -> tuple[str, int, int]:
         "Content-Type": "application/json",
     }
     payload = {
-        "model": MODEL_OPENROUTER,
+        "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.0,
     }
@@ -157,7 +207,7 @@ def _do_openrouter_call(prompt: str, run_id: str) -> tuple[str, int, int]:
     log.debug(
         "[%s] OpenRouter request | model=%s | prompt_chars=%d",
         run_id,
-        MODEL_OPENROUTER,
+        model,
         len(prompt),
     )
 
@@ -195,13 +245,14 @@ def _call_openrouter(prompt: str, run_id: str) -> tuple[str, int, int]:
 
 
 def _do_claude_call(prompt: str, run_id: str) -> tuple[str, int, int]:
+    model = _get_model("claude")
     client = get_anthropic_client()
     log = _get_logger()
-    log.debug("[%s] Claude request | model=%s | prompt_chars=%d", run_id, MODEL_CLAUDE, len(prompt))
+    log.debug("[%s] Claude request | model=%s | prompt_chars=%d", run_id, model, len(prompt))
 
     t0 = time.perf_counter()
     response = client.messages.create(
-        model=MODEL_CLAUDE,
+        model=model,
         max_tokens=4096,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.0,
@@ -260,7 +311,7 @@ KNOWN_PROVIDER_NAMES: tuple[str, ...] = tuple(sorted(_provider_by_name().keys())
 
 @dataclass
 class ProviderChainResult:
-    success: tuple[str, int, int, float] | None = None
+    success: tuple[str, int, int, float | None] | None = None
     failures: list[tuple[str, str]] = field(default_factory=list)
     provider_name: str | None = None
 
@@ -293,11 +344,12 @@ def _call_chain(chain: list, prompt: str, run_id: str) -> ProviderChainResult:
                     provider.__name__,
                 )
                 continue
-            cost = _compute_cost(provider, input_tokens, output_tokens)
+            provider_short = provider.__name__.removeprefix("_call_")
+            cost = _compute_cost(provider, input_tokens, output_tokens, _get_model(provider_short))
             return ProviderChainResult(
                 success=(raw, input_tokens, output_tokens, cost),
                 failures=failures,
-                provider_name=provider.__name__.removeprefix("_call_"),
+                provider_name=provider_short,
             )
         except _recoverable_exceptions() as exc:
             failures.append((provider.__name__, str(exc)))
