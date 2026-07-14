@@ -562,8 +562,9 @@ ADR-0004 must answer exactly five questions:
 - **Precondition:** None.
 - **Non-goals:** No adapter implementation (GitHub Issue → IssueContract) yet; no Scout code; no pipeline consumption.
 
-### Provider Registry (idea 9)
-- **Priority:** P4 | **Status:** 📐 Scoped
+### ✅ Issue #230: Provider Registry (idea 9)
+- **Priority:** P4 | **Status:** ✅ **Completed**
+- **PR:** #231
 - **Goal:** Make the models in `providers.py` configurable via a `providers` section in `orchestrator.json`, with current constants as defaults. Model appears in `run.json` for audit.
 - **Source:** `docs/planning/roadmap.md`
 - **Precondition:** None.
