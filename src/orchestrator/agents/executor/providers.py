@@ -66,8 +66,7 @@ def init_provider_models(config: TargetConfig | None) -> dict[str, str]:
 def _get_model(provider_name: str) -> str:
     """Return resolved model for a provider. Falls back to default if init not called."""
     if not _resolved_models:
-        if provider_name in _DEFAULT_MODELS:
-            _get_logger().debug("provider models not initialized — using defaults")
+        _get_logger().debug("provider models not initialized — using defaults")
         return _DEFAULT_MODELS.get(provider_name, provider_name)
     return _resolved_models.get(provider_name, _DEFAULT_MODELS.get(provider_name, provider_name))
 

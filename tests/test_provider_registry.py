@@ -240,3 +240,105 @@ def test_model_whitespace_is_stripped():
     """A model value with surrounding whitespace is normalized on load."""
     cfg = ProviderModelConfig(model="  claude-sonnet-4-6  ")
     assert cfg.model == "claude-sonnet-4-6"
+
+
+@pytest.mark.unit
+def test_init_provider_models_none_config():
+    """Passing config=None returns hardcoded defaults."""
+    resolved = init_provider_models(None)
+    assert resolved == {
+        "gemini": MODEL_GEMINI,
+        "openrouter": MODEL_OPENROUTER,
+        "claude": MODEL_CLAUDE,
+    }
+
+
+@pytest.mark.unit
+def test_openrouter_override_reaches_sdk(tmp_path, monkeypatch):
+    """An openrouter override in config flows through to the HTTP payload."""
+    config = _config(
+        tmp_path,
+        ProvidersConfig(openrouter=ProviderModelConfig(model="meta-llama/llama-4-scout")),
+    )
+    init_provider_models(config)
+    assert _get_model("openrouter") == "meta-llama/llama-4-scout"
+
+    from orchestrator.agents.executor.providers import _do_openrouter_call
+
+    mock_response = MagicMock()
+    mock_response.json.return_value = {
+        "choices": [{"message": {"content": "patched"}}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+    }
+    mock_response.raise_for_status = MagicMock()
+
+    mock_client = MagicMock()
+    mock_client.post.return_value = mock_response
+    monkeypatch.setattr(
+        "orchestrator.agents.executor.providers.get_openrouter_client",
+        lambda: mock_client,
+    )
+    monkeypatch.setenv("OPENROUTER_API_KEY", "fake")
+
+    _do_openrouter_call("some prompt", "run_test")
+
+    _, kwargs = mock_client.post.call_args
+    assert kwargs["json"]["model"] == "meta-llama/llama-4-scout"
+
+
+@pytest.mark.unit
+def test_claude_override_used_end_to_end_cost_llm_null(tmp_path, monkeypatch):
+    """executor.run() with Claude override + Claude actually called → cost_llm is None."""
+    from orchestrator.agents.executor import run
+    from orchestrator.schemas.architect_output import ArchitectOutput, Task
+
+    config = _config(
+        tmp_path,
+        ProvidersConfig(claude=ProviderModelConfig(model="claude-3-5-haiku-20241022")),
+    )
+    (tmp_path / "test.py").write_text("x = 1\n", encoding="utf-8")
+
+    task = Task(
+        task_id="t1",
+        title="bump x",
+        description="bump x",
+        files_to_modify=["test.py"],
+        priority="high",
+        effort="low",
+        risk_level="high",
+        dependencies=[],
+    )
+    arch_out = ArchitectOutput(
+        validated_findings=[],
+        false_positives=[],
+        systemic_risks=[],
+        implementation_plan=[task],
+        blockers=[],
+    )
+
+    cb_claude_mock = MagicMock()
+    cb_claude_mock.call.return_value = ("x = 2\n", 10, 5)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_claude", cb_claude_mock)
+
+    warnings_logged: list[str] = []
+    import orchestrator.agents.executor as _emod
+
+    original_get_logger = _emod._get_logger
+
+    def _patched_get_logger(logs_dir=None):
+        logger = original_get_logger(logs_dir)
+        original_warning = logger.warning
+
+        def _capture_warning(msg, *args, **kwargs):
+            warnings_logged.append(msg % args if args else msg)
+            return original_warning(msg, *args, **kwargs)
+
+        logger.warning = _capture_warning
+        return logger
+
+    monkeypatch.setattr(_emod, "_get_logger", _patched_get_logger)
+
+    _, meta = run(arch_out, config=config, staging_dir=tmp_path / "staging")
+
+    assert meta["cost_llm"] is None
+    assert any("Claude cost unknown" in w for w in warnings_logged)
