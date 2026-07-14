@@ -39,6 +39,10 @@ def run(
     elif isinstance(config, (str, Path)):
         config = TargetConfig.load(target_path=Path(config))
 
+    from orchestrator.agents.executor.providers import init_provider_models
+
+    init_provider_models(config)
+
     logs_dir = config.workspace_path / "logs"
     project_root = config.target_path.resolve()
     timeout = config.validator_timeout or DEFAULT_TIMEOUT
