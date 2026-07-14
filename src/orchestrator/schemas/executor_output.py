@@ -31,6 +31,7 @@ class FileChange(BaseModel):
     error: str | None = None  # error message when status == "error"
     tokens_used: int = 0
     cost_usd: float = 0.0
+    provider_name: str | None = None  # provider (gemini/openrouter/claude) that generated this
 
 
 class ExecutorOutput(BaseModel):

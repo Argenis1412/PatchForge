@@ -2,6 +2,8 @@
 
 __all__ = [
     "SCHEMA_VERSION",
+    "ProviderModelConfig",
+    "ProvidersConfig",
     "TargetCapabilities",
     "TargetConfig",
     "default_workspace_path",
@@ -16,7 +18,7 @@ import os
 from pathlib import Path
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from orchestrator.git import resolve_git_root as _resolve_git_root
 
@@ -57,6 +59,23 @@ def validate_workspace_path(target_path: Path, workspace_path: Path) -> Path:
     return resolved_workspace
 
 
+class ProviderModelConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    model: Optional[str] = None
+
+    @field_validator("model", mode="before")
+    @classmethod
+    def _strip_model(cls, v: str | None) -> str | None:
+        return v.strip() if isinstance(v, str) else v
+
+
+class ProvidersConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    gemini: ProviderModelConfig = Field(default_factory=ProviderModelConfig)
+    openrouter: ProviderModelConfig = Field(default_factory=ProviderModelConfig)
+    claude: ProviderModelConfig = Field(default_factory=ProviderModelConfig)
+
+
 class TargetCapabilities(BaseModel):
     detected_supports_python: bool = False
     detected_supports_typescript: bool = False
@@ -89,6 +108,8 @@ class TargetConfig(BaseModel):
     test_command: Optional[List[str]] = None
     typecheck_command: Optional[List[str]] = None
     validator_timeout: Optional[int] = Field(default=None, gt=0)
+
+    providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
 
     capabilities: TargetCapabilities = Field(default_factory=TargetCapabilities)
 
@@ -157,6 +178,7 @@ class TargetConfig(BaseModel):
                     "test_command",
                     "typecheck_command",
                     "validator_timeout",
+                    "providers",
                 ]:
                     if key in file_data and file_data[key] is not None:
                         if key == "workspace_path":

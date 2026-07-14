@@ -207,7 +207,7 @@ These must not change without a new ADR in `docs/adr/`:
 
 ---
 
-## Completed (18 items)
+## Completed (19 items)
 
 ### P0 — Core Stability
 - ✅ T-02: Atomic Rollback Validation (#81)
@@ -268,6 +268,14 @@ These must not change without a new ADR in `docs/adr/`:
   source-agnostic issue schema for future GitHub API and Scout sources. Coexists with `IssueInput`
   (no adapter/pipeline wiring). `extra="forbid"`, no origin discriminator or free-form metadata dict,
   no defaults on semantic fields, `schema_version` deferred as Known Debt. 6 new tests.
+- ✅ Issue #230 — Provider Registry (2026-07-13): `ProvidersConfig`/`ProviderModelConfig`
+  (`extra="forbid"`) let `orchestrator.json` override the `gemini`/`openrouter`/`claude` models used by
+  `providers.py`, with the hardcoded constants as fallback. `init_provider_models(config)` resolves once
+  per run (called from both `executor.run()` and `validator.run()`); `_get_model(name)` reads the cache.
+  `exec_meta` gains `models_resolved` (audit) and `cost_llm` (null only when Claude was both overridden
+  away from the cost table's model AND actually used in the run — not merely because config has an
+  override). `RunMetadata.provider_config` (previously unused) is populated for audit/worker cold-start.
+  `FileChange.provider_name` is additive. No changes to fallback chain logic or risk-level routing. 11 new tests.
 
 ### Planning
 - ✅ Issue #221 — Post-P3 roadmap consolidation (2026-07-11): new `docs/planning/roadmap.md` (Core P4–P5 with agreed cuts + explicit Deferred section) and `docs/planning/scout-vision.md` (Scout frozen as second product line). Live docs (index, README, CLAUDE.md, CONTEXT.md, thesis) repointed; obsolete P3 sprint prompts and superseded roadmaps removed.

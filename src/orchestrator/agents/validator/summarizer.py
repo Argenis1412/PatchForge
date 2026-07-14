@@ -8,7 +8,6 @@ from orchestrator.schemas.validator_output import ToolResult
 
 from .logging import _get_logger
 
-MODEL_GEMINI = "gemini-2.5-flash"
 COST_PER_SUMMARY = 0.0
 
 
@@ -44,13 +43,15 @@ ERRORS
         )
         t0 = time.perf_counter()
         try:
+            from orchestrator.agents.executor.providers import _get_model
             from orchestrator.agents.validator import _cb_validator
             from orchestrator.clients.gemini_client import get_gemini_client
 
+            model = _get_model("gemini")
             client = get_gemini_client()
             response = _cb_validator.call(
                 lambda: client.models.generate_content(
-                    model=MODEL_GEMINI,
+                    model=model,
                     contents=prompt,
                 )
             )
@@ -68,7 +69,7 @@ ERRORS
                 input_tok,
                 output_tok,
             )
-            return summary, MODEL_GEMINI
+            return summary, model
 
         except CircuitBreakerOpenError:
             _get_logger().warning("[%s] Gemini CB open — trying provider chain", run_id)

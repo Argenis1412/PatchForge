@@ -405,6 +405,7 @@ def execute(
     run_metadata.patch_checksum = patch_checksum
     run_metadata.validation_summary = validation_summary
     run_metadata.model_metadata = model_metadata
+    run_metadata.provider_config = exec_meta.get("models_resolved")
     run_metadata.updated_at = datetime.now(timezone.utc)
     workspace_mgr.write_run_json(run_id, run_metadata)
 
