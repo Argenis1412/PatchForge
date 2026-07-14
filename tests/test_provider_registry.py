@@ -243,6 +243,24 @@ def test_model_whitespace_is_stripped():
 
 
 @pytest.mark.unit
+def test_target_config_load_reads_providers_from_json(tmp_path):
+    """TargetConfig.load() merges the providers section from orchestrator.json."""
+    import json
+
+    (tmp_path / "orchestrator.json").write_text(
+        json.dumps({"providers": {"gemini": {"model": "gemini-2.5-pro"}}}),
+        encoding="utf-8",
+    )
+    config = TargetConfig.load(tmp_path)
+    resolved = init_provider_models(config)
+
+    assert resolved["gemini"] == "gemini-2.5-pro"
+    assert _get_model("gemini") == "gemini-2.5-pro"
+    assert resolved["claude"] == MODEL_CLAUDE
+    assert resolved["openrouter"] == MODEL_OPENROUTER
+
+
+@pytest.mark.unit
 def test_init_provider_models_none_config():
     """Passing config=None returns hardcoded defaults."""
     resolved = init_provider_models(None)
