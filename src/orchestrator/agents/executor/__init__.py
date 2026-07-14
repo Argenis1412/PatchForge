@@ -24,7 +24,7 @@ from orchestrator.schemas.executor_output import ExecutorOutput, FileChange, Tas
 
 from . import applier as _applier
 from .logging import _get_logger
-from .providers import KNOWN_PROVIDER_NAMES, MODEL_CLAUDE, MODEL_GEMINI, MODEL_OPENROUTER
+from .providers import KNOWN_PROVIDER_NAMES, MODEL_CLAUDE, _get_model, init_provider_models
 from .rollback import rollback_to_commit as rollback_to_commit
 from .scheduler import _build_dag, _topological_order
 
@@ -93,7 +93,12 @@ def run(
             )
         _get_logger().info("[%s] force_provider override active: %s", run_id, force_provider)
 
-    model_string = f"GM:{MODEL_GEMINI}|OR:{MODEL_OPENROUTER}|CL:{MODEL_CLAUDE}"
+    resolved = init_provider_models(config)
+    model_string = (
+        f"GM:{_get_model('gemini')}|OR:{_get_model('openrouter')}|CL:{_get_model('claude')}"
+    )
+    claude_override_used = _get_model("claude") != MODEL_CLAUDE
+    providers_used: set[str] = set()
     result = ExecutorOutput(model=model_string, run_id=run_id)
 
     total_tokens_input = 0
@@ -206,6 +211,8 @@ def run(
 
             result.total_tokens += change.tokens_used
             result.total_cost_usd += change.cost_usd
+            if change.provider_name:
+                providers_used.add(change.provider_name)
 
             # Simple heuristic for token tracking: _apply_task returns combined tokens_used
             total_tokens_input += change.tokens_used // 2
@@ -267,11 +274,21 @@ def run(
         run_dir,
     )
 
+    cost_llm_null = claude_override_used and "claude" in providers_used
+    if cost_llm_null:
+        _get_logger().warning(
+            "[%s] cost_usd reflects only known-cost providers; "
+            "Claude cost unknown due to model override",
+            run_id,
+        )
+
     meta = {
         "tokens_input": total_tokens_input,
         "tokens_output": total_tokens_output,
         "cost_usd": result.total_cost_usd,
         "model_used": model_string,
+        "models_resolved": resolved,
+        "cost_llm": None if cost_llm_null else result.total_cost_usd,
     }
 
     return result, meta

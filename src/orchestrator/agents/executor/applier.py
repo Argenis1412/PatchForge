@@ -100,7 +100,8 @@ def _apply_task(
 
     modified_content: str | None = None
     input_tokens = output_tokens = 0
-    cost_this_call = 0.0
+    cost_this_call: float | None = 0.0
+    provider_name: str | None = None
 
     # force_provider is orthogonal to risk_level: it only changes which LLM
     # generates the patch.  risk_level still controls high-risk gating
@@ -124,6 +125,7 @@ def _apply_task(
         if chain_result.success is not None:
             raw, input_tokens, output_tokens, cost_this_call = chain_result.success
             modified_content = raw
+            provider_name = chain_result.provider_name
             break
         last_failures = chain_result.failures
         _get_logger().warning(
@@ -150,6 +152,8 @@ def _apply_task(
 
     assert modified_content is not None
 
+    cost_usd = cost_this_call if cost_this_call is not None else 0.0
+
     if original_content and not modified_content.endswith(original_content[-1]):
         modified_content += original_content[-1]
 
@@ -164,7 +168,8 @@ def _apply_task(
                 status="error",
                 error=syntax_error,
                 tokens_used=input_tokens + output_tokens,
-                cost_usd=cost_this_call,
+                cost_usd=cost_usd,
+                provider_name=provider_name,
             )
 
     diff = _make_diff(original_content, modified_content, relative_path, is_new_file=is_new_file)
@@ -179,7 +184,8 @@ def _apply_task(
             original_content=original_content,
             modified_content=original_content,
             tokens_used=input_tokens + output_tokens,
-            cost_usd=cost_this_call,
+            cost_usd=cost_usd,
+            provider_name=provider_name,
         )
 
     if task.risk_level == "high":
@@ -194,7 +200,8 @@ def _apply_task(
             original_content=original_content,
             modified_content=modified_content,
             tokens_used=input_tokens + output_tokens,
-            cost_usd=cost_this_call,
+            cost_usd=cost_usd,
+            provider_name=provider_name,
         )
     else:
         staging_path = staging_dir / relative_path
@@ -211,5 +218,6 @@ def _apply_task(
             original_content=original_content,
             modified_content=modified_content,
             tokens_used=input_tokens + output_tokens,
-            cost_usd=cost_this_call,
+            cost_usd=cost_usd,
+            provider_name=provider_name,
         )
