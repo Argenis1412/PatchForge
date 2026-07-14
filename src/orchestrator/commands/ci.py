@@ -464,6 +464,7 @@ def execute(
             "overall_passed": validator_output.overall_passed,
         },
     }
+    run_metadata.provider_config = exec_meta.get("models_resolved")
 
     if not validator_output.overall_passed:
         run_metadata.status = "validation_failed"
