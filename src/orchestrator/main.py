@@ -319,5 +319,52 @@ def apply(
     )
 
 
+@app.command("export-audit")
+def export_audit_command(
+    run_id: str = typer.Argument(..., help="Run ID of an existing, terminal run"),
+    workspace: Optional[Path] = typer.Option(
+        None, "--workspace", help="Path to the workspace directory"
+    ),
+    out: Optional[Path] = typer.Option(
+        None, "--out", help="Output directory for the bundle (default: current directory)"
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Overwrite an existing bundle at the output path"
+    ),
+    sign: bool = typer.Option(
+        False, "--sign", help="Sign manifest.json with a detached armored GPG signature"
+    ),
+    gpg_key: Optional[str] = typer.Option(
+        None, "--gpg-key", help="GPG key ID to sign with (default: gpg's default key)"
+    ),
+) -> None:
+    """Export a terminal run as a SHA-256-manifested audit bundle."""
+    from orchestrator.commands.export_audit import export_audit as execute_export_audit
+
+    execute_export_audit(
+        run_id=run_id,
+        workspace=workspace,
+        out_dir=out,
+        force=force,
+        sign=sign,
+        gpg_key=gpg_key,
+    )
+
+
+@app.command("verify-audit")
+def verify_audit_command(
+    bundle: Path = typer.Argument(..., help="Path to an audit-<run_id>.tar.gz bundle"),
+    require_signature: bool = typer.Option(
+        False,
+        "--require-signature",
+        help="Fail if the bundle has no GPG signature (policy decision, not a bundle property)",
+    ),
+) -> None:
+    """Verify an audit bundle's artifact hashes, completeness, and optional signature."""
+    from orchestrator.commands.export_audit import verify_audit as execute_verify_audit
+
+    execute_verify_audit(bundle_path=bundle, require_signature=require_signature)
+
+
 if __name__ == "__main__":
     app()
