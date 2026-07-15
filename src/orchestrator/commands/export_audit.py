@@ -198,7 +198,10 @@ def _verify_audit_open(bundle_path: Path, require_signature: bool) -> None:
     with tarfile.open(bundle_path, mode="r:gz") as tar:
         members = {m.name: m for m in tar.getmembers() if m.isfile()}
 
-        manifest_names = [n for n in members if n.endswith("/manifest.json")]
+        # The wrapper manifest sits at "<top_level>/manifest.json" — exactly one
+        # slash. This must not match "<top_level>/artifacts/manifest.json", a
+        # legitimate run artifact that happens to share the filename.
+        manifest_names = [n for n in members if n.endswith("/manifest.json") and n.count("/") == 1]
         if len(manifest_names) != 1:
             console.print("[bold red]Bundle does not contain exactly one manifest.json[/bold red]")
             raise typer.Exit(code=5)
