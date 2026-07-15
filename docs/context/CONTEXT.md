@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-07-12
+> Last updated: 2026-07-15
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 716 passed, 2 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 780 passed, 5 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3). `SqliteCircuitBreakerStore` is now thread-safe (issue #219).
 
@@ -276,6 +276,18 @@ These must not change without a new ADR in `docs/adr/`:
   away from the cost table's model AND actually used in the run — not merely because config has an
   override). `RunMetadata.provider_config` (previously unused) is populated for audit/worker cold-start.
   `FileChange.provider_name` is additive. No changes to fallback chain logic or risk-level routing. 11 new tests.
+- ✅ Issue #232 — Audit Bundle Export (2026-07-15): `patchforge export-audit <run_id>` produces
+  `audit-<run_id>.tar.gz` — a SHA-256-manifested tarball mirroring `runs/<run_id>/` under `artifacts/`,
+  plus `manifest.json` (PatchForge version, `commit_anchor`, UTC timestamp, full `RunMetadata` structural
+  mirror). Terminal-state gate is `status in {applied, failed, validation_failed}`; a residual `*.wal`
+  sidecar is treated as an interrupted run. Optional `--sign`/`--gpg-key` produce a detached armored
+  signature. `patchforge verify-audit <bundle>` reads the tarball entirely in memory (no `extractall`,
+  no temp-dir extraction) to recompute hashes and detect both missing and injected/undeclared artifacts;
+  `--require-signature` makes signature absence a verifier-side policy failure rather than an in-bundle
+  claim an attacker could strip alongside the signature itself. New `schemas/audit_manifest.py`
+  (`AuditManifest`, `ArtifactHash`, `extra="forbid"`) — a terminal derived artifact, not an inter-stage
+  DTO. Zero changes to `pipeline.py` or `RunMetadata`. 24 new tests (3 GPG tests skip without `gpg` on
+  PATH).
 
 ### Planning
 - ✅ Issue #221 — Post-P3 roadmap consolidation (2026-07-11): new `docs/planning/roadmap.md` (Core P4–P5 with agreed cuts + explicit Deferred section) and `docs/planning/scout-vision.md` (Scout frozen as second product line). Live docs (index, README, CLAUDE.md, CONTEXT.md, thesis) repointed; obsolete P3 sprint prompts and superseded roadmaps removed.
