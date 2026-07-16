@@ -576,7 +576,15 @@ ADR-0004 must answer exactly five questions:
 - **Goal:** `patchforge export-audit <run_id>` produces `audit-<run_id>.tar.gz` + `manifest.json` with SHA-256 of every artifact, PatchForge version, `commit_anchor`, timestamp, and a full structural mirror of `RunMetadata` (providers used included via `provider_config`). Optional GPG signing via `--sign`. `patchforge verify-audit <bundle>` recomputes hashes entirely in memory (no disk extraction) and detects tampering, missing artifacts, and injected/undeclared artifacts. `--require-signature` makes signature absence a verifier-side policy failure.
 - **Source:** `docs/planning/roadmap.md`
 - **Precondition:** Provider Registry complete (audit manifest must record the exact model used) — satisfied by #230.
-- **Non-goals:** No upload to external services (S3, artifact registries); no multi-run chain of custody; no RFC 3161 timestamping; no redaction of sensitive `RunMetadata` fields (full mirror is architecturally mandated, see `docs/planning/p4/04-audit-bundle-export.md`).
+- **Non-goals:** No upload to external services (S3, artifact registries); no multi-run chain of custody; no RFC 3161 timestamping; no redaction by default (full mirror is architecturally mandated, see `docs/planning/p4/04-audit-bundle-export.md`) — opt-in `--redact` added by #234.
+
+### ✅ Issue #234: Redact sensitive fields from audit bundle export
+- **Priority:** Tech debt closure (follow-up to #232) | **Status:** ✅ **Completed**
+- **PR:** (this branch)
+- **Goal:** Opt-in `--redact` flag on `export-audit` replaces `secrets_ref`, `env_file`, `workspace_path`, `target_path`, `staging_dir`, `logs_dir`, and `provider_config` with a `"[REDACTED]"` sentinel — only when the field's value is not `None` — in both `manifest.json`'s `run_metadata` and the raw `artifacts/run.json` file inside the bundle. Default (no flag) behavior is unchanged, preserving the structural-mirror mandate.
+- **Source:** `docs/context/discoveries.md` (debt logged during #232), triaged during P4-4 stabilization.
+- **Precondition:** #232 complete.
+- **Non-goals:** No redaction of unstructured log content (`events.jsonl`) — impractical without auditing every `log_event` call site. No lock during export or GPG signer allowlist — evaluated during the same triage and deferred, tracked in #235 and #236 respectively.
 
 ### Approval Provenance (idea 10)
 - **Priority:** P4 | **Status:** 📐 Scoped

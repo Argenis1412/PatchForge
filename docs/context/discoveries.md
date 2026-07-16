@@ -19,26 +19,26 @@
 
 ## Log
 
-### [2026-07-15] Issue #232 — Audit bundle manifest mirrors sensitive `RunMetadata` fields unredacted
+### ✅ [2026-07-15] Issue #232 — Audit bundle manifest mirrors sensitive `RunMetadata` fields unredacted (RESOLVED in #234)
 
 - **File:** `src/orchestrator/commands/export_audit.py` (manifest construction), `src/orchestrator/schemas/audit_manifest.py`
 - **Debt:** `AuditManifest.run_metadata` embeds the full, unredacted `RunMetadata.model_dump(mode="json")` — including `secrets_ref`, `env_file`, `workspace_path`, `staging_dir`, and `logs_dir`. `export-audit` is explicitly meant to produce a deliverable handed to third-party auditors; these fields leak internal filesystem layout and a reference to where secrets live (not the secret value itself, but still an internal-topology disclosure).
 - **Discovered by:** Implementation (accepted deliberately during planning, not caught by review)
-- **Why deferred:** `docs/planning/p4/04-audit-bundle-export.md` mandates the manifest be a *structural mirror* of `RunMetadata` with no field enumeration, specifically so composition with the future Approval Provenance item (#5) doesn't silently omit new fields. Redaction would require enumerating a field allowlist/denylist, which contradicts that mandate. Out of scope for #232; revisit as a dedicated issue if bundles are ever shared with auditors outside the organization's own trust boundary.
+- **Resolution:** Issue #234 added an opt-in `--redact` flag that replaces `secrets_ref`, `env_file`, `workspace_path`, `target_path`, `staging_dir`, `logs_dir`, and `provider_config` with a `"[REDACTED]"` sentinel (only when the field is set) in both `manifest.json`'s `run_metadata` and the raw `artifacts/run.json` file — an adversarial review during planning caught that redacting only the manifest would leave the same data sitting unredacted in `run.json`. Default (no flag) behavior is unchanged, preserving the structural-mirror mandate for composition with Approval Provenance (#5). An anti-rot test (`test_redact_fields_cover_all_run_metadata_fields`) fails CI if a future field is added to `RunMetadata` without being classified as redact-worthy or public.
 
-### [2026-07-15] Issue #232 — `export-audit` has no lock between the terminal-state check and archiving
+### [2026-07-15] Issue #232 — `export-audit` has no lock between the terminal-state check and archiving (tracked in #235)
 
 - **File:** `src/orchestrator/commands/export_audit.py` (`export_audit()`)
 - **Debt:** The run's `status` is checked once, then the run directory is walked and hashed in a separate pass. No repo/run lock is held in between. A concurrent process rewriting `run.json` or an artifact after the status check but before archiving could produce a bundle whose manifest reflects a moment that never fully existed on disk (mismatched status vs. content). Each individual artifact read is now a consistent single-read snapshot (fixed in the same PR), but the run as a whole is not locked across the full export.
 - **Discovered by:** Implementation, accepted per roadmap Cuts ("no repo lock is acquired — Invariant #3 already guarantees per-artifact atomicity via WAL")
-- **Why deferred:** Explicit non-goal in `docs/planning/p4/04-audit-bundle-export.md` — the terminality precondition is the documented substitute for locking, not full mutual exclusion. Acceptable for the common case (a run that finished and is not being touched); revisit only if dogfooding surfaces a real race (e.g. concurrent `export-audit` runs during active worker processing).
+- **Why deferred:** Explicit non-goal in `docs/planning/p4/04-audit-bundle-export.md` — the terminality precondition is the documented substitute for locking, not full mutual exclusion. Re-evaluated during #234 triage and still deferred: acceptable for the common case (a run that finished and is not being touched); revisit only if dogfooding surfaces a real race (e.g. concurrent `export-audit` runs during active worker processing). Tracked as low-priority backlog in #235.
 
-### [2026-07-15] Issue #232 — GPG signature verification trusts any locally-known key; CI never exercises the real `gpg` binary
+### [2026-07-15] Issue #232 — GPG signature verification trusts any locally-known key; CI never exercises the real `gpg` binary (tracked in #236)
 
 - **File:** `src/orchestrator/commands/export_audit.py` (`_verify_gpg_signature()`), `tests/test_export_audit.py`
 - **Debt:** `verify-audit` accepts any cryptographically valid signature from the operator's local GPG keyring — there is no signer-fingerprint allowlist, so a bundle "verified" only proves *some* trusted-by-this-machine key signed it, not that it was PatchForge (or a specific authorized party) that produced it. Separately, all GPG-path tests (`test_gpg_sign_and_verify` and friends) are `skipif`-guarded on `gpg` being present in `PATH`; CI almost certainly has no `gpg` installed, so the real `subprocess.run(["gpg", ...])` success path — as opposed to the mocked one — has never been exercised by CI, only manually.
 - **Discovered by:** Bot review (signer-allowlist finding, evaluated and explicitly out of scope for #232) + implementation review
-- **Why deferred:** A signer allowlist is a new authorization feature (config surface, storage format) with no AC in #232 requesting it; documented as a deliberate non-goal in `_verify_gpg_signature`'s docstring. Installing `gpg` in CI to close the untested-real-binary gap is a CI-infrastructure change outside this issue's scope.
+- **Why deferred:** A signer allowlist is a new authorization feature (config surface, storage format) with no AC in #232 requesting it; documented as a deliberate non-goal in `_verify_gpg_signature`'s docstring. Installing `gpg` in CI to close the untested-real-binary gap is a CI-infrastructure change outside this issue's scope. Re-evaluated during #234 triage and still deferred. Tracked as P5/Scout-vision candidate in #236.
 
 ### ✅ [2026-07-10] Dogfooding 008 — `plan` CLI gaps and non-determinism (PARTIALLY RESOLVED)
 

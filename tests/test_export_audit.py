@@ -38,6 +38,10 @@ def _make_run(
     status: str = "applied",
     run_id: str = RUN_ID,
     provider_config: dict | None = None,
+    secrets_ref: str | None = None,
+    env_file: str | None = None,
+    staging_dir: str | None = None,
+    logs_dir: str | None = None,
 ) -> Path:
     run_dir = workspace_mgr.create_run_directory(run_id)
     meta = RunMetadata(
@@ -49,6 +53,10 @@ def _make_run(
         v1_supported=True,
         status=status,
         provider_config=provider_config,
+        secrets_ref=secrets_ref,
+        env_file=env_file,
+        staging_dir=staging_dir,
+        logs_dir=logs_dir,
     )
     workspace_mgr.write_run_json(run_id, meta)
     (run_dir / "findings.json").write_text('{"findings": []}', encoding="utf-8")
@@ -441,6 +449,162 @@ def test_manifest_provider_config_none_when_pre_executor(
         manifest = json.loads(extracted.read())
 
     assert manifest["run_metadata"]["provider_config"] is None
+
+
+# workspace_path/target_path are not listed here: _make_run always sets them
+# (non-None), so they are covered directly in the assertions below.
+_REDACT_FIELD_VALUES = {
+    "secrets_ref": "vault://secrets/prod",
+    "env_file": "/dummy/target/.env",
+    "staging_dir": "/dummy/staging",
+    "logs_dir": "/dummy/logs",
+    "provider_config": {"architect": "claude-opus-4-7"},
+}
+
+
+def test_export_redact_replaces_sensitive_fields(workspace_mgr: WorkspaceManager, tmp_path: Path):
+    import json
+
+    _make_run(
+        workspace_mgr,
+        status="applied",
+        provider_config=_REDACT_FIELD_VALUES["provider_config"],
+        secrets_ref=_REDACT_FIELD_VALUES["secrets_ref"],
+        env_file=_REDACT_FIELD_VALUES["env_file"],
+        staging_dir=_REDACT_FIELD_VALUES["staging_dir"],
+        logs_dir=_REDACT_FIELD_VALUES["logs_dir"],
+    )
+    bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path, redact=True)
+
+    members = _read_tarball(bundle)
+    top_level = f"audit-{RUN_ID}"
+    manifest = json.loads(members[f"{top_level}/manifest.json"])
+    run_json = json.loads(members[f"{top_level}/artifacts/run.json"])
+
+    from orchestrator.commands.export_audit import _PUBLIC_FIELDS, _REDACT_FIELDS
+
+    for doc in (manifest["run_metadata"], run_json):
+        for field in _REDACT_FIELDS:
+            assert doc[field] == "[REDACTED]", f"{field} was not redacted: {doc[field]!r}"
+        # workspace_path/target_path are always set by _make_run (non-None), so
+        # they must be redacted too.
+        assert doc["workspace_path"] == "[REDACTED]"
+        assert doc["target_path"] == "[REDACTED]"
+        # Public fields must survive untouched.
+        assert doc["run_id"] == RUN_ID
+        assert doc["branch"] == "main"
+        assert doc["base_commit"] == "abc123def456"
+        for field in _PUBLIC_FIELDS:
+            assert doc[field] != "[REDACTED]"
+
+
+def test_export_redact_preserves_none_values(workspace_mgr: WorkspaceManager, tmp_path: Path):
+    """Fields never set (None) must stay None, not become '[REDACTED]'."""
+    import json
+
+    _make_run(workspace_mgr, status="applied")  # secrets_ref/env_file/etc. default to None
+    bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path, redact=True)
+
+    members = _read_tarball(bundle)
+    top_level = f"audit-{RUN_ID}"
+    manifest = json.loads(members[f"{top_level}/manifest.json"])
+    run_json = json.loads(members[f"{top_level}/artifacts/run.json"])
+
+    for doc in (manifest["run_metadata"], run_json):
+        assert doc["secrets_ref"] is None
+        assert doc["env_file"] is None
+        assert doc["staging_dir"] is None
+        assert doc["logs_dir"] is None
+        assert doc["provider_config"] is None
+        # workspace_path/target_path are always set, so they're still redacted.
+        assert doc["workspace_path"] == "[REDACTED]"
+        assert doc["target_path"] == "[REDACTED]"
+
+
+def test_export_default_preserves_all_fields(workspace_mgr: WorkspaceManager, tmp_path: Path):
+    """Without --redact, both manifest and run.json keep the full mirror."""
+    import json
+
+    _make_run(
+        workspace_mgr,
+        status="applied",
+        provider_config=_REDACT_FIELD_VALUES["provider_config"],
+        secrets_ref=_REDACT_FIELD_VALUES["secrets_ref"],
+        env_file=_REDACT_FIELD_VALUES["env_file"],
+        staging_dir=_REDACT_FIELD_VALUES["staging_dir"],
+        logs_dir=_REDACT_FIELD_VALUES["logs_dir"],
+    )
+    bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path)
+
+    members = _read_tarball(bundle)
+    top_level = f"audit-{RUN_ID}"
+    manifest = json.loads(members[f"{top_level}/manifest.json"])
+    run_json = json.loads(members[f"{top_level}/artifacts/run.json"])
+
+    for doc in (manifest["run_metadata"], run_json):
+        assert doc["secrets_ref"] == _REDACT_FIELD_VALUES["secrets_ref"]
+        assert doc["env_file"] == _REDACT_FIELD_VALUES["env_file"]
+        assert doc["staging_dir"] == _REDACT_FIELD_VALUES["staging_dir"]
+        assert doc["logs_dir"] == _REDACT_FIELD_VALUES["logs_dir"]
+        assert doc["provider_config"] == _REDACT_FIELD_VALUES["provider_config"]
+
+
+def test_redacted_bundle_verifies(workspace_mgr: WorkspaceManager, tmp_path: Path):
+    """verify-audit must pass on a --redact bundle: run.json hash matches its redacted bytes."""
+    _make_run(
+        workspace_mgr,
+        status="applied",
+        secrets_ref=_REDACT_FIELD_VALUES["secrets_ref"],
+    )
+    bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path, redact=True)
+
+    verify_audit(bundle)  # must not raise
+
+
+def test_redact_with_sign(
+    workspace_mgr: WorkspaceManager, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """--redact --sign must sign the redacted manifest, and verify-audit must pass."""
+    import orchestrator.commands.export_audit as module
+
+    _make_run(
+        workspace_mgr,
+        status="applied",
+        secrets_ref=_REDACT_FIELD_VALUES["secrets_ref"],
+    )
+
+    def _fake_run(cmd, **kwargs):
+        if "--verify" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+        output_path = Path(cmd[cmd.index("--output") + 1])
+        output_path.write_text("-----BEGIN PGP SIGNATURE-----\nfake\n-----END PGP SIGNATURE-----\n")
+        return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(module.subprocess, "run", _fake_run)
+
+    bundle = export_audit(
+        RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path, redact=True, sign=True
+    )
+
+    with tarfile.open(bundle, mode="r:gz") as tar:
+        assert f"audit-{RUN_ID}/manifest.json.asc" in tar.getnames()
+
+    verify_audit(bundle)  # must not raise
+
+
+def test_redact_fields_cover_all_run_metadata_fields():
+    """Anti-rot guard: every RunMetadata field must be classified as redact-worthy
+    or public. A new field added without classification fails this test."""
+    from orchestrator.commands.export_audit import _PUBLIC_FIELDS, _REDACT_FIELDS
+
+    all_fields = set(RunMetadata.model_fields.keys())
+    classified = _REDACT_FIELDS | _PUBLIC_FIELDS
+
+    assert not (_REDACT_FIELDS & _PUBLIC_FIELDS), "a field cannot be both redacted and public"
+    assert classified == all_fields, (
+        f"unclassified RunMetadata fields: {all_fields - classified}; "
+        f"stale entries no longer on RunMetadata: {classified - all_fields}"
+    )
 
 
 def test_export_deterministic_artifact_ordering(workspace_mgr: WorkspaceManager, tmp_path: Path):

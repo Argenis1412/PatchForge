@@ -289,6 +289,15 @@ These must not change without a new ADR in `docs/adr/`:
   DTO. Zero changes to `pipeline.py` or `RunMetadata`. 34 new tests (3 GPG sign/verify tests skip without
   `gpg` on PATH; GPG failure paths and CLI flag passthrough are covered via mocked `subprocess.run`,
   needing no real `gpg`).
+- ✅ Issue #234 — Redact sensitive fields from audit bundle export (2026-07-15): opt-in `--redact` flag
+  on `export-audit` replaces `secrets_ref`, `env_file`, `workspace_path`, `target_path`, `staging_dir`,
+  `logs_dir`, `provider_config` with `"[REDACTED]"` — only when set — in both `manifest.json`'s
+  `run_metadata` and the raw `artifacts/run.json` file, so a `verify-audit` hash check still passes.
+  Default export (no flag) is unchanged, preserving the structural-mirror mandate for composition with
+  future Approval Provenance fields. An anti-rot test asserts every `RunMetadata` field is classified as
+  redact-worthy or public, failing CI if a new field is added without classification. 6 new tests.
+  Follow-up debts (no lock during export, GPG signer allowlist + untested real-binary CI path) evaluated
+  during the same triage and deferred to #235/#236.
 
 ### Planning
 - ✅ Issue #221 — Post-P3 roadmap consolidation (2026-07-11): new `docs/planning/roadmap.md` (Core P4–P5 with agreed cuts + explicit Deferred section) and `docs/planning/scout-vision.md` (Scout frozen as second product line). Live docs (index, README, CLAUDE.md, CONTEXT.md, thesis) repointed; obsolete P3 sprint prompts and superseded roadmaps removed.
