@@ -33,7 +33,7 @@ class ArtifactHash(BaseModel):
 class AuditManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    manifest_schema_version: int = MANIFEST_SCHEMA_VERSION
+    manifest_schema_version: int
     run_id: str
     patchforge_version: str
     bundle_created_at: datetime

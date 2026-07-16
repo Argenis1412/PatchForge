@@ -148,6 +148,54 @@ def test_export_creates_missing_out_dir(workspace_mgr: WorkspaceManager, tmp_pat
     assert bundle.exists()
 
 
+def test_export_reads_each_artifact_exactly_once(
+    workspace_mgr: WorkspaceManager, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Manifest hash and archived bytes must come from a single read (no TOCTOU)."""
+    run_dir = _make_run(workspace_mgr, status="applied")
+    open_counts: dict[str, int] = {}
+    original_open = Path.open
+
+    def _counting_open(self: Path, *args, **kwargs):
+        open_counts[str(self)] = open_counts.get(str(self), 0) + 1
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", _counting_open)
+
+    export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path)
+
+    for artifact in ["findings.json", "patch.diff"]:
+        path = str(run_dir / artifact)
+        assert open_counts.get(path, 0) == 1, f"{artifact} opened {open_counts.get(path, 0)} times"
+
+
+def test_export_leaves_prior_bundle_untouched_on_write_failure(
+    workspace_mgr: WorkspaceManager, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import orchestrator.commands.export_audit as module
+
+    _make_run(workspace_mgr, status="applied")
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    bundle_path = out_dir / f"audit-{RUN_ID}.tar.gz"
+    bundle_path.write_bytes(b"prior good bundle bytes")
+
+    def _raise(*args, **kwargs):
+        raise OSError("simulated write failure mid-archive")
+
+    monkeypatch.setattr(module, "_add_tar_bytes", _raise)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=out_dir, force=True)
+
+    assert _exit_code(exc_info) == 3
+    # The prior bundle must survive a failed write attempt untouched.
+    assert bundle_path.read_bytes() == b"prior good bundle bytes"
+    # No leftover .tmp-* file from the failed write.
+    leftovers = list(out_dir.glob(f"audit-{RUN_ID}.tar.gz.tmp-*"))
+    assert leftovers == []
+
+
 def _rebuild_tarball(members: dict[str, bytes], dest: Path, top_level: str) -> None:
     with tarfile.open(dest, mode="w:gz") as tar:
         for name, data in members.items():
@@ -240,6 +288,92 @@ def test_verify_detects_artifact_injection(workspace_mgr: WorkspaceManager, tmp_
         bundle,
         top_level,
     )
+
+    with pytest.raises(typer.Exit) as exc_info:
+        verify_audit(bundle)
+
+    assert _exit_code(exc_info) == 5
+
+
+def test_verify_rejects_duplicate_member_names(workspace_mgr: WorkspaceManager, tmp_path: Path):
+    import io
+
+    _make_run(workspace_mgr, status="applied")
+    bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path)
+
+    members = _read_tarball(bundle)
+    with tarfile.open(bundle, mode="w:gz") as tar:
+        for name, data in members.items():
+            info = tarfile.TarInfo(name=name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+        # Duplicate the manifest entry under the same name.
+        manifest_name = f"audit-{RUN_ID}/manifest.json"
+        dup_data = members[manifest_name]
+        info = tarfile.TarInfo(name=manifest_name)
+        info.size = len(dup_data)
+        tar.addfile(info, io.BytesIO(dup_data))
+
+    with pytest.raises(typer.Exit) as exc_info:
+        verify_audit(bundle)
+
+    assert _exit_code(exc_info) == 5
+
+
+def test_verify_rejects_non_regular_member_type(workspace_mgr: WorkspaceManager, tmp_path: Path):
+    import io
+
+    _make_run(workspace_mgr, status="applied")
+    bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path)
+
+    members = _read_tarball(bundle)
+    with tarfile.open(bundle, mode="w:gz") as tar:
+        for name, data in members.items():
+            info = tarfile.TarInfo(name=name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+        symlink_info = tarfile.TarInfo(name=f"audit-{RUN_ID}/artifacts/sneaky-link")
+        symlink_info.type = tarfile.SYMTYPE
+        symlink_info.linkname = "/etc/passwd"
+        tar.addfile(symlink_info)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        verify_audit(bundle)
+
+    assert _exit_code(exc_info) == 5
+
+
+def test_verify_rejects_backslash_in_member_name(workspace_mgr: WorkspaceManager, tmp_path: Path):
+    import io
+
+    _make_run(workspace_mgr, status="applied")
+    bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path)
+
+    members = _read_tarball(bundle)
+    with tarfile.open(bundle, mode="w:gz") as tar:
+        for name, data in members.items():
+            info = tarfile.TarInfo(name=name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+        info = tarfile.TarInfo(name=f"audit-{RUN_ID}/artifacts/evil\\payload")
+        info.size = 4
+        tar.addfile(info, io.BytesIO(b"evil"))
+
+    with pytest.raises(typer.Exit) as exc_info:
+        verify_audit(bundle)
+
+    assert _exit_code(exc_info) == 5
+
+
+def test_verify_rejects_oversized_member(
+    workspace_mgr: WorkspaceManager, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import orchestrator.commands.export_audit as module
+
+    _make_run(workspace_mgr, status="applied")
+    bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path)
+
+    monkeypatch.setattr(module, "_MAX_MEMBER_SIZE", 4)
 
     with pytest.raises(typer.Exit) as exc_info:
         verify_audit(bundle)
@@ -367,6 +501,7 @@ def test_manifest_extra_field_rejected():
     with pytest.raises(ValidationError):
         AuditManifest.model_validate(
             {
+                "manifest_schema_version": 1,
                 "run_id": "x",
                 "patchforge_version": "1.1.0",
                 "bundle_created_at": "2026-07-15T00:00:00Z",
@@ -378,12 +513,32 @@ def test_manifest_extra_field_rejected():
         )
 
 
+def test_manifest_schema_version_required():
+    from pydantic import ValidationError
+
+    from orchestrator.schemas.audit_manifest import AuditManifest
+
+    with pytest.raises(ValidationError):
+        AuditManifest.model_validate(
+            {
+                "run_id": "x",
+                "patchforge_version": "1.1.0",
+                "bundle_created_at": "2026-07-15T00:00:00Z",
+                "commit_anchor": "abc",
+                "artifacts": [],
+                "run_metadata": {},
+            }
+        )
+
+
 @pytest.mark.skipif(not _gpg_available(), reason="gpg not available in PATH")
 def test_gpg_sign_and_verify(workspace_mgr: WorkspaceManager, tmp_path: Path):
     _make_run(workspace_mgr, status="applied")
     try:
         bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path, sign=True)
     except typer.Exit as exc:
+        if exc.exit_code != 4:
+            raise
         pytest.skip(f"gpg present but signing unavailable (exit {exc.exit_code})")
 
     with tarfile.open(bundle, mode="r:gz") as tar:
@@ -403,6 +558,8 @@ def test_gpg_signature_stripping_requires_signature_flag(
     try:
         bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path, sign=True)
     except typer.Exit as exc:
+        if exc.exit_code != 4:
+            raise
         pytest.skip(f"gpg present but signing unavailable (exit {exc.exit_code})")
 
     top_level = f"audit-{RUN_ID}"
@@ -429,6 +586,8 @@ def test_gpg_mutated_signature_fails_verify(workspace_mgr: WorkspaceManager, tmp
     try:
         bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path, sign=True)
     except typer.Exit as exc:
+        if exc.exit_code != 4:
+            raise
         pytest.skip(f"gpg present but signing unavailable (exit {exc.exit_code})")
 
     top_level = f"audit-{RUN_ID}"
