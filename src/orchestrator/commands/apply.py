@@ -18,6 +18,7 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from orchestrator.clients.bootstrap import bootstrap_environment
+from orchestrator.provenance import resolve_approved_by
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.storage import _wal_write
 from orchestrator.storage.lock import acquire_repo_lock, release_repo_lock
@@ -103,6 +104,10 @@ def execute(
         raise typer.Exit(code=1) from None
 
     target_path = Path(run_metadata.target_path)
+
+    # This is the actual human gate — record who is approving now, not at
+    # scan/ci time when no approval has happened yet.
+    run_metadata.approved_by = resolve_approved_by(target_path)
 
     # 2.5 Verify experiment context if experiment.json is present
     from orchestrator.schemas.experiment import verify_experiment_or_warn

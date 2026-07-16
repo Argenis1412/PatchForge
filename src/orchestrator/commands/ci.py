@@ -11,12 +11,14 @@ __all__ = ["execute"]
 
 import hashlib
 import logging
+import os
 import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from orchestrator.provenance import resolve_triggered_by
 from orchestrator.schemas.ci_result import CiResult
 
 logger = logging.getLogger(__name__)
@@ -85,6 +87,10 @@ def execute(
         result_path = workspace_path / "ci_result.json"
 
     run_id = ""
+    triggered_by = resolve_triggered_by(
+        repo_root=target_path,
+        github_actor=os.environ.get("GITHUB_ACTOR"),
+    )
 
     def _fail(
         status: str,
@@ -104,6 +110,7 @@ def execute(
             error=error,
             issue_number=issue_number,
             force_provider=force_provider,
+            triggered_by=triggered_by,
         )
         _write_result(r, result_path)
         return r
@@ -180,6 +187,7 @@ def execute(
         max_files=max_files,
         max_diff_lines=max_diff_lines,
         issue_number=issue_number,
+        triggered_by=triggered_by,
     )
     workspace_mgr.write_run_json(run_id, run_metadata)
     workspace_mgr.write_artifact(run_id, "findings.json", findings.model_dump_json(indent=2))
@@ -605,6 +613,7 @@ def execute(
         validation_passed=True,
         issue_number=issue_number,
         force_provider=force_provider,
+        triggered_by=run_metadata.triggered_by,
     )
     _write_result(result, result_path)
     return result
