@@ -605,7 +605,7 @@ ADR-0004 must answer exactly five questions:
   `approved_by` captured only in `apply.py` at the actual human gate. `ci.py`'s `_fail()` closure carries
   provenance so failed CI runs stay auditable. New `src/orchestrator/provenance.py` domain module + two
   `git.py` Level-1 wrappers. PR-body "Step 0" consolidation from the planning doc was scoped down (only 2
-  real call sites; the YAML workflow can't call Python) — inline provenance at each site instead. 20 new tests.
+  real call sites; the YAML workflow can't call Python) — inline provenance at each site instead. 27 new tests.
 
 ---
 

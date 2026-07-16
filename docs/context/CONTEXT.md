@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 828 passed, 5 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 835 passed, 5 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3). `SqliteCircuitBreakerStore` is now thread-safe (issue #219).
 
@@ -317,7 +317,7 @@ These must not change without a new ADR in `docs/adr/`:
   Both fields classified as public (not redacted) in `export_audit._PUBLIC_FIELDS`. Surfaced in PR bodies
   from both the worker-loop path (`work_queue.py`) and the GitHub Actions workflow. Planning doc's "Step 0"
   PR-body consolidation into a single choke point was scoped down — only 2 real call sites exist and the
-  YAML workflow cannot call Python, so a full consolidation would have been over-engineering. 20 new tests.
+  YAML workflow cannot call Python, so a full consolidation would have been over-engineering. 27 new tests.
 
 ### Planning
 - ✅ Issue #221 — Post-P3 roadmap consolidation (2026-07-11): new `docs/planning/roadmap.md` (Core P4–P5 with agreed cuts + explicit Deferred section) and `docs/planning/scout-vision.md` (Scout frozen as second product line). Live docs (index, README, CLAUDE.md, CONTEXT.md, thesis) repointed; obsolete P3 sprint prompts and superseded roadmaps removed.
