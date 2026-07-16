@@ -14,6 +14,7 @@ __all__ = [
 
 import hashlib
 import io
+import json
 import os
 import subprocess
 import tarfile
@@ -36,6 +37,70 @@ _TERMINAL_STATUSES = {"applied", "failed", "validation_failed"}
 _CHUNK_SIZE = 65536
 _MAX_MEMBER_SIZE = 500 * 1024 * 1024  # 500 MiB per tar member
 _MAX_MEMBER_COUNT = 100_000
+_RUN_JSON_NAME = "run.json"
+_REDACTED_SENTINEL = "[REDACTED]"
+
+# Fields that leak internal filesystem layout, secret references, or provider
+# configuration. Redacted only when --redact is passed; the default export
+# keeps the full structural mirror (see docs/planning/p4/04-audit-bundle-export.md).
+_REDACT_FIELDS = frozenset(
+    {
+        "secrets_ref",
+        "env_file",
+        "workspace_path",
+        "target_path",
+        "staging_dir",
+        "logs_dir",
+        "provider_config",
+    }
+)
+
+# Every other RunMetadata field, kept here so a test can assert the two sets
+# partition RunMetadata.model_fields exactly — a new field added to RunMetadata
+# without being classified into one of these sets fails that test.
+_PUBLIC_FIELDS = frozenset(
+    {
+        "run_id",
+        "base_commit",
+        "branch",
+        "status",
+        "schema_version",
+        "created_at",
+        "updated_at",
+        "v1_supported",
+        "support_reasons",
+        "risk_budget",
+        "max_files",
+        "max_diff_lines",
+        "executor_had_errors",
+        "goal",
+        "affected_files",
+        "patch_checksum",
+        "validation_summary",
+        "model_metadata",
+        "lifecycle_state",
+        "apply_status",
+        "auto_apply_eligible",
+        "failure_artifacts",
+        "issue_number",
+        "trace_id",
+        "worker_id",
+        "current_stage",
+    }
+)
+
+
+def _redact_metadata(metadata_dump: dict) -> dict:
+    """Replace sensitive fields with a sentinel, leaving unset (None) fields alone.
+
+    Redacting a field that was never set would falsely imply something was
+    hidden rather than simply absent.
+    """
+    redacted = dict(metadata_dump)
+    for field in _REDACT_FIELDS:
+        if field in redacted and redacted[field] is not None:
+            redacted[field] = _REDACTED_SENTINEL
+    return redacted
 
 
 def _package_version() -> str:
@@ -88,6 +153,7 @@ def export_audit(
     force: bool = False,
     sign: bool = False,
     gpg_key: Optional[str] = None,
+    redact: bool = False,
 ) -> Path:
     """Export runs/<run_id>/ as a SHA-256-manifested audit tarball.
 
@@ -143,6 +209,27 @@ def export_audit(
         artifact_hashes.append(ArtifactHash(path=rel_path, sha256=sha256, size_bytes=len(data)))
         artifact_bytes[rel_path] = data
 
+    metadata_dump = run_metadata.model_dump(mode="json")
+    if redact:
+        metadata_dump = _redact_metadata(metadata_dump)
+
+        # The raw run.json artifact mirrors run_metadata verbatim — redacting
+        # only the manifest's copy would leave the same secrets sitting in the
+        # archived run.json, defeating the point of --redact. Both must reflect
+        # the same redacted content, and the artifact hash must match it.
+        if _RUN_JSON_NAME in artifact_bytes:
+            raw_run = json.loads(artifact_bytes[_RUN_JSON_NAME])
+            raw_run = _redact_metadata(raw_run)
+            redacted_bytes = json.dumps(raw_run, indent=2, default=str).encode("utf-8")
+            artifact_bytes[_RUN_JSON_NAME] = redacted_bytes
+            new_hash = hashlib.sha256(redacted_bytes).hexdigest()
+            artifact_hashes = [
+                ArtifactHash(path=a.path, sha256=new_hash, size_bytes=len(redacted_bytes))
+                if a.path == _RUN_JSON_NAME
+                else a
+                for a in artifact_hashes
+            ]
+
     manifest = AuditManifest(
         manifest_schema_version=MANIFEST_SCHEMA_VERSION,
         run_id=run_id,
@@ -150,7 +237,7 @@ def export_audit(
         bundle_created_at=datetime.now(timezone.utc),
         commit_anchor=run_metadata.base_commit,
         artifacts=artifact_hashes,
-        run_metadata=run_metadata.model_dump(mode="json"),
+        run_metadata=metadata_dump,
     )
     manifest_bytes = manifest.model_dump_json(indent=2).encode("utf-8")
 

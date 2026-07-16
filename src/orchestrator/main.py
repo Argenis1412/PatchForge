@@ -337,6 +337,15 @@ def export_audit_command(
     gpg_key: Optional[str] = typer.Option(
         None, "--gpg-key", help="GPG key ID to sign with (default: gpg's default key)"
     ),
+    redact: bool = typer.Option(
+        False,
+        "--redact",
+        help=(
+            "Replace sensitive fields (filesystem paths, secret refs, provider config) "
+            "with '[REDACTED]' in the manifest and run.json artifact. "
+            "Does not redact unstructured log content (events.jsonl)."
+        ),
+    ),
 ) -> None:
     """Export a terminal run as a SHA-256-manifested audit bundle."""
     from orchestrator.commands.export_audit import export_audit as execute_export_audit
@@ -348,6 +357,7 @@ def export_audit_command(
         force=force,
         sign=sign,
         gpg_key=gpg_key,
+        redact=redact,
     )
 
 
