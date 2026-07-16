@@ -112,7 +112,9 @@ def export_audit(
         console.print(
             f"[bold red]Cannot create output directory {resolved_out_dir}: {exc}[/bold red]"
         )
-        raise typer.Exit(code=2) from exc
+        # Same exit code bucket as the path-collision case below: both are
+        # "the output path is unusable", as opposed to code 2 (non-terminal run).
+        raise typer.Exit(code=3) from exc
 
     bundle_path = resolved_out_dir / f"audit-{run_id}.tar.gz"
     if bundle_path.exists() and not force:
@@ -188,8 +190,10 @@ def verify_audit(bundle_path: Path, require_signature: bool = False) -> None:
     try:
         _verify_audit_open(bundle_path, require_signature)
     except tarfile.TarError as exc:
+        # A corrupted/non-tar bundle is a verification failure (same bucket as
+        # tampered content), not a "not found" condition — code 5, not 1.
         console.print(f"[bold red]Cannot open bundle {bundle_path}: {exc}[/bold red]")
-        raise typer.Exit(code=1) from exc
+        raise typer.Exit(code=5) from exc
 
     console.print(f"[bold green]Bundle {bundle_path} verified successfully[/bold green]")
 
@@ -283,7 +287,8 @@ def _verify_gpg_signature(manifest_bytes: bytes, signature_bytes: bytes) -> None
             capture_output=True,
         )
         if result.returncode != 0:
-            console.print("[bold red]GPG signature verification failed[/bold red]")
+            stderr = result.stderr.decode("utf-8", errors="replace").strip()
+            console.print(f"[bold red]GPG signature verification failed: {stderr}[/bold red]")
             raise typer.Exit(code=6)
     except OSError as exc:
         console.print(f"[bold red]Cannot invoke gpg: {exc}[/bold red]")

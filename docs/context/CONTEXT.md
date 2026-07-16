@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 780 passed, 5 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 790 passed, 5 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3). `SqliteCircuitBreakerStore` is now thread-safe (issue #219).
 
@@ -286,8 +286,9 @@ These must not change without a new ADR in `docs/adr/`:
   `--require-signature` makes signature absence a verifier-side policy failure rather than an in-bundle
   claim an attacker could strip alongside the signature itself. New `schemas/audit_manifest.py`
   (`AuditManifest`, `ArtifactHash`, `extra="forbid"`) — a terminal derived artifact, not an inter-stage
-  DTO. Zero changes to `pipeline.py` or `RunMetadata`. 24 new tests (3 GPG tests skip without `gpg` on
-  PATH).
+  DTO. Zero changes to `pipeline.py` or `RunMetadata`. 34 new tests (3 GPG sign/verify tests skip without
+  `gpg` on PATH; GPG failure paths and CLI flag passthrough are covered via mocked `subprocess.run`,
+  needing no real `gpg`).
 
 ### Planning
 - ✅ Issue #221 — Post-P3 roadmap consolidation (2026-07-11): new `docs/planning/roadmap.md` (Core P4–P5 with agreed cuts + explicit Deferred section) and `docs/planning/scout-vision.md` (Scout frozen as second product line). Live docs (index, README, CLAUDE.md, CONTEXT.md, thesis) repointed; obsolete P3 sprint prompts and superseded roadmaps removed.

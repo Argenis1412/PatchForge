@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 import tarfile
 from pathlib import Path
 
 import pytest
 import typer
+from typer.testing import CliRunner
 
 from orchestrator.commands.export_audit import export_audit, verify_audit
+from orchestrator.main import app
 from orchestrator.schemas.artifacts import RunMetadata
 from orchestrator.workspace import WorkspaceManager
+
+cli_runner = CliRunner()
 
 RUN_ID = "run_20260715_120000_abcdef"
 
@@ -207,15 +212,13 @@ def test_verify_detects_path_traversal_member(workspace_mgr: WorkspaceManager, t
     _make_run(workspace_mgr, status="applied")
     bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path)
 
-    top_level = f"audit-{RUN_ID}"
     members = _read_tarball(bundle)
     members["../../evil"] = b"payload"
     with tarfile.open(bundle, mode="w:gz") as tar:
         import io
 
         for name, data in members.items():
-            arcname = name if name.startswith(top_level) else name
-            info = tarfile.TarInfo(name=arcname)
+            info = tarfile.TarInfo(name=name)
             info.size = len(data)
             tar.addfile(info, io.BytesIO(data))
 
@@ -453,3 +456,182 @@ def test_package_version_fallback(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(module, "version", _raise)
     assert module._package_version() == "unknown"
+
+
+def test_export_defaults_out_dir_to_cwd(
+    workspace_mgr: WorkspaceManager, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _make_run(workspace_mgr, status="applied")
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+
+    bundle = export_audit(RUN_ID, workspace=workspace_mgr.root)
+
+    assert bundle == cwd / f"audit-{RUN_ID}.tar.gz"
+    assert bundle.exists()
+
+
+def test_export_out_dir_mkdir_failure(
+    workspace_mgr: WorkspaceManager, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _make_run(workspace_mgr, status="applied")
+
+    def _raise_mkdir(self, *args, **kwargs):
+        raise OSError("simulated disk failure")
+
+    monkeypatch.setattr(Path, "mkdir", _raise_mkdir)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path / "out")
+
+    assert _exit_code(exc_info) == 3
+
+
+def test_export_gpg_sign_failure_exits_4(
+    workspace_mgr: WorkspaceManager, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import orchestrator.commands.export_audit as module
+
+    _make_run(workspace_mgr, status="applied")
+
+    def _raise(cmd, **kwargs):
+        raise subprocess.CalledProcessError(2, cmd, stderr=b"gpg: signing failed: No secret key")
+
+    monkeypatch.setattr(module.subprocess, "run", _raise)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path, sign=True)
+
+    assert _exit_code(exc_info) == 4
+
+
+def test_export_gpg_missing_binary_exits_4(
+    workspace_mgr: WorkspaceManager, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import orchestrator.commands.export_audit as module
+
+    _make_run(workspace_mgr, status="applied")
+
+    def _raise(cmd, **kwargs):
+        raise OSError("gpg not found")
+
+    monkeypatch.setattr(module.subprocess, "run", _raise)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path, sign=True)
+
+    assert _exit_code(exc_info) == 4
+
+
+def test_export_sign_writes_signature_file_without_real_gpg(
+    workspace_mgr: WorkspaceManager, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Mocks gpg so signature-inclusion behavior is verified even in CI without gpg."""
+    import orchestrator.commands.export_audit as module
+
+    _make_run(workspace_mgr, status="applied")
+    captured_cmd: list[str] = []
+
+    def _fake_run(cmd, **kwargs):
+        captured_cmd[:] = cmd
+        output_path = Path(cmd[cmd.index("--output") + 1])
+        output_path.write_text("-----BEGIN PGP SIGNATURE-----\nfake\n-----END PGP SIGNATURE-----\n")
+        return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(module.subprocess, "run", _fake_run)
+
+    bundle = export_audit(
+        RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path, sign=True, gpg_key="ABCD1234"
+    )
+
+    with tarfile.open(bundle, mode="r:gz") as tar:
+        assert f"audit-{RUN_ID}/manifest.json.asc" in tar.getnames()
+
+    assert "--local-user" in captured_cmd
+    assert "ABCD1234" in captured_cmd
+
+
+def test_verify_bundle_not_found(tmp_path: Path):
+    with pytest.raises(typer.Exit) as exc_info:
+        verify_audit(tmp_path / "does-not-exist.tar.gz")
+
+    assert _exit_code(exc_info) == 1
+
+
+def test_verify_corrupted_archive_exits_5(tmp_path: Path):
+    bad_bundle = tmp_path / "corrupt.tar.gz"
+    bad_bundle.write_bytes(b"not a real gzip tarball")
+
+    with pytest.raises(typer.Exit) as exc_info:
+        verify_audit(bad_bundle)
+
+    assert _exit_code(exc_info) == 5
+
+
+def test_verify_invalid_manifest_json_exits_5(workspace_mgr: WorkspaceManager, tmp_path: Path):
+    import io
+
+    _make_run(workspace_mgr, status="applied")
+    bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path)
+
+    top_level = f"audit-{RUN_ID}"
+    members = _read_tarball(bundle)
+    members[f"{top_level}/manifest.json"] = b"{not valid json"
+    with tarfile.open(bundle, mode="w:gz") as tar:
+        for name, data in members.items():
+            info = tarfile.TarInfo(name=name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+
+    with pytest.raises(typer.Exit) as exc_info:
+        verify_audit(bundle)
+
+    assert _exit_code(exc_info) == 5
+
+
+def test_cli_export_audit_gpg_key_passthrough(
+    workspace_mgr: WorkspaceManager, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import orchestrator.commands.export_audit as module
+
+    _make_run(workspace_mgr, status="applied")
+    captured_cmd: list[str] = []
+
+    def _fake_run(cmd, **kwargs):
+        captured_cmd[:] = cmd
+        output_path = Path(cmd[cmd.index("--output") + 1])
+        output_path.write_text("fake-signature")
+        return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(module.subprocess, "run", _fake_run)
+
+    result = cli_runner.invoke(
+        app,
+        [
+            "export-audit",
+            RUN_ID,
+            "--workspace",
+            str(workspace_mgr.root),
+            "--out",
+            str(tmp_path),
+            "--sign",
+            "--gpg-key",
+            "DEADBEEF",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "--local-user" in captured_cmd
+    assert "DEADBEEF" in captured_cmd
+
+
+def test_cli_verify_audit_require_signature_passthrough(
+    workspace_mgr: WorkspaceManager, tmp_path: Path
+):
+    _make_run(workspace_mgr, status="applied")
+    bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path)
+
+    result = cli_runner.invoke(app, ["verify-audit", str(bundle), "--require-signature"])
+
+    assert result.exit_code == 6, result.output
