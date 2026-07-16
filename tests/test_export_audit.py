@@ -958,3 +958,134 @@ def test_cli_verify_audit_require_signature_passthrough(
     result = cli_runner.invoke(app, ["verify-audit", str(bundle), "--require-signature"])
 
     assert result.exit_code == 6, result.output
+
+
+# ---------------------------------------------------------------------------
+# Repo lock integration tests (issue #235)
+# ---------------------------------------------------------------------------
+
+_REPO_IDENTITY = str(Path("/dummy/target").resolve())
+
+
+def test_export_audit_acquires_and_releases_lock(workspace_mgr: WorkspaceManager, tmp_path: Path):
+    from orchestrator.storage.lock import acquire_repo_lock
+
+    _make_run(workspace_mgr, status="applied")
+    db_dir = tmp_path / "coord"
+    db_dir.mkdir()
+
+    export_audit(
+        RUN_ID,
+        workspace=workspace_mgr.root,
+        out_dir=tmp_path / "out",
+        worker_id="w1",
+        coordination_db_dir=db_dir,
+    )
+
+    assert acquire_repo_lock(_REPO_IDENTITY, "w2", db_dir=db_dir)
+
+
+def test_export_audit_fails_when_repo_locked(workspace_mgr: WorkspaceManager, tmp_path: Path):
+    from orchestrator.storage.lock import acquire_repo_lock
+
+    _make_run(workspace_mgr, status="applied")
+    db_dir = tmp_path / "coord"
+    db_dir.mkdir()
+
+    # Pre-acquire under the raw "w1" identity to prove export_audit's namespaced
+    # "w1:export-audit" is treated as distinct — not a reentrant renewal.
+    assert acquire_repo_lock(_REPO_IDENTITY, "w1", db_dir=db_dir)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        export_audit(
+            RUN_ID,
+            workspace=workspace_mgr.root,
+            out_dir=tmp_path / "out",
+            worker_id="w1",
+            coordination_db_dir=db_dir,
+        )
+
+    assert _exit_code(exc_info) == 8
+
+
+def test_export_audit_releases_lock_on_non_terminal_status_failure(
+    workspace_mgr: WorkspaceManager, tmp_path: Path
+):
+    from orchestrator.storage.lock import acquire_repo_lock
+
+    _make_run(workspace_mgr, status="planned")
+    db_dir = tmp_path / "coord"
+    db_dir.mkdir()
+
+    with pytest.raises(typer.Exit) as exc_info:
+        export_audit(
+            RUN_ID,
+            workspace=workspace_mgr.root,
+            out_dir=tmp_path / "out",
+            worker_id="w1",
+            coordination_db_dir=db_dir,
+        )
+
+    assert _exit_code(exc_info) == 2
+    assert acquire_repo_lock(_REPO_IDENTITY, "w2", db_dir=db_dir)
+
+
+def test_export_audit_concurrent_no_worker_id_blocked(
+    workspace_mgr: WorkspaceManager, tmp_path: Path
+):
+    from orchestrator.storage.lock import acquire_repo_lock
+
+    _make_run(workspace_mgr, status="applied")
+    db_dir = tmp_path / "coord"
+    db_dir.mkdir()
+
+    assert acquire_repo_lock(_REPO_IDENTITY, "first-caller", db_dir=db_dir)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        export_audit(
+            RUN_ID,
+            workspace=workspace_mgr.root,
+            out_dir=tmp_path / "out",
+            coordination_db_dir=db_dir,
+        )
+
+    assert _exit_code(exc_info) == 8
+
+
+def test_export_audit_aborts_when_target_path_changes_under_lock(
+    workspace_mgr: WorkspaceManager, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """If target_path mutates between the pre-lock read and the post-lock
+    reread, the repo identity used for the lock no longer matches the run's
+    current identity — continuing would export under a stale, unverified lock."""
+    import orchestrator.commands.export_audit as module
+    from orchestrator.storage.lock import acquire_repo_lock
+
+    _make_run(workspace_mgr, status="applied")
+    db_dir = tmp_path / "coord"
+    db_dir.mkdir()
+
+    original_read = module.WorkspaceManager.read_run_json
+    call_count = {"n": 0}
+
+    def _mutating_read(self, run_id):
+        metadata = original_read(self, run_id)
+        call_count["n"] += 1
+        if call_count["n"] == 2:
+            metadata = metadata.model_copy(update={"target_path": "/different/target"})
+        return metadata
+
+    monkeypatch.setattr(module.WorkspaceManager, "read_run_json", _mutating_read)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        export_audit(
+            RUN_ID,
+            workspace=workspace_mgr.root,
+            out_dir=tmp_path / "out",
+            worker_id="w1",
+            coordination_db_dir=db_dir,
+        )
+
+    assert _exit_code(exc_info) == 2
+    # Lock must still be released despite the abort.
+    assert acquire_repo_lock(_REPO_IDENTITY, "w2", db_dir=db_dir)
