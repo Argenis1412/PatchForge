@@ -128,11 +128,17 @@ jobs:
         run: |
 
           AFFECTED=""
+          TRIGGERED_BY="unknown"
           if [ -f "/tmp/pf-workspace/ci_result.json" ]; then
             AFFECTED=$(python3 -c "
           import json
           r = json.load(open('/tmp/pf-workspace/ci_result.json'))
           print('\n'.join(f'- \`{f}\`' for f in r.get('affected_files', [])))
+          ")
+            TRIGGERED_BY=$(python3 -c "
+          import json
+          r = json.load(open('/tmp/pf-workspace/ci_result.json'))
+          print(r.get('triggered_by') or 'unknown')
           ")
           fi
 
@@ -159,6 +165,7 @@ jobs:
           **Source issue:** #$ISSUE_NUMBER
           **Risk budget:** $RISK
           **Validation:** $VALIDATION
+          **Triggered by:** $TRIGGERED_BY
 
           ### Affected files
           $AFFECTED
