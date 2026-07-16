@@ -573,6 +573,31 @@ class TestCiExecute:
         assert "Bootstrap failed" in (result.error or "")
         assert result_path.exists()
 
+    def test_ci_fail_carries_provenance(self, ci_repo, monkeypatch):
+        """#241: CiResult must carry triggered_by even on a failure path,
+        not only on success — otherwise failed runs are unauditable."""
+        from orchestrator.commands.ci import execute
+
+        repo, ws = ci_repo
+        result_path = ws / "fail_result.json"
+        monkeypatch.setenv("GITHUB_ACTOR", "octocat")
+
+        with patch(
+            "orchestrator.clients.bootstrap.bootstrap_environment",
+            side_effect=RuntimeError("boom"),
+        ):
+            result = execute(
+                target_path=repo,
+                workspace_path=ws,
+                result_path=result_path,
+            )
+
+        assert result.status == "scan_failed"
+        assert result.triggered_by == "github:octocat"
+
+        data = json.loads(result_path.read_text(encoding="utf-8"))
+        assert data["triggered_by"] == "github:octocat"
+
     def test_apply_failure_preserves_validation_context(self, ci_repo):
         """#5: apply_failed after passing validation must report validation_passed=True."""
         from orchestrator.commands.ci import execute
