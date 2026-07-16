@@ -34,6 +34,20 @@ jobs:
       run: |
         ruff format --check src/ tests/
 
+    - name: Set up ephemeral GPG key for tests
+      run: |
+        export GNUPGHOME="$(mktemp -d)"
+        gpg --batch --gen-key <<EOF
+        Key-Type: RSA
+        Key-Length: 2048
+        Name-Real: PatchForge CI
+        Name-Email: ci@patchforge.test
+        %no-protection
+        %commit
+        EOF
+        gpg --batch --list-secret-keys | grep -q sec || { echo "::error::GPG key generation did not produce a usable secret key"; exit 1; }
+        echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+
     - name: Run tests (parallel)
       run: |
         pytest -v --tb=short --cov=src/orchestrator --cov-report= --cov-append -n auto --dist loadfile -m "not serial"
