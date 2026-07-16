@@ -83,6 +83,7 @@ jobs:
             -e ANTHROPIC_API_KEY \
             -e GOOGLE_API_KEY \
             -e OPENROUTER_API_KEY \
+            -e GITHUB_ACTOR \
             "$PATCHFORGE_IMAGE" \
             patchforge ci /repo \
               --workspace /workspace \
@@ -128,17 +129,18 @@ jobs:
         run: |
 
           AFFECTED=""
-          TRIGGERED_BY="unknown"
+          TRIGGERED_BY_LINE=""
           if [ -f "/tmp/pf-workspace/ci_result.json" ]; then
             AFFECTED=$(python3 -c "
           import json
           r = json.load(open('/tmp/pf-workspace/ci_result.json'))
           print('\n'.join(f'- \`{f}\`' for f in r.get('affected_files', [])))
           ")
-            TRIGGERED_BY=$(python3 -c "
+            TRIGGERED_BY_LINE=$(python3 -c "
           import json
           r = json.load(open('/tmp/pf-workspace/ci_result.json'))
-          print(r.get('triggered_by') or 'unknown')
+          triggered_by = r.get('triggered_by')
+          print(f'**Triggered by:** {triggered_by}' if triggered_by else '')
           ")
           fi
 
@@ -165,7 +167,7 @@ jobs:
           **Source issue:** #$ISSUE_NUMBER
           **Risk budget:** $RISK
           **Validation:** $VALIDATION
-          **Triggered by:** $TRIGGERED_BY
+          $TRIGGERED_BY_LINE
 
           ### Affected files
           $AFFECTED
