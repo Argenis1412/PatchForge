@@ -428,6 +428,68 @@ class TestCiExecute:
         assert result.issue_number == 7
         assert "patchforge/" in result.branch
 
+    def test_happy_path_carries_provenance_in_ci_result_and_run_json(self, ci_repo, monkeypatch):
+        """#241: success-path CiResult and the persisted RunMetadata must both
+        carry triggered_by. Failure-path coverage lives in
+        test_ci_fail_carries_provenance."""
+        from orchestrator.commands.ci import execute
+        from orchestrator.workspace import WorkspaceManager
+
+        repo, ws = ci_repo
+        monkeypatch.setenv("GITHUB_ACTOR", "octocat")
+        arch_output = _make_arch_output()
+        exec_output = _make_executor_output()
+        val_output = _make_validator_output(passed=True)
+        issue_md = ws / "issue.md"
+        issue_md.write_text('---\ntitle: "t"\nnumber: 1\n---\n\nFix\n', encoding="utf-8")
+
+        mock_git_ok = MagicMock(return_code=0, returncode=0, stderr="", stdout="")
+
+        with (
+            patch("orchestrator.scanners.python.scan", return_value=_make_scan_findings()),
+            patch(
+                "orchestrator.agents.architect.run_from_issue",
+                return_value=(arch_output, {"cost_usd": 0}),
+            ),
+            patch("orchestrator.risk.check_plan_gate", return_value=_make_risk_result()),
+            patch("orchestrator.risk.check_patch_gate", return_value=_make_risk_result()),
+            patch(
+                "orchestrator.agents.executor.run",
+                return_value=(exec_output, {"cost_usd": 0}),
+            ),
+            patch("orchestrator.schemas.experiment.Experiment"),
+            patch("orchestrator.workspace.WorkspaceManager.write_experiment"),
+            patch("orchestrator.validation_workspace.create_validation_workspace") as mock_val_ws,
+            patch(
+                "orchestrator.validation_workspace.apply_patch_to_copy",
+                return_value=MagicMock(return_code=0),
+            ),
+            patch(
+                "orchestrator.validation_workspace.run_validation_in_copy",
+                return_value=val_output,
+            ),
+            patch("orchestrator.git.create_controlled_branch", return_value=mock_git_ok),
+            patch("orchestrator.git.apply_patch", return_value=mock_git_ok),
+            patch("subprocess.run", return_value=mock_git_ok),
+        ):
+            mock_val_ws.return_value.__enter__ = MagicMock(
+                return_value=MagicMock(temporary_root=repo, patch_path=repo / "patch.diff"),
+            )
+            mock_val_ws.return_value.__exit__ = MagicMock(return_value=False)
+
+            result = execute(
+                target_path=repo,
+                workspace_path=ws,
+                issue_file=issue_md,
+                issue_number=7,
+            )
+
+        assert result.status == "applied"
+        assert result.triggered_by == "github:octocat"
+
+        run_json_data = WorkspaceManager(ws).read_run_json(result.run_id)
+        assert run_json_data.triggered_by == "github:octocat"
+
     def test_force_provider_forwarded_to_executor_and_result(self, ci_repo):
         from orchestrator.commands.ci import execute
 
@@ -572,6 +634,31 @@ class TestCiExecute:
         assert result.status == "scan_failed"
         assert "Bootstrap failed" in (result.error or "")
         assert result_path.exists()
+
+    def test_ci_fail_carries_provenance(self, ci_repo, monkeypatch):
+        """#241: CiResult must carry triggered_by even on a failure path,
+        not only on success — otherwise failed runs are unauditable."""
+        from orchestrator.commands.ci import execute
+
+        repo, ws = ci_repo
+        result_path = ws / "fail_result.json"
+        monkeypatch.setenv("GITHUB_ACTOR", "octocat")
+
+        with patch(
+            "orchestrator.clients.bootstrap.bootstrap_environment",
+            side_effect=RuntimeError("boom"),
+        ):
+            result = execute(
+                target_path=repo,
+                workspace_path=ws,
+                result_path=result_path,
+            )
+
+        assert result.status == "scan_failed"
+        assert result.triggered_by == "github:octocat"
+
+        data = json.loads(result_path.read_text(encoding="utf-8"))
+        assert data["triggered_by"] == "github:octocat"
 
     def test_apply_failure_preserves_validation_context(self, ci_repo):
         """#5: apply_failed after passing validation must report validation_passed=True."""

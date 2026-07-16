@@ -193,3 +193,76 @@ def test_apply_aborts_if_head_resolution_fails(
     failure_data = json.loads(failure_json.read_text(encoding="utf-8"))
     assert failure_data["error"] == "Failed to resolve HEAD"
     assert "Simulated git resolution failure" in failure_data["message"]
+
+
+def test_apply_captures_approved_by_at_human_gate(tmp_path: Path) -> None:
+    """#241: apply.py must record approved_by from local git config the
+    moment the user invokes apply — the actual human gate. Reaching
+    CONFLICT is enough to prove the field survives to write_run_json()."""
+    from unittest.mock import patch as _patch
+
+    from orchestrator.schemas.artifacts import PatchLifecycleState
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    subprocess.run(["git", "init"], cwd=repo_dir, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.name", "Approver"],
+        cwd=repo_dir,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "approver@example.com"],
+        cwd=repo_dir,
+        check=True,
+        capture_output=True,
+    )
+    (repo_dir / "file.txt").write_text("v1", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo_dir, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "v1"], cwd=repo_dir, check=True, capture_output=True)
+    proc = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo_dir, capture_output=True, text=True, check=True
+    )
+    commit1 = proc.stdout.strip()
+    branch_proc = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=repo_dir,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    actual_branch = branch_proc.stdout.strip()
+
+    workspace_path = tmp_path / "workspace"
+    workspace = WorkspaceManager(workspace_path)
+    workspace.setup()
+    run_id = "test-approved-by"
+    run_dir = workspace.create_run_directory(run_id)
+    meta = RunMetadata(
+        run_id=run_id,
+        target_path=str(repo_dir),
+        workspace_path=str(workspace_path),
+        base_commit=commit1,
+        branch=actual_branch,
+        status="previewed",
+        v1_supported=True,
+        patch_checksum="dummy",
+    )
+    workspace.write_run_json(run_id, meta)
+    (run_dir / "patch.diff").write_text("dummy patch", encoding="utf-8")
+
+    # CONFLICT reaches the line 199 write_run_json but exits before the
+    # apply pipeline runs, keeping the test hermetic. classify_lifecycle
+    # is imported lazily inside apply.execute(), so patch the source module.
+    with (
+        _patch(
+            "orchestrator.lifecycle.classify_lifecycle",
+            return_value=PatchLifecycleState.CONFLICT,
+        ),
+        pytest.raises(typer.Exit),
+    ):
+        apply_execute(run_id, workspace=workspace_path)
+
+    persisted = workspace.read_run_json(run_id)
+    assert persisted.approved_by == "local:Approver <approver@example.com>"

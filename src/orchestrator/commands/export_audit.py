@@ -88,6 +88,8 @@ _PUBLIC_FIELDS = frozenset(
         "trace_id",
         "worker_id",
         "current_stage",
+        "triggered_by",
+        "approved_by",
     }
 )
 

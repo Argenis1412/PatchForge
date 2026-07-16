@@ -9,13 +9,13 @@
 
 **What:** PatchForge — AI-powered, safety-first code modification tool. Generates, validates, and applies patches through a deterministic Plan → Preview → Validate → Apply pipeline.
 
-**Phase:** P4 — Trust & Configuration (P0/P1/P2/P3 complete)
+**Phase:** P4 — Trust & Configuration (complete; P0/P1/P2/P3 also complete)
 
 **Stack:** Python 3.12+ | Pydantic schemas | Typer CLI | ruff + pytest QA
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 790 passed, 5 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 835 passed, 5 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3). `SqliteCircuitBreakerStore` is now thread-safe (issue #219).
 
@@ -207,7 +207,7 @@ These must not change without a new ADR in `docs/adr/`:
 
 ---
 
-## Completed (19 items)
+## Completed (20 items)
 
 ### P0 — Core Stability
 - ✅ T-02: Atomic Rollback Validation (#81)
@@ -306,6 +306,18 @@ These must not change without a new ADR in `docs/adr/`:
   `run.json` for manifest/tarball consistency. Supersedes the "no repo lock" non-goal from
   `docs/planning/p4/04-audit-bundle-export.md`. No CLI flags — infrastructure for future `work_queue.py`
   integration. 4 new tests.
+- ✅ Issue #241 — Approval Provenance (2026-07-16, closes P4): `RunMetadata.triggered_by`/`approved_by`
+  are additive fields (no `schema_version` bump) recording who ran a stage, not an authorization gate.
+  `triggered_by` is captured in `scan`/`ci` from `GITHUB_ACTOR` when present, falling back to
+  `git config user.name`/`user.email` locally; `ci.py`'s `_fail()` closure carries it so failed runs stay
+  auditable, not just successful ones. `approved_by` is captured only in `apply.py` at the actual human
+  gate — never at scan/ci time, when no approval has occurred yet. New `src/orchestrator/provenance.py`
+  (Level-2 domain module: source selection, partial-identity fallback) and two `git.py` Level-1 wrappers
+  (`git_config_user_name`/`_email`, degrading to `None` on unset config, timeout, or missing git binary).
+  Both fields classified as public (not redacted) in `export_audit._PUBLIC_FIELDS`. Surfaced in PR bodies
+  from both the worker-loop path (`work_queue.py`) and the GitHub Actions workflow. Planning doc's "Step 0"
+  PR-body consolidation into a single choke point was scoped down — only 2 real call sites exist and the
+  YAML workflow cannot call Python, so a full consolidation would have been over-engineering. 27 new tests.
 
 ### Planning
 - ✅ Issue #221 — Post-P3 roadmap consolidation (2026-07-11): new `docs/planning/roadmap.md` (Core P4–P5 with agreed cuts + explicit Deferred section) and `docs/planning/scout-vision.md` (Scout frozen as second product line). Live docs (index, README, CLAUDE.md, CONTEXT.md, thesis) repointed; obsolete P3 sprint prompts and superseded roadmaps removed.

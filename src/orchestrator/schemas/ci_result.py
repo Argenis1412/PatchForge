@@ -25,3 +25,5 @@ class CiResult(BaseModel):
     error: Optional[str] = None
     issue_number: Optional[int] = None
     force_provider: Optional[str] = None
+    triggered_by: Optional[str] = None
+    approved_by: Optional[str] = None

@@ -296,6 +296,7 @@ def _execute_apply_with_checkpoints(
     store: Any,
     *,
     base_branch: str = "main",
+    triggered_by: Optional[str] = None,
 ) -> None:
     """Headless 5-phase apply with apply.json WAL.
 
@@ -419,9 +420,12 @@ def _execute_apply_with_checkpoints(
     _wal_write(apply_result, wal_path)
 
     # ---- Phase 4: PR ----------------------------------------------------
+    body = f"Automated patch from PatchForge run `{run_id}` (issue #{issue_number})."
+    if triggered_by:
+        body += f"\n\n**Triggered by:** {triggered_by}"
     pr_obj = github.create_pr(
         title=f"PatchForge: {run_id}",
-        body=f"Automated patch from PatchForge run `{run_id}` (issue #{issue_number}).",
+        body=body,
         head=branch,
         base=base_branch,
     )
@@ -476,6 +480,7 @@ def _execute_pipeline_with_resume(
                 github,
                 store,
                 base_branch=run_metadata.branch,
+                triggered_by=run_metadata.triggered_by,
             )
             continue
 

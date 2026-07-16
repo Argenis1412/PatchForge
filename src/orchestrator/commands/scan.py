@@ -12,6 +12,7 @@ __all__ = [
 ]
 
 import json
+import os
 from datetime import datetime, timezone
 
 import typer
@@ -21,6 +22,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from orchestrator.git import repository_state
 from orchestrator.observability.events import log_event, log_failure
+from orchestrator.provenance import resolve_triggered_by
 from orchestrator.scanners.python import scan
 from orchestrator.schemas.artifacts import RunMetadata, generate_run_id
 from orchestrator.schemas.config import TargetConfig
@@ -136,6 +138,10 @@ def execute(
                     created_at=now,
                     updated_at=now,
                     v1_supported=False,
+                    triggered_by=resolve_triggered_by(
+                        repo_root=config.target_path,
+                        github_actor=os.environ.get("GITHUB_ACTOR"),
+                    ),
                 ),
             )
             if json_output:
@@ -159,6 +165,11 @@ def execute(
         _max_files = 10
         _max_diff_lines = 500
 
+    triggered_by = resolve_triggered_by(
+        repo_root=config.target_path,
+        github_actor=os.environ.get("GITHUB_ACTOR"),
+    )
+
     run_metadata = RunMetadata(
         run_id=run_id,
         target_path=str(config.target_path),
@@ -173,6 +184,7 @@ def execute(
         risk_budget=risk_budget,
         max_files=_max_files,
         max_diff_lines=_max_diff_lines,
+        triggered_by=triggered_by,
     )
 
     # 7. Persist findings BEFORE any potential exit(1) — AC8

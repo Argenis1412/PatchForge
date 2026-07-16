@@ -594,12 +594,18 @@ ADR-0004 must answer exactly five questions:
 - **Precondition:** #232 complete.
 - **Non-goals:** No CLI flags for `--worker-id` or `--coordination-db` (infrastructure only, for future `work_queue.py` wiring). No output-file write protection (pre-existing race, unrelated to run-directory reads).
 
-### Approval Provenance (idea 10)
-- **Priority:** P4 | **Status:** 📐 Scoped
+### ✅ Approval Provenance (idea 10)
+- **Priority:** P4 | **Status:** ✅ **Completed**
+- **PR:** #241 (closes P4)
 - **Goal:** Two additive `RunMetadata` fields — `triggered_by` and `approved_by` — captured from `github.actor` in CI and `git config user.*` locally. PR body includes the provenance line. Additive with default per ADR-0004 (no `schema_version` bump).
 - **Source:** `docs/planning/roadmap.md`
 - **Precondition:** None (independent; strong synergy with Audit Bundle).
 - **Non-goals:** No authorization policy or role checks; no multi-person approval flow; no cryptographic identity verification (GPG on commits already covers that per Invariant #6).
+- **Delivered:** `triggered_by` captured in `scan`/`ci` (CI env first, local git config fallback);
+  `approved_by` captured only in `apply.py` at the actual human gate. `ci.py`'s `_fail()` closure carries
+  provenance so failed CI runs stay auditable. New `src/orchestrator/provenance.py` domain module + two
+  `git.py` Level-1 wrappers. PR-body "Step 0" consolidation from the planning doc was scoped down (only 2
+  real call sites; the YAML workflow can't call Python) — inline provenance at each site instead. 27 new tests.
 
 ---
 

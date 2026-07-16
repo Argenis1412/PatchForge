@@ -613,3 +613,91 @@ def test_scan_invalid_risk_budget(valid_repo: Path, workspace_dir: Path):
     assert "low" in result.output
     assert "medium" in result.output
     assert "high" in result.output
+
+
+# ---------------------------------------------------------------------------
+# 17. Approval Provenance (#241)
+# ---------------------------------------------------------------------------
+
+
+_REAL_SUBPROCESS_RUN = subprocess.run
+
+
+def _mock_tool_run_pass_through_git(args, **kwargs):
+    """Like _mock_tool_run but delegates 'git ...' commands to the real
+    binary so provenance capture (git config --get user.*) works. Used by
+    the scan-level provenance tests, which need git config to return real
+    values from the tmp_path fixture rather than the '$cmd 1.0.0' stub.
+
+    Uses a pre-captured reference to subprocess.run so the delegation does
+    not re-enter the mock and infinite-recurse."""
+    cmd = args[0] if args else "tool"
+    if cmd == "git":
+        return _REAL_SUBPROCESS_RUN(args, **kwargs)
+    return _mock_tool_run(args, **kwargs)
+
+
+def test_scan_captures_triggered_by_from_github_actor(
+    valid_repo: Path, workspace_dir: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """scan.py must read GITHUB_ACTOR when running in CI."""
+    monkeypatch.setenv("GITHUB_ACTOR", "octocat")
+
+    with (
+        patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
+        patch(
+            "orchestrator.scanners.python.subprocess.run",
+            side_effect=_mock_tool_run_pass_through_git,
+        ),
+    ):
+        result = runner.invoke(app, ["scan", str(valid_repo), "--workspace", str(workspace_dir)])
+
+    assert result.exit_code == 0, result.output
+    runs_dir = workspace_dir / "runs"
+    run_dirs = list(runs_dir.iterdir())
+    data = json.loads((runs_dir / run_dirs[0].name / "run.json").read_text())
+    assert data["triggered_by"] == "github:octocat"
+
+
+def test_scan_captures_triggered_by_from_local_git_config(
+    valid_repo: Path, workspace_dir: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """scan.py must fall back to local git config when GITHUB_ACTOR is unset.
+
+    valid_repo is initialised with user.name='Test' / user.email='t@t.com'
+    (see _init_git_repo)."""
+    monkeypatch.delenv("GITHUB_ACTOR", raising=False)
+
+    with (
+        patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
+        patch(
+            "orchestrator.scanners.python.subprocess.run",
+            side_effect=_mock_tool_run_pass_through_git,
+        ),
+    ):
+        result = runner.invoke(app, ["scan", str(valid_repo), "--workspace", str(workspace_dir)])
+
+    assert result.exit_code == 0, result.output
+    runs_dir = workspace_dir / "runs"
+    run_dirs = list(runs_dir.iterdir())
+    data = json.loads((runs_dir / run_dirs[0].name / "run.json").read_text())
+    assert data["triggered_by"] == "local:Test <t@t.com>"
+
+
+def test_scan_failure_path_carries_triggered_by(
+    valid_repo: Path, workspace_dir: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Symmetry with ci.py's _fail() closure: even a scanner crash must
+    persist triggered_by on the minimal run.json — failed runs must be
+    just as auditable as successful ones."""
+    monkeypatch.setenv("GITHUB_ACTOR", "octocat")
+
+    with patch("orchestrator.commands.scan.scan", side_effect=RuntimeError("boom")):
+        result = runner.invoke(app, ["scan", str(valid_repo), "--workspace", str(workspace_dir)])
+
+    assert result.exit_code == 1
+    runs_dir = workspace_dir / "runs"
+    run_dirs = list(runs_dir.iterdir())
+    data = json.loads((runs_dir / run_dirs[0].name / "run.json").read_text())
+    assert data["status"] == "failed"
+    assert data["triggered_by"] == "github:octocat"

@@ -366,6 +366,39 @@ def normalize_git_url(url: str) -> str:
     return url.lower()
 
 
+def _git_config_get(repo_root: Path, key: str) -> str | None:
+    """Return ``git config --get <key>`` output, or None on any failure.
+
+    Graceful degradation for unset keys, timeouts, missing git binary, and
+    any other OSError (permission denied, etc.) — provenance capture must
+    never crash the calling command. Matches ``repository_identity()``'s
+    broad ``except Exception`` posture for the same reason.
+    """
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root), "config", "--get", key],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if res.returncode != 0:
+            return None
+        value = res.stdout.strip()
+        return value or None
+    except Exception:
+        return None
+
+
+def git_config_user_name(repo_root: Path) -> str | None:
+    """Return ``git config user.name``, or None if unset/unavailable."""
+    return _git_config_get(repo_root, "user.name")
+
+
+def git_config_user_email(repo_root: Path) -> str | None:
+    """Return ``git config user.email``, or None if unset/unavailable."""
+    return _git_config_get(repo_root, "user.email")
+
+
 def repository_identity(repo_root: Path) -> str:
     """Return the repository's identity.
 
