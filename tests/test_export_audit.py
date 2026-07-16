@@ -757,7 +757,22 @@ def test_gpg_mutated_signature_fails_verify(workspace_mgr: WorkspaceManager, tmp
     top_level = f"audit-{RUN_ID}"
     members = _read_tarball(bundle)
     sig_key = f"{top_level}/manifest.json.asc"
-    members[sig_key] = members[sig_key] + b"\nMUTATED\n"
+
+    # Flip a byte inside the armored body itself. gpg's armor parser stops
+    # reading at "-----END PGP SIGNATURE-----", so appending bytes after it
+    # is silently ignored and the original, untouched signature still
+    # verifies successfully — confirmed against the real gpg binary.
+    lines = members[sig_key].split(b"\n")
+    body_idx = next(
+        i
+        for i, line in enumerate(lines)
+        if i >= 2 and line and not line.startswith(b"=") and not line.startswith(b"-----")
+    )
+    corrupted = bytearray(lines[body_idx])
+    corrupted[0] ^= 0xFF
+    lines[body_idx] = bytes(corrupted)
+    members[sig_key] = b"\n".join(lines)
+
     with tarfile.open(bundle, mode="w:gz") as tar:
         for name, data in members.items():
             info = tarfile.TarInfo(name=name)
