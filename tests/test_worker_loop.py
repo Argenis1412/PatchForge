@@ -490,3 +490,108 @@ def test_apply_wal_recovery_from_pr_created(workspace, fake_github, fake_store, 
         _execute_apply_with_checkpoints(run_id, 1, repo_path, workspace, fake_github, fake_store)
 
     fake_github.close_pr.assert_called_once_with(42)
+
+
+def test_apply_pr_body_includes_triggered_by(
+    workspace, fake_github, fake_store, monkeypatch, tmp_path
+):
+    """#241: PR body created in Phase 4 must include the Triggered by line
+    when triggered_by is passed from _execute_pipeline_with_resume."""
+    from orchestrator.schemas.validator_output import ValidatorOutput
+
+    run_id = "run_pr_body"
+    workspace.create_run_directory(run_id)
+    repo_path = workspace.run_dir(run_id) / "repo"
+    repo_path.mkdir(parents=True)
+    (workspace.run_dir(run_id) / "patch.diff").write_text("dummy patch\n", encoding="utf-8")
+
+    # Mock every subprocess/git touchpoint reached before Phase 4.
+    monkeypatch.setattr("orchestrator.git.current_head", lambda *a, **kw: "0" * 40)
+    monkeypatch.setattr(
+        "orchestrator.git.create_controlled_branch",
+        lambda *a, **kw: MagicMock(return_code=0, stderr=""),
+    )
+    monkeypatch.setattr(
+        "orchestrator.git.apply_patch",
+        lambda *a, **kw: MagicMock(return_code=0, stderr=""),
+    )
+    monkeypatch.setattr(
+        "orchestrator.git.git_push",
+        lambda *a, **kw: MagicMock(return_code=0, stderr=""),
+    )
+    monkeypatch.setattr(
+        "orchestrator.storage.work_queue.subprocess.run",
+        lambda *a, **kw: MagicMock(returncode=0, stderr="", stdout=""),
+    )
+    # Skip Phase 1 post-apply validation (TargetConfig.load + validator).
+    monkeypatch.setattr(
+        "orchestrator.schemas.config.TargetConfig.load",
+        classmethod(lambda cls, **kw: MagicMock()),
+    )
+    monkeypatch.setattr(
+        "orchestrator.agents.validator.run",
+        lambda **kw: (
+            ValidatorOutput(overall_passed=True, checks=[], model_used_for_summary="test"),
+            {},
+        ),
+    )
+
+    _execute_apply_with_checkpoints(
+        run_id,
+        1,
+        repo_path,
+        workspace,
+        fake_github,
+        fake_store,
+        triggered_by="github:octocat",
+    )
+
+    fake_github.create_pr.assert_called_once()
+    body = fake_github.create_pr.call_args.kwargs["body"]
+    assert "**Triggered by:** github:octocat" in body
+
+
+def test_apply_pr_body_omits_triggered_by_when_none(
+    workspace, fake_github, fake_store, monkeypatch
+):
+    """When triggered_by is None (default), the PR body must not add an
+    empty provenance line."""
+    from orchestrator.schemas.validator_output import ValidatorOutput
+
+    run_id = "run_pr_body_none"
+    workspace.create_run_directory(run_id)
+    repo_path = workspace.run_dir(run_id) / "repo"
+    repo_path.mkdir(parents=True)
+    (workspace.run_dir(run_id) / "patch.diff").write_text("dummy patch\n", encoding="utf-8")
+
+    monkeypatch.setattr("orchestrator.git.current_head", lambda *a, **kw: "0" * 40)
+    monkeypatch.setattr(
+        "orchestrator.git.create_controlled_branch",
+        lambda *a, **kw: MagicMock(return_code=0, stderr=""),
+    )
+    monkeypatch.setattr(
+        "orchestrator.git.apply_patch", lambda *a, **kw: MagicMock(return_code=0, stderr="")
+    )
+    monkeypatch.setattr(
+        "orchestrator.git.git_push", lambda *a, **kw: MagicMock(return_code=0, stderr="")
+    )
+    monkeypatch.setattr(
+        "orchestrator.storage.work_queue.subprocess.run",
+        lambda *a, **kw: MagicMock(returncode=0, stderr="", stdout=""),
+    )
+    monkeypatch.setattr(
+        "orchestrator.schemas.config.TargetConfig.load",
+        classmethod(lambda cls, **kw: MagicMock()),
+    )
+    monkeypatch.setattr(
+        "orchestrator.agents.validator.run",
+        lambda **kw: (
+            ValidatorOutput(overall_passed=True, checks=[], model_used_for_summary="test"),
+            {},
+        ),
+    )
+
+    _execute_apply_with_checkpoints(run_id, 1, repo_path, workspace, fake_github, fake_store)
+
+    body = fake_github.create_pr.call_args.kwargs["body"]
+    assert "Triggered by" not in body
