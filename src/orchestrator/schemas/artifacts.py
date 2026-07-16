@@ -101,6 +101,10 @@ class RunMetadata(BaseModel):
     provider_config: Optional[dict] = None
     current_stage: Optional[str] = None
 
+    # P4-5: Approval Provenance
+    triggered_by: Optional[str] = None
+    approved_by: Optional[str] = None
+
 
 def compute_auto_apply_eligible(
     risk_budget: str,
