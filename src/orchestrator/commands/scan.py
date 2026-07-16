@@ -138,6 +138,10 @@ def execute(
                     created_at=now,
                     updated_at=now,
                     v1_supported=False,
+                    triggered_by=resolve_triggered_by(
+                        repo_root=config.target_path,
+                        github_actor=os.environ.get("GITHUB_ACTOR"),
+                    ),
                 ),
             )
             if json_output:

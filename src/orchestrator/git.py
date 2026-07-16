@@ -369,8 +369,10 @@ def normalize_git_url(url: str) -> str:
 def _git_config_get(repo_root: Path, key: str) -> str | None:
     """Return ``git config --get <key>`` output, or None on any failure.
 
-    Graceful degradation for unset keys, timeouts, and a missing git binary
-    — provenance capture must never crash the calling command.
+    Graceful degradation for unset keys, timeouts, missing git binary, and
+    any other OSError (permission denied, etc.) — provenance capture must
+    never crash the calling command. Matches ``repository_identity()``'s
+    broad ``except Exception`` posture for the same reason.
     """
     try:
         res = subprocess.run(
@@ -383,7 +385,7 @@ def _git_config_get(repo_root: Path, key: str) -> str | None:
             return None
         value = res.stdout.strip()
         return value or None
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+    except Exception:
         return None
 
 
