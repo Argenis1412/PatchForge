@@ -28,7 +28,9 @@ from typing import Optional
 import typer
 from rich.console import Console
 
+from orchestrator.schemas.artifacts import RunMetadata
 from orchestrator.schemas.audit_manifest import MANIFEST_SCHEMA_VERSION, ArtifactHash, AuditManifest
+from orchestrator.storage.lock import acquire_repo_lock, release_repo_lock
 from orchestrator.workspace import WorkspaceManager
 
 console = Console()
@@ -154,11 +156,16 @@ def export_audit(
     sign: bool = False,
     gpg_key: Optional[str] = None,
     redact: bool = False,
+    worker_id: Optional[str] = None,
+    coordination_db_dir: Optional[Path] = None,
 ) -> Path:
     """Export runs/<run_id>/ as a SHA-256-manifested audit tarball.
 
     Returns the path to the produced bundle. Raises typer.Exit on any
     documented failure mode (see docs/planning/p4/04-audit-bundle-export.md).
+
+    Exit code 8: coordination_db_dir was provided but the repo lock could not
+    be acquired (another operation holds it). Retry once it completes.
     """
     workspace_mgr = WorkspaceManager(workspace)
 
@@ -169,45 +176,64 @@ def export_audit(
         console.print(f"[bold red]Run not found: {exc}[/bold red]")
         raise typer.Exit(code=1) from exc
 
-    if run_metadata.status not in _TERMINAL_STATUSES:
-        console.print(
-            f"[bold red]Run {run_id} is not in a terminal state "
-            f"(status={run_metadata.status!r}). Audit export requires one of "
-            f"{sorted(_TERMINAL_STATUSES)}.[/bold red]"
+    repo_identity = str(Path(run_metadata.target_path).resolve())
+    effective_worker_id = f"{worker_id}:export-audit" if worker_id else uuid.uuid4().hex
+    acquired = False
+    if coordination_db_dir is not None:
+        acquired = acquire_repo_lock(
+            repo_identity, effective_worker_id, ttl_seconds=300, db_dir=coordination_db_dir
         )
-        raise typer.Exit(code=2)
+        if not acquired:
+            console.print(
+                f"[bold red]Cannot export: {repo_identity} is locked by another "
+                "in-progress operation. Retry once it completes.[/bold red]"
+            )
+            raise typer.Exit(code=8)
 
     try:
-        run_files = _collect_run_files(run_dir)
-    except ValueError as exc:
-        console.print(f"[bold red]{exc}[/bold red]")
-        raise typer.Exit(code=2) from exc
+        if run_metadata.status not in _TERMINAL_STATUSES:
+            console.print(
+                f"[bold red]Run {run_id} is not in a terminal state "
+                f"(status={run_metadata.status!r}). Audit export requires one of "
+                f"{sorted(_TERMINAL_STATUSES)}.[/bold red]"
+            )
+            raise typer.Exit(code=2)
 
-    resolved_out_dir = Path(out_dir).resolve() if out_dir is not None else Path.cwd()
-    try:
-        resolved_out_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        console.print(
-            f"[bold red]Cannot create output directory {resolved_out_dir}: {exc}[/bold red]"
-        )
-        # Same exit code bucket as the path-collision case below: both are
-        # "the output path is unusable", as opposed to code 2 (non-terminal run).
-        raise typer.Exit(code=3) from exc
+        try:
+            run_files = _collect_run_files(run_dir)
+        except ValueError as exc:
+            console.print(f"[bold red]{exc}[/bold red]")
+            raise typer.Exit(code=2) from exc
 
-    bundle_path = resolved_out_dir / f"audit-{run_id}.tar.gz"
-    if bundle_path.exists() and not force:
-        console.print(
-            f"[bold red]{bundle_path} already exists. Use --force to overwrite.[/bold red]"
-        )
-        raise typer.Exit(code=3)
+        resolved_out_dir = Path(out_dir).resolve() if out_dir is not None else Path.cwd()
+        try:
+            resolved_out_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            console.print(
+                f"[bold red]Cannot create output directory {resolved_out_dir}: {exc}[/bold red]"
+            )
+            raise typer.Exit(code=3) from exc
 
-    artifact_hashes: list[ArtifactHash] = []
-    artifact_bytes: dict[str, bytes] = {}
-    for file_path in run_files:
-        rel_path = file_path.relative_to(run_dir).as_posix()
-        data, sha256 = _read_and_hash(file_path)
-        artifact_hashes.append(ArtifactHash(path=rel_path, sha256=sha256, size_bytes=len(data)))
-        artifact_bytes[rel_path] = data
+        bundle_path = resolved_out_dir / f"audit-{run_id}.tar.gz"
+        if bundle_path.exists() and not force:
+            console.print(
+                f"[bold red]{bundle_path} already exists. Use --force to overwrite.[/bold red]"
+            )
+            raise typer.Exit(code=3)
+
+        artifact_hashes: list[ArtifactHash] = []
+        artifact_bytes: dict[str, bytes] = {}
+        for file_path in run_files:
+            rel_path = file_path.relative_to(run_dir).as_posix()
+            data, sha256 = _read_and_hash(file_path)
+            artifact_hashes.append(ArtifactHash(path=rel_path, sha256=sha256, size_bytes=len(data)))
+            artifact_bytes[rel_path] = data
+
+        if _RUN_JSON_NAME in artifact_bytes:
+            run_metadata = RunMetadata(**json.loads(artifact_bytes[_RUN_JSON_NAME]))
+    finally:
+        if coordination_db_dir is not None and acquired:
+            release_repo_lock(repo_identity, effective_worker_id, db_dir=coordination_db_dir)
 
     metadata_dump = run_metadata.model_dump(mode="json")
     if redact:

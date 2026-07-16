@@ -298,6 +298,14 @@ These must not change without a new ADR in `docs/adr/`:
   redact-worthy or public, failing CI if a new field is added without classification. 6 new tests.
   Follow-up debts (no lock during export, GPG signer allowlist + untested real-binary CI path) evaluated
   during the same triage and deferred to #235/#236.
+- ✅ Issue #235 — Repo lock around export-audit's read window (2026-07-16): opt-in `worker_id`/
+  `coordination_db_dir` params on `export_audit()` hold a repo lock across the status check, file walk,
+  and hash loop — the full TOCTOU-prone read window. Lock failure aborts with exit code 8 (new). Worker
+  identity auto-generated via `uuid.uuid4().hex` (or `{worker_id}:export-audit` suffix when explicit) to
+  prevent silent same-identity bypass and reentrant-release bugs. Metadata refreshed from locked read of
+  `run.json` for manifest/tarball consistency. Supersedes the "no repo lock" non-goal from
+  `docs/planning/p4/04-audit-bundle-export.md`. No CLI flags — infrastructure for future `work_queue.py`
+  integration. 4 new tests.
 
 ### Planning
 - ✅ Issue #221 — Post-P3 roadmap consolidation (2026-07-11): new `docs/planning/roadmap.md` (Core P4–P5 with agreed cuts + explicit Deferred section) and `docs/planning/scout-vision.md` (Scout frozen as second product line). Live docs (index, README, CLAUDE.md, CONTEXT.md, thesis) repointed; obsolete P3 sprint prompts and superseded roadmaps removed.

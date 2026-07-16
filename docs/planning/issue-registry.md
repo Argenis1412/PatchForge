@@ -586,6 +586,14 @@ ADR-0004 must answer exactly five questions:
 - **Precondition:** #232 complete.
 - **Non-goals:** No redaction of unstructured log content (`events.jsonl`) — impractical without auditing every `log_event` call site. No lock during export or GPG signer allowlist — evaluated during the same triage and deferred, tracked in #235 and #236 respectively.
 
+### ✅ Issue #235: Repo lock around export-audit's read window
+- **Priority:** Tech debt closure (follow-up to #232) | **Status:** ✅ **Completed**
+- **PR:** (this branch)
+- **Goal:** Opt-in `worker_id`/`coordination_db_dir` params on `export_audit()` hold a repo lock across the status check, file walk, and hash loop. Lock failure aborts with exit code 8. Worker identity uses `uuid.uuid4().hex` or `{worker_id}:export-audit` suffix to prevent same-identity bypass and reentrant-release. Metadata refreshed from locked read for manifest/tarball consistency. Supersedes the "no repo lock" non-goal in `docs/planning/p4/04-audit-bundle-export.md`.
+- **Source:** `docs/context/discoveries.md` (debt logged during #232), triaged during P4-4 stabilization.
+- **Precondition:** #232 complete.
+- **Non-goals:** No CLI flags for `--worker-id` or `--coordination-db` (infrastructure only, for future `work_queue.py` wiring). No output-file write protection (pre-existing race, unrelated to run-directory reads).
+
 ### Approval Provenance (idea 10)
 - **Priority:** P4 | **Status:** 📐 Scoped
 - **Goal:** Two additive `RunMetadata` fields — `triggered_by` and `approved_by` — captured from `github.actor` in CI and `git config user.*` locally. PR body includes the provenance line. Additive with default per ADR-0004 (no `schema_version` bump).
