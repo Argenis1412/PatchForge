@@ -185,12 +185,27 @@ def export_audit(
         )
         if not acquired:
             console.print(
-                f"[bold red]Cannot export: {repo_identity} is locked by another "
-                "in-progress operation. Retry once it completes.[/bold red]"
+                f"[bold red]Cannot export: unable to acquire the coordination lock for "
+                f"{repo_identity} (held by another operation, or the lock backend is "
+                "unavailable). Retry once it completes.[/bold red]"
             )
             raise typer.Exit(code=8)
 
     try:
+        if coordination_db_dir is not None:
+            try:
+                run_metadata = workspace_mgr.read_run_json(run_id)
+            except (FileNotFoundError, ValueError) as exc:
+                console.print(f"[bold red]Run not found: {exc}[/bold red]")
+                raise typer.Exit(code=1) from exc
+            refreshed_identity = str(Path(run_metadata.target_path).resolve())
+            if refreshed_identity != repo_identity:
+                console.print(
+                    f"[bold red]Run {run_id}'s target_path changed while acquiring the "
+                    "lock; aborting export as unsafe.[/bold red]"
+                )
+                raise typer.Exit(code=2)
+
         if run_metadata.status not in _TERMINAL_STATUSES:
             console.print(
                 f"[bold red]Run {run_id} is not in a terminal state "
