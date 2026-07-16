@@ -570,12 +570,13 @@ ADR-0004 must answer exactly five questions:
 - **Precondition:** None.
 - **Non-goals:** No new providers or custom endpoints; no multi-model cost table; no changes to fallback chain or risk-level routing. Override of Claude records `cost_llm: null` + warning rather than a wrong number.
 
-### Audit Bundle Export (idea 7)
-- **Priority:** P4 | **Status:** 📐 Scoped
-- **Goal:** `patchforge export-audit <run_id>` produces `audit-<run_id>.tar.gz` + `manifest.json` with SHA-256 of every artifact, PatchForge version, `schema_version`, providers used, `commit_anchor`, timestamp. Optional GPG signing via `--sign`. `--verify` recomputes hashes.
+### ✅ Issue #232: Audit Bundle Export (idea 7)
+- **Priority:** P4 | **Status:** ✅ **Completed**
+- **PR:** (this branch)
+- **Goal:** `patchforge export-audit <run_id>` produces `audit-<run_id>.tar.gz` + `manifest.json` with SHA-256 of every artifact, PatchForge version, `commit_anchor`, timestamp, and a full structural mirror of `RunMetadata` (providers used included via `provider_config`). Optional GPG signing via `--sign`. `patchforge verify-audit <bundle>` recomputes hashes entirely in memory (no disk extraction) and detects tampering, missing artifacts, and injected/undeclared artifacts. `--require-signature` makes signature absence a verifier-side policy failure.
 - **Source:** `docs/planning/roadmap.md`
-- **Precondition:** Provider Registry complete (audit manifest must record the exact model used).
-- **Non-goals:** No upload to external services (S3, artifact registries); no multi-run chain of custody; no RFC 3161 timestamping.
+- **Precondition:** Provider Registry complete (audit manifest must record the exact model used) — satisfied by #230.
+- **Non-goals:** No upload to external services (S3, artifact registries); no multi-run chain of custody; no RFC 3161 timestamping; no redaction of sensitive `RunMetadata` fields (full mirror is architecturally mandated, see `docs/planning/p4/04-audit-bundle-export.md`).
 
 ### Approval Provenance (idea 10)
 - **Priority:** P4 | **Status:** 📐 Scoped
