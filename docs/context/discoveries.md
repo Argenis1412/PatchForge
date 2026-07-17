@@ -48,12 +48,26 @@
 - **Resolution:** Issue #236 added a CI step that generates an ephemeral RSA-2048 keypair in an isolated `GNUPGHOME` (via `mktemp -d`, exported through `GITHUB_ENV`) before the test steps run. A post-generation check (`gpg --list-secret-keys | grep -q sec`) fails the step loudly if the key wasn't actually usable, preventing a silent regression back to skip-only behavior. Accepted risk: keyring contention under parallel test execution is avoided today because `pytest -n auto --dist loadfile` groups same-file tests onto one xdist worker, not because of an explicit lock; flagged for revisit if CI flakiness appears or the dist strategy changes.
 - **Bug caught by this fix:** `test_gpg_mutated_signature_fails_verify` simulated tampering by appending `b"\nMUTATED\n"` after `-----END PGP SIGNATURE-----`. gpg's armor parser stops reading at the END marker, so the appended bytes were silently ignored and the original signature still verified successfully — the test asserted a failure that real gpg never produced. Undetected for as long as the test was skip-guarded; surfaced immediately once CI exercised the real binary (first CI run on #236's PR failed with "DID NOT RAISE Exit"). Fixed in the same PR by flipping a byte inside the armored body instead of appending after it, which corrupts the actual signature packet (confirmed against the real gpg binary locally: `gpg --verify` returns exit 2 / "invalid packet").
 
-### [2026-07-17] Dogfooding 010 — Scanner's ruff/pytest availability check breaks on venv-less clones
+### ✅ [2026-07-17] Dogfooding 010 — Scanner's ruff/pytest availability check breaks on venv-less clones (RESOLVED in #250)
 
 - **File:** `src/orchestrator/scanners/python.py:53-55` (`_detect_tool`)
 - **Debt:** `_detect_tool()` uses `shutil.which(cmd)` to decide `v1_supported`. A fresh clone with no local `.venv` fails this scan-time check even when the same Python interpreter running PatchForge could invoke `ruff`/`pytest` via `-m` — the exact scenario dogfooding-009 already fixed for the *validator* (`sys.executable -m <tool>` in `runners.py`), but that fix never reached this scanner-side detection.
 - **Discovered by:** Dogfooding-010, Run A
-- **Why deferred:** Out of scope for P4; the dogfooding-009 pattern should likely be extended to `_detect_tool`, but that's a scanner change independent of the P4 items under test.
+- **Resolution:** Issue #250 split `_detect_tool` into `_probe_module` (tries `sys.executable -m <tool> --version` first, mirroring the validator's default invocation) and `_probe_path` (the original `shutil.which` + bare-command check, kept as a fallback for `cmd_override` users). Only `rc==0` on the module probe counts as a hit; timeout/OSError/non-zero rc all fall through to PATH, since none of them prove the module isn't importable. This fix does not eliminate the inverse case (tool on PATH but not importable via `-m`) — see the two new discoveries logged below.
+
+### [2026-07-17] Issue #250 — Scanner and doctor now disagree on tool availability on venv-less clones
+
+- **File:** `src/orchestrator/doctor.py:13-32` (`check_command_available`) vs. `src/orchestrator/scanners/python.py` (`_detect_tool`)
+- **Debt:** Issue #250 gave `scan`'s tool detection a `sys.executable -m <tool>` probe before falling back to PATH. `doctor.py`'s `check_command_available()` still only checks PATH via a bare command. Confirmed by grep that `doctor.py` does not call `_detect_tool` — the two are independent implementations. Result: on a venv-less clone where ruff/pytest are only importable (not on PATH), `patchforge scan` now reports `v1_supported: true` while `patchforge doctor` still reports the tools as missing.
+- **Discovered by:** Implementation of #250 (flagged during adversarial plan review, confirmed by grep before implementation)
+- **Why deferred:** Different surface (`doctor.py`), different callers, different test file (`tests/test_doctor.py` presumably). Out of scope for #250's Golden-Rule-minimal diff; the `sys.executable -m` pattern should likely be extended to `check_command_available` in a follow-up issue.
+
+### [2026-07-17] Issue #250 — Scanner cannot distinguish "available via PATH" from "available via the validator's default `-m` invocation"
+
+- **File:** `src/orchestrator/scanners/python.py` (`_detect_tool` / `_probe_path`)
+- **Debt:** After #250, `_detect_tool` accepts *either* a successful `sys.executable -m <tool>` probe *or* a PATH-based probe as evidence of availability. This is necessary because the scanner doesn't know whether the validator will run with its default invocation (`-m`) or a user-configured `cmd_override` (typically a bare PATH command) — but it means a tool installed via pipx (on PATH, not importable by the running interpreter) is reported `available: true` by `scan` even though the validator's *default* `-m` invocation would fail against it. `test_detect_tool_falls_back_to_path_when_module_missing` in `tests/test_scan.py` documents this exact scenario.
+- **Discovered by:** Adversarial plan review during #250 planning (a first draft of the issue incorrectly claimed this false positive was eliminated; corrected before implementation)
+- **Why deferred:** Fixing this properly requires the scanner to read the validator's configured invocation form from `orchestrator.json` (`cmd_override` vs default) — a larger, separate change with its own config-reading surface and test plan. Out of scope for #250.
 
 ### ✅ [2026-07-17] Dogfooding 010 — Provider Registry (#230) is not wired into the architect stage (RESOLVED in #246)
 
