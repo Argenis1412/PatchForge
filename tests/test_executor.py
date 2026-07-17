@@ -430,6 +430,151 @@ class TestValidatePythonContent:
         assert "not valid Python" in result
 
 
+# ---------------------------------------------------------------------------
+# Issue #245 — Fence-stripping fallback for LLM output
+# ---------------------------------------------------------------------------
+
+
+class TestStripFences:
+    @pytest.mark.unit
+    def test_no_fences(self):
+        from orchestrator.agents.executor.validation import strip_fences
+
+        assert strip_fences("x = 1\n") == "x = 1\n"
+
+    @pytest.mark.unit
+    def test_backtick_no_lang(self):
+        from orchestrator.agents.executor.validation import strip_fences
+
+        assert strip_fences("```\nx = 1\n```") == "x = 1"
+
+    @pytest.mark.unit
+    def test_backtick_with_lang(self):
+        from orchestrator.agents.executor.validation import strip_fences
+
+        assert strip_fences("```python\nx = 1\n```") == "x = 1"
+
+    @pytest.mark.unit
+    def test_backtick_with_lang_and_spaces(self):
+        from orchestrator.agents.executor.validation import strip_fences
+
+        assert strip_fences("``` python \nx = 1\n``` ") == "x = 1"
+
+    @pytest.mark.unit
+    def test_tilde(self):
+        from orchestrator.agents.executor.validation import strip_fences
+
+        assert strip_fences("~~~\nx = 1\n~~~") == "x = 1"
+
+    @pytest.mark.unit
+    def test_tilde_with_lang(self):
+        from orchestrator.agents.executor.validation import strip_fences
+
+        assert strip_fences("~~~python\nx = 1\n~~~") == "x = 1"
+
+    @pytest.mark.unit
+    def test_preamble_before_fence(self):
+        from orchestrator.agents.executor.validation import strip_fences
+
+        result = strip_fences("Here is the file:\n```python\nx = 1\n```")
+        assert result == "x = 1"
+
+    @pytest.mark.unit
+    def test_trailing_after_fence(self):
+        from orchestrator.agents.executor.validation import strip_fences
+
+        result = strip_fences("```python\nx = 1\n```\nLet me know if you need anything else.")
+        assert result == "x = 1"
+
+    @pytest.mark.unit
+    def test_inner_backticks_preserved(self):
+        from orchestrator.agents.executor.validation import strip_fences
+
+        content = '```python\ndef f():\n    """example: `x`"""\n    return 1\n```'
+        result = strip_fences(content)
+        assert result == 'def f():\n    """example: `x`"""\n    return 1'
+
+    @pytest.mark.unit
+    def test_only_opening_fence_no_strip(self):
+        from orchestrator.agents.executor.validation import strip_fences
+
+        content = "```python\nx = 1"
+        assert strip_fences(content) == content
+
+    @pytest.mark.unit
+    def test_empty_content_between_fences(self):
+        from orchestrator.agents.executor.validation import strip_fences
+
+        assert strip_fences("```\n```") == ""
+
+    @pytest.mark.unit
+    def test_mismatched_fence_types_no_strip(self):
+        from orchestrator.agents.executor.validation import strip_fences
+
+        content = "```python\nx = 1\n~~~"
+        assert strip_fences(content) == content
+
+    @pytest.mark.unit
+    def test_trailing_whitespace_on_fence_line(self):
+        from orchestrator.agents.executor.validation import strip_fences
+
+        assert strip_fences("```python   \nx = 1\n```   ") == "x = 1"
+
+    @pytest.mark.unit
+    def test_special_lang_tags(self):
+        from orchestrator.agents.executor.validation import strip_fences
+
+        assert strip_fences("```c++\nint x = 1;\n```") == "int x = 1;"
+        assert strip_fences("```objective-c\nint x = 1;\n```") == "int x = 1;"
+        assert strip_fences("```f#\nlet x = 1\n```") == "let x = 1"
+
+    @pytest.mark.unit
+    def test_multiple_blocks_no_strip(self):
+        from orchestrator.agents.executor.validation import strip_fences
+
+        content = "```python\nx = 1\n```\nSome text\n```python\ny = 2\n```"
+        assert strip_fences(content) == content
+
+    @pytest.mark.unit
+    def test_multiline_real_file(self):
+        from orchestrator.agents.executor.validation import strip_fences
+
+        body = "import os\n\n\ndef main():\n    print(os.getcwd())\n"
+        content = f"```python\n{body}```"
+        assert strip_fences(content) == body.strip()
+
+
+@pytest.mark.unit
+def test_apply_task_skips_markdown_files(tmp_path, monkeypatch):
+    from orchestrator.agents.executor.applier import _apply_task
+
+    source_file = tmp_path / "README.md"
+    source_file.write_text("# Title\n", encoding="utf-8")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    fenced = "```\n# Title\n\nSome fenced content in the actual markdown.\n```"
+
+    task = Task(
+        task_id="t1",
+        title="Update readme",
+        description="desc",
+        files_to_modify=["README.md"],
+        priority="low",
+        effort="low",
+        risk_level="low",
+        dependencies=[],
+    )
+
+    cb_gemini_mock = MagicMock()
+    cb_gemini_mock.call.side_effect = lambda fn: (fenced, 10, 10)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini_mock)
+
+    result = _apply_task(task, "run1", tmp_path, staging)
+
+    assert result.modified_content == fenced + "\n"
+
+
 @pytest.mark.unit
 def test_apply_task_rejects_xml_output(tmp_path, monkeypatch):
     from orchestrator.agents.executor.applier import _apply_task

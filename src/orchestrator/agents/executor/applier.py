@@ -10,7 +10,7 @@ from orchestrator.schemas.executor_output import FileChange, TaskStatus
 from .diffing import _make_diff
 from .logging import _get_logger
 from .providers import _PROVIDER_CHAIN, MAX_RETRIES, _call_chain, _provider_by_name
-from .validation import validate_python_content
+from .validation import strip_fences, validate_python_content
 
 
 def _build_prompt(task: Task, file_path: Path, file_content: str) -> str:
@@ -151,6 +151,9 @@ def _apply_task(
         )
 
     assert modified_content is not None
+
+    if not relative_path.endswith((".md", ".markdown")):
+        modified_content = strip_fences(modified_content)
 
     cost_usd = cost_this_call if cost_this_call is not None else 0.0
 
