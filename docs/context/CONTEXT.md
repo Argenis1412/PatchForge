@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-07-15
+> Last updated: 2026-07-17
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 835 passed, 5 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 860 passed, 5 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3). `SqliteCircuitBreakerStore` is now thread-safe (issue #219).
 
@@ -326,6 +326,8 @@ These must not change without a new ADR in `docs/adr/`:
 ### Tech Debt Closure
 - ✅ Issue #219 — CB thread-safety gaps pre-P3 (#219): `_sqlite_connect()` opt-in `check_same_thread=False` + `SqliteCircuitBreakerStore._conn_lock`; `_registry_lock` in `circuit_breaker_for()`; `_init_lock` in `providers._init_circuit_breakers()`. Lock ordering documented. 2 regression tests.
 - ✅ Issue #212 — Close verified tech debt: 7 entries marked ✅, harden ci apply (`git add -A` → targeted staging via `parse_diff_files`), centralize `PROJECT_ROOT` in `orchestrator/paths.py`
+- ✅ Issue #245 — Fence-stripping fallback for executor LLM output (2026-07-17, PR #247), discovered in Dogfooding-010: new `strip_fences()` in `validation.py`, called from `applier.py` right before `.py` syntax validation. Handles ``` and ~~~ fences (with/without language tags, including `c++`/`f#`/`objective-c`), preamble/trailing text, and preserves inner backticks — only strips when exactly one complete fence pair is found, so ambiguous content (unclosed, mismatched types, multiple pairs) is left untouched. Skips `.md`/`.markdown` files. `_strip_markdown()` in `providers.py` (naive, can corrupt inner-backtick content) is left as a documented known limitation, not fixed here. 16 new tests.
+- ✅ Issue #246 — Provider Registry wired into architect and scout (2026-07-17, PR #248), discovered in Dogfooding-010: `init_provider_models(config)` now runs in both `architect.run()`/`run_from_issue()` and `scout.run()` before their first LLM call, so a model pinned in `orchestrator.json` finally affects `plan` and scout's reconnaissance passes — previously only `executor`/`validator` honored the registry. Local `_MODEL_MAP`/`_COST_RATES` in both agents were removed; `model_used` resolves via the shared `_get_model()`, and cost is taken directly from `_call_chain()` (nullable via `_compute_cost()`'s existing guard) instead of being recomputed against a stale rate table that silently produced wrong numbers on an override. `log_call` and console cost prints were made `None`-safe end-to-end. 10 new tests.
 
 **Recent:**
 - ✅ Issue #223 — Validator PATH resolution via `sys.executable -m` (2026-07-12, PR #224): `run_ruff()`/`run_pytest()`

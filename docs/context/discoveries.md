@@ -55,19 +55,19 @@
 - **Discovered by:** Dogfooding-010, Run A
 - **Why deferred:** Out of scope for P4; the dogfooding-009 pattern should likely be extended to `_detect_tool`, but that's a scanner change independent of the P4 items under test.
 
-### [2026-07-17] Dogfooding 010 — Provider Registry (#230) is not wired into the architect stage
+### ✅ [2026-07-17] Dogfooding 010 — Provider Registry (#230) is not wired into the architect stage (RESOLVED in #246)
 
 - **File:** `src/orchestrator/agents/architect/provider.py:19-33` vs. `src/orchestrator/agents/executor/providers.py:49-63`
 - **Debt:** `init_provider_models(config)` — the function that resolves `orchestrator.json`'s `providers.*.model` pins — is called only from `agents/executor/__init__.py:96` and `agents/validator/__init__.py:44`. The architect's `provider.py` has its own hardcoded `_ARCHITECT_CHAIN` and hardcoded `_MODEL_MAP`, and never reads `TargetConfig.providers` at all, so pinning a model in `orchestrator.json` has zero effect on `plan` — confirmed directly across 5 dogfooding runs, all of which used `claude-sonnet-4-6` for `plan` despite a Gemini pin.
 - **Discovered by:** Dogfooding-010, Runs A through C
-- **Why deferred:** Requires a product decision on whether the architect should honor Provider Registry too (likely yes) before scoping a fix issue; out of scope for this dogfooding.
+- **Resolution:** Issue #246 (PR #248) wires `init_provider_models(config)` into both `architect.run()`/`run_from_issue()` and `scout.run()`, before their first LLM call. Both agents' local `_MODEL_MAP`/`_COST_RATES` were removed; `model_used` now resolves via the shared `_get_model()`, and cost comes straight from `_call_chain()` (already nullable when a model is overridden, via `_compute_cost()`'s guard) instead of being recomputed against a stale rate table. `log_call` and all cost print statements were made `None`-safe so an overridden model with an unknown cost reports "unknown" instead of a wrong number or a crash. 10 new tests.
 
-### [2026-07-17] Dogfooding 010 — Executor has no markdown-fence-stripping fallback for LLM output
+### ✅ [2026-07-17] Dogfooding 010 — Executor has no markdown-fence-stripping fallback for LLM output (RESOLVED in #245)
 
 - **File:** `src/orchestrator/agents/executor/applier.py:28,51` (prompt), `src/orchestrator/agents/executor/validation.py:19` (`ast.parse` rejects the result)
 - **Debt:** The executor prompt instructs the model not to wrap output in markdown fences, but there is no defensive stripping if it does anyway. When routing falls to a weaker/free model, this produced a reproducible `"LLM output is not valid Python (line 1): invalid syntax"` failure in 3 of 5 preview attempts during this dogfooding session. The `ast.parse` safety net correctly prevents bad content from being applied, but there's no recovery — the task just errors out and burns the call.
 - **Discovered by:** Dogfooding-010, Runs B and B2
-- **Why deferred:** Out of scope for P4/this dogfooding; a stripping helper (detect and strip a leading/trailing fence line before `ast.parse`) would likely fix most cases cheaply.
+- **Resolution:** Issue #245 (PR #247) added `strip_fences()` in `validation.py`, called from `applier.py` right before Python syntax validation. Handles ``` and ~~~ fences (with or without language tags, including `c++`/`f#`/`objective-c`), preamble/trailing text around a single fence pair, and preserves inner backticks. Only strips when exactly one complete fence pair is found — ambiguous content (no fences, unclosed, mismatched types, multiple pairs) passes through unchanged. Skips `.md`/`.markdown` files, where fences are legitimate content. `_strip_markdown()` in `providers.py` is left untouched as a documented known limitation (its naive `split()` can corrupt content with inner backticks before `strip_fences` ever sees it). 16 new tests.
 
 ### [2026-07-17] Dogfooding 010 — `--risk-budget high` is functionally a no-op vs. `medium`
 
