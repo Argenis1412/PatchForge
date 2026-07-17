@@ -272,6 +272,169 @@ def test_init_provider_models_none_config():
 
 
 @pytest.mark.unit
+def test_architect_run_calls_init_provider_models_before_llm_call(tmp_path, monkeypatch):
+    """Issue #246: architect.run() must resolve the registry before calling the LLM,
+    regardless of entry point — plan.py never did this before."""
+    from orchestrator.agents.architect import run
+    from orchestrator.schemas.scout_output import ScoutOutput
+
+    config = _config(
+        tmp_path,
+        ProvidersConfig(claude=ProviderModelConfig(model="claude-3-5-haiku-20241022")),
+    )
+    scout_output = ScoutOutput(hotspots=[], summary="s", risks=["r"], recommended_order=[])
+
+    calls: list = []
+    original_init = init_provider_models
+
+    def _spy_init(cfg):
+        calls.append(cfg)
+        return original_init(cfg)
+
+    monkeypatch.setattr("orchestrator.agents.architect.init_provider_models", _spy_init)
+    monkeypatch.setattr(
+        "orchestrator.agents.architect.call_claude",
+        lambda *a, **kw: (
+            '{"validated_findings": [], "false_positives": [], "systemic_risks": [],'
+            ' "implementation_plan": [], "blockers": []}',
+            {"input": 1, "output": 1},
+            None,
+            "claude-3-5-haiku-20241022",
+        ),
+    )
+
+    run(scout_output, config=config)
+
+    assert calls == [config]
+    assert _get_model("claude") == "claude-3-5-haiku-20241022"
+
+
+@pytest.mark.unit
+def test_architect_run_from_issue_uses_registry_resolved_model(tmp_path, monkeypatch):
+    """run_from_issue() already receives config as a parameter — it must also
+    resolve the registry, not just run()."""
+    from orchestrator.agents.architect import run_from_issue
+    from orchestrator.schemas.issue import IssueInput
+
+    config = _config(
+        tmp_path,
+        ProvidersConfig(claude=ProviderModelConfig(model="claude-3-5-haiku-20241022")),
+    )
+    issue = IssueInput(title="t", severity="low", labels=[], body="b", raw="b")
+
+    monkeypatch.setattr(
+        "orchestrator.agents.architect.call_claude",
+        lambda *a, **kw: (
+            '{"validated_findings": [], "false_positives": [], "systemic_risks": [],'
+            ' "implementation_plan": [], "blockers": []}',
+            {"input": 1, "output": 1},
+            None,
+            "claude-3-5-haiku-20241022",
+        ),
+    )
+
+    _, meta = run_from_issue(issue, config=config)
+
+    assert meta["model_used"] == "claude-3-5-haiku-20241022"
+    assert meta["cost_usd"] is None
+
+
+@pytest.mark.unit
+def test_architect_run_prints_unknown_cost_without_crash(tmp_path, monkeypatch, capsys):
+    """AC10: the pre-implementation print must not crash with cost=None."""
+    from orchestrator.agents.architect import run
+    from orchestrator.schemas.scout_output import ScoutOutput
+
+    config = _config(
+        tmp_path,
+        ProvidersConfig(claude=ProviderModelConfig(model="claude-3-5-haiku-20241022")),
+    )
+    scout_output = ScoutOutput(hotspots=[], summary="s", risks=["r"], recommended_order=[])
+
+    monkeypatch.setattr(
+        "orchestrator.agents.architect.call_claude",
+        lambda *a, **kw: (
+            '{"validated_findings": [], "false_positives": [], "systemic_risks": [],'
+            ' "implementation_plan": [], "blockers": []}',
+            {"input": 1, "output": 1},
+            None,
+            "claude-3-5-haiku-20241022",
+        ),
+    )
+
+    _, meta = run(scout_output, config=config)
+
+    assert meta["cost_usd"] is None
+    assert "unknown" in capsys.readouterr().out
+
+
+@pytest.mark.unit
+def test_scout_run_calls_init_provider_models_before_llm_call(tmp_path, monkeypatch):
+    """Issue #246: scout.run() must resolve the registry before calling Gemini."""
+    from orchestrator.agents.scout import run
+
+    config = _config(
+        tmp_path,
+        ProvidersConfig(gemini=ProviderModelConfig(model="gemini-2.5-pro")),
+    )
+    (tmp_path / "main.py").write_text("x = 1\n", encoding="utf-8")
+
+    calls: list = []
+    original_init = init_provider_models
+
+    def _spy_init(cfg):
+        calls.append(cfg)
+        return original_init(cfg)
+
+    monkeypatch.setattr("orchestrator.agents.scout.init_provider_models", _spy_init)
+    scout_json = '{"hotspots": [], "summary": "s", "risks": [], "recommended_order": []}'
+    monkeypatch.setattr(
+        "orchestrator.agents.scout.call_gemini",
+        lambda *a, **kw: (
+            "[]" if kw.get("span_id") == "scout_pass1" else scout_json,
+            {"input": 1, "output": 1},
+            None,
+            "gemini-2.5-pro",
+        ),
+    )
+
+    run(config)
+
+    assert len(calls) == 1
+    assert calls[0].target_path == config.target_path
+    assert _get_model("gemini") == "gemini-2.5-pro"
+
+
+@pytest.mark.unit
+def test_scout_run_none_cost_aggregation_does_not_crash(tmp_path, monkeypatch, capsys):
+    """AC8: pass1 and pass2 both returning cost=None must not raise a TypeError
+    when scout aggregates total cost, and prints must show 'unknown' not crash."""
+    from orchestrator.agents.scout import run
+
+    config = _config(
+        tmp_path,
+        ProvidersConfig(gemini=ProviderModelConfig(model="gemini-2.5-pro")),
+    )
+    (tmp_path / "main.py").write_text("x = 1\n", encoding="utf-8")
+
+    scout_json = '{"hotspots": [], "summary": "s", "risks": [], "recommended_order": []}'
+    monkeypatch.setattr(
+        "orchestrator.agents.scout.call_gemini",
+        lambda *a, **kw: (
+            "[]" if kw.get("span_id") == "scout_pass1" else scout_json,
+            {"input": 1, "output": 1},
+            None,
+            "gemini-2.5-pro",
+        ),
+    )
+
+    output, meta = run(config)
+
+    assert meta["cost_usd"] is None
+    assert "unknown" in capsys.readouterr().out
+
+
+@pytest.mark.unit
 def test_openrouter_override_reaches_sdk(tmp_path, monkeypatch):
     """An openrouter override in config flows through to the HTTP payload."""
     config = _config(

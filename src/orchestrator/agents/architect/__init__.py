@@ -12,7 +12,8 @@ from typing import Optional, Union
 
 from orchestrator.agents.architect.file_collector import build_target_files_block
 from orchestrator.agents.architect.prompts import ARCHITECT_PROMPT, ISSUE_ARCHITECT_PROMPT
-from orchestrator.agents.architect.provider import MODEL, call_claude
+from orchestrator.agents.architect.provider import call_claude
+from orchestrator.agents.executor.providers import _get_model, init_provider_models
 from orchestrator.llm.parser import LLMParseError, SchemaValidationError, parse_llm_response
 from orchestrator.observability.events import FailureType, log_failure
 from orchestrator.schemas.architect_output import ArchitectOutput
@@ -34,6 +35,7 @@ def run(
         if isinstance(config, (str, Path)):
             config = TargetConfig.load(target_path=Path(config))
         logs_dir = config.workspace_path / "logs"
+    init_provider_models(config)
 
     print("[Architect] Processing ScoutOutput object...")
     scout_data = scout_output.model_dump_json()
@@ -42,7 +44,7 @@ def run(
     print(
         f"[Architect] Target files: {len(paths)} of {total} paths injected (truncated={truncated})"
     )
-    display_model = force_provider or MODEL
+    display_model = force_provider or _get_model("claude")
     print(f"[Architect] Asking {display_model} to structure the implementation plan...")
 
     raw_response, tokens, cost, model_used = call_claude(
@@ -56,7 +58,8 @@ def run(
         force_provider=force_provider,
     )
 
-    print(f"[Architect] Done | model={model_used} | tokens: {tokens} | cost: ${cost:.5f}")
+    cost_display = f"${cost:.5f}" if cost is not None else "unknown"
+    print(f"[Architect] Done | model={model_used} | tokens: {tokens} | cost: {cost_display}")
 
     # Validate JSON via canonical parser
     try:
@@ -115,6 +118,7 @@ def run_from_issue(
         if isinstance(config, (str, Path)):
             config = TargetConfig.load(target_path=Path(config))
         logs_dir = config.workspace_path / "logs"
+    init_provider_models(config)
 
     print("[Architect] Processing IssueInput object...")
 
@@ -133,7 +137,7 @@ def run_from_issue(
         body=_escape(issue_input.body),
         target_files=_escape(target_files_block),
     )
-    display_model = force_provider or MODEL
+    display_model = force_provider or _get_model("claude")
     print(f"[Architect] Asking {display_model} to structure the implementation plan...")
 
     raw_response, tokens, cost, model_used = call_claude(
@@ -147,7 +151,8 @@ def run_from_issue(
         force_provider=force_provider,
     )
 
-    print(f"[Architect] Done | model={model_used} | tokens: {tokens} | cost: ${cost:.5f}")
+    cost_display = f"${cost:.5f}" if cost is not None else "unknown"
+    print(f"[Architect] Done | model={model_used} | tokens: {tokens} | cost: {cost_display}")
 
     # Validate JSON via canonical parser
     try:

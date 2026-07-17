@@ -214,12 +214,15 @@ class TestArchitectFallback:
 
 class TestArchitectProviderChain:
     @pytest.mark.unit
-    def test_gemini_fallback_uses_gemini_cost_rates(self, monkeypatch):
+    def test_gemini_fallback_uses_registry_resolved_model_and_chain_cost(self, monkeypatch):
+        """Issue #246: architect no longer recomputes cost locally — it uses
+        whatever _call_chain already computed (via _compute_cost), and resolves
+        model_used through the shared Provider Registry (_get_model)."""
         from orchestrator.agents.architect import provider as arch_provider
         from orchestrator.agents.executor.providers import ProviderChainResult
 
         chain_result = ProviderChainResult(
-            success=(_CLEAN_JSON, 1_000_000, 1_000_000, 0.0),
+            success=(_CLEAN_JSON, 1_000_000, 1_000_000, 0.375),
             provider_name="gemini",
         )
         monkeypatch.setattr(arch_provider, "_call_chain", lambda *a, **kw: chain_result)
@@ -229,17 +232,16 @@ class TestArchitectProviderChain:
 
         assert raw == _CLEAN_JSON
         assert model_used == "gemini-2.5-flash"
-        # Gemini rates: 0.075 in + 0.30 out per 1M tokens
-        assert cost == pytest.approx(0.075 + 0.30)
+        assert cost == pytest.approx(0.375)
         assert tokens == {"input": 1_000_000, "output": 1_000_000}
 
     @pytest.mark.unit
-    def test_claude_default_cost_rates(self, monkeypatch):
+    def test_claude_default_uses_registry_resolved_model_and_chain_cost(self, monkeypatch):
         from orchestrator.agents.architect import provider as arch_provider
         from orchestrator.agents.executor.providers import ProviderChainResult
 
         chain_result = ProviderChainResult(
-            success=(_CLEAN_JSON, 1_000_000, 1_000_000, 0.0),
+            success=(_CLEAN_JSON, 1_000_000, 1_000_000, 18.0),
             provider_name="claude",
         )
         monkeypatch.setattr(arch_provider, "_call_chain", lambda *a, **kw: chain_result)
@@ -248,8 +250,31 @@ class TestArchitectProviderChain:
         _, _, cost, model_used = arch_provider.call_claude("prompt", "architect")
 
         assert model_used == "claude-sonnet-4-6"
-        # Claude rates: 3.00 in + 15.00 out per 1M tokens
-        assert cost == pytest.approx(3.00 + 15.00)
+        assert cost == pytest.approx(18.0)
+
+    @pytest.mark.unit
+    def test_none_cost_propagates_when_model_overridden(self, monkeypatch):
+        """AC6: when _call_chain reports cost=None (overridden model with an
+        unknown cost table), architect must propagate None, not coerce to 0.0."""
+        from orchestrator.agents.architect import provider as arch_provider
+        from orchestrator.agents.executor.providers import ProviderChainResult
+
+        chain_result = ProviderChainResult(
+            success=(_CLEAN_JSON, 1_000_000, 1_000_000, None),
+            provider_name="claude",
+        )
+        monkeypatch.setattr(arch_provider, "_call_chain", lambda *a, **kw: chain_result)
+        logged_costs = []
+        monkeypatch.setattr(
+            arch_provider,
+            "log_call",
+            lambda *a, **kw: logged_costs.append(kw.get("cost_usd")),
+        )
+
+        _, _, cost, _ = arch_provider.call_claude("prompt", "architect")
+
+        assert cost is None
+        assert logged_costs == [None]
 
     @pytest.mark.unit
     def test_chain_exhausted_raises_provider_error(self, monkeypatch):
