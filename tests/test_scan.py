@@ -775,7 +775,8 @@ def test_detect_tool_found_via_module_when_not_on_path():
 
 
 def test_detect_tool_probes_module_form_first():
-    """No existing test pinned the literal -m argv sequence; this one does."""
+    """No existing test pinned the literal -m argv sequence; this one does.
+    Also asserts a successful module probe never falls through to PATH."""
     from unittest.mock import MagicMock
 
     calls = []
@@ -789,12 +790,15 @@ def test_detect_tool_probes_module_form_first():
         return result
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", return_value="/usr/bin/ruff"),
+        patch(
+            "orchestrator.scanners.python.shutil.which", return_value="/usr/bin/ruff"
+        ) as mock_which,
         patch("orchestrator.scanners.python.subprocess.run", side_effect=_record),
     ):
         _detect_tool("ruff")
 
     assert calls[0] == [_sys.executable, "-m", "ruff", "--version"]
+    mock_which.assert_not_called()
 
 
 def test_detect_tool_module_probe_empty_output_still_available():

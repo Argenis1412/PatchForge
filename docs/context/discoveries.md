@@ -50,7 +50,7 @@
 
 ### ✅ [2026-07-17] Dogfooding 010 — Scanner's ruff/pytest availability check breaks on venv-less clones (RESOLVED in #250)
 
-- **File:** `src/orchestrator/scanners/python.py:53-55` (`_detect_tool`)
+- **File:** `src/orchestrator/scanners/python.py:100-112` (`_detect_tool`)
 - **Debt:** `_detect_tool()` uses `shutil.which(cmd)` to decide `v1_supported`. A fresh clone with no local `.venv` fails this scan-time check even when the same Python interpreter running PatchForge could invoke `ruff`/`pytest` via `-m` — the exact scenario dogfooding-009 already fixed for the *validator* (`sys.executable -m <tool>` in `runners.py`), but that fix never reached this scanner-side detection.
 - **Discovered by:** Dogfooding-010, Run A
 - **Resolution:** Issue #250 split `_detect_tool` into `_probe_module` (tries `sys.executable -m <tool> --version` first, mirroring the validator's default invocation) and `_probe_path` (the original `shutil.which` + bare-command check, kept as a fallback for `cmd_override` users). Only `rc==0` on the module probe counts as a hit; timeout/OSError/non-zero rc all fall through to PATH, since none of them prove the module isn't importable. This fix does not eliminate the inverse case (tool on PATH but not importable via `-m`) — see the two new discoveries logged below.

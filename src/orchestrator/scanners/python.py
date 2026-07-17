@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import tomllib
 from pathlib import Path
 from typing import Optional
@@ -44,6 +45,13 @@ DEFAULT_IGNORE_DIRS: frozenset[str] = frozenset(
 # Filenames that indicate a likely application entry point.
 _ENTRY_POINTS: frozenset[str] = frozenset({"main.py", "app.py", "cli.py", "__main__.py"})
 
+# cwd for the `-m` tool-version probe. `python -m` prepends the process's cwd
+# to sys.path, so if the probe inherited the scanned repo's directory (e.g. a
+# user running `patchforge scan .` from inside the target repo), a malicious
+# `ruff.py`/`ruff/` at the repo root would shadow the real package. Pin the
+# probe to a directory that is never the scanned target.
+_PROBE_CWD = Path(tempfile.gettempdir())
+
 
 # ---------------------------------------------------------------------------
 # Private helpers
@@ -57,13 +65,21 @@ def _probe_module(cmd: str) -> Optional[ToolInfo]:
     ``agents/validator/runners.py``). Returns ``None`` on any non-success
     outcome (non-zero exit, timeout, or OSError) — none of those prove the
     module is importable, so the caller must fall back to a PATH probe.
+
+    Runs from :data:`_PROBE_CWD` with ``PYTHONPATH`` stripped so the probe
+    cannot resolve *cmd* from the scanned repository instead of the real
+    installed package (see :data:`_PROBE_CWD`'s docstring).
     """
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
     try:
         res = subprocess.run(
             [sys.executable, "-m", cmd, "--version"],
             capture_output=True,
             text=True,
             timeout=10,
+            cwd=_PROBE_CWD,
+            env=env,
         )
     except (subprocess.TimeoutExpired, OSError):
         return None
