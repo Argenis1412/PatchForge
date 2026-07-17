@@ -116,6 +116,24 @@ class TestLogCall:
         assert entry["run_id"] is None
         assert entry["event"] == "llm_call"
 
+    def test_none_cost_does_not_crash_and_writes_null(self, tmp_path: Path) -> None:
+        """Issue #246: an overridden model with an unknown cost table produces
+        cost_usd=None from the provider chain — log_call must not crash on
+        round(None, 5) and must serialize it as JSON null, not 0.0."""
+        log_call(
+            agent="test_agent",
+            prompt="hello",
+            response="world",
+            tokens={"input": 10, "output": 20},
+            cost_usd=None,
+            logs_dir=tmp_path,
+        )
+        legacy = json.loads((tmp_path / "test_agent.log").read_text())
+        assert legacy["cost_usd"] is None
+
+        llm_entry = json.loads((tmp_path / "llm_calls.jsonl").read_text())
+        assert llm_entry["data"]["cost_usd"] is None
+
     def test_with_error_sets_level_error(self, tmp_path: Path) -> None:
         log_call(
             agent="fail",

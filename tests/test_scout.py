@@ -129,13 +129,15 @@ def test_scout_provider_non_json_falls_back(monkeypatch):
 
 
 @pytest.mark.unit
-def test_scout_provider_claude_cost_rates(monkeypatch):
-    """When the chain falls through to Claude, Claude cost rates are applied."""
+def test_scout_provider_claude_uses_registry_resolved_model_and_chain_cost(monkeypatch):
+    """Issue #246: scout no longer recomputes cost locally — it uses whatever
+    _call_chain already computed, and resolves model_used through the shared
+    Provider Registry (_get_model)."""
     from orchestrator.agents.executor.providers import ProviderChainResult
     from orchestrator.agents.scout import provider as scout_provider
 
     chain_result = ProviderChainResult(
-        success=(_VALID_JSON, 1_000_000, 1_000_000, 0.0),
+        success=(_VALID_JSON, 1_000_000, 1_000_000, 18.0),
         provider_name="claude",
     )
     monkeypatch.setattr(scout_provider, "_call_chain", lambda *a, **kw: chain_result)
@@ -145,17 +147,16 @@ def test_scout_provider_claude_cost_rates(monkeypatch):
 
     assert raw == _VALID_JSON
     assert model_used == "claude-sonnet-4-6"
-    assert cost == pytest.approx(3.00 + 15.00)
+    assert cost == pytest.approx(18.0)
 
 
 @pytest.mark.unit
-def test_scout_provider_gemini_cost_rates(monkeypatch):
-    """Default (Gemini) provider applies Gemini cost rates."""
+def test_scout_provider_gemini_uses_registry_resolved_model_and_chain_cost(monkeypatch):
     from orchestrator.agents.executor.providers import ProviderChainResult
     from orchestrator.agents.scout import provider as scout_provider
 
     chain_result = ProviderChainResult(
-        success=(_VALID_JSON, 1_000_000, 1_000_000, 0.0),
+        success=(_VALID_JSON, 1_000_000, 1_000_000, 0.375),
         provider_name="gemini",
     )
     monkeypatch.setattr(scout_provider, "_call_chain", lambda *a, **kw: chain_result)
@@ -164,7 +165,32 @@ def test_scout_provider_gemini_cost_rates(monkeypatch):
     _, _, cost, model_used = scout_provider.call_gemini("prompt", "scout")
 
     assert model_used == "gemini-2.5-flash"
-    assert cost == pytest.approx(0.075 + 0.30)
+    assert cost == pytest.approx(0.375)
+
+
+@pytest.mark.unit
+def test_scout_provider_none_cost_propagates_when_model_overridden(monkeypatch):
+    """AC6: when _call_chain reports cost=None (overridden model with an
+    unknown cost table), scout must propagate None, not coerce to 0.0."""
+    from orchestrator.agents.executor.providers import ProviderChainResult
+    from orchestrator.agents.scout import provider as scout_provider
+
+    chain_result = ProviderChainResult(
+        success=(_VALID_JSON, 1_000_000, 1_000_000, None),
+        provider_name="claude",
+    )
+    monkeypatch.setattr(scout_provider, "_call_chain", lambda *a, **kw: chain_result)
+    logged_costs = []
+    monkeypatch.setattr(
+        scout_provider,
+        "log_call",
+        lambda *a, **kw: logged_costs.append(kw.get("cost_usd")),
+    )
+
+    _, _, cost, _ = scout_provider.call_gemini("prompt", "scout")
+
+    assert cost is None
+    assert logged_costs == [None]
 
 
 @pytest.mark.unit

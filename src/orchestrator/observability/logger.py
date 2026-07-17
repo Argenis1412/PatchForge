@@ -9,7 +9,7 @@ def log_call(
     prompt: str,
     response: str,
     tokens: dict,
-    cost_usd: float,
+    cost_usd: float | None,
     logs_dir: Optional[Path] = None,
     *,
     trace_id: str | None = None,
@@ -31,7 +31,7 @@ def log_call(
         "prompt_chars": len(prompt),
         "response_chars": len(response),
         "tokens": tokens,
-        "cost_usd": round(cost_usd, 5),
+        "cost_usd": round(cost_usd, 5) if cost_usd is not None else None,
     }
     log_path = logs_dir / f"{agent}.log"
     with open(log_path, "a", encoding="utf-8") as f:
@@ -43,7 +43,7 @@ def log_call(
         "prompt_chars": len(prompt),
         "response_chars": len(response),
         "tokens": tokens,
-        "cost_usd": round(cost_usd, 5),
+        "cost_usd": round(cost_usd, 5) if cost_usd is not None else None,
     }
     if model is not None:
         data["model"] = model

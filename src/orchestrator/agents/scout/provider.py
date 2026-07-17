@@ -10,24 +10,11 @@ from orchestrator.agents.executor.providers import (
     _call_claude,
     _call_gemini,
     _call_openrouter,
+    _get_model,
 )
 from orchestrator.exceptions import ProviderError
 from orchestrator.observability.events import FailureType, log_failure
 from orchestrator.observability.logger import log_call
-
-MODEL = "gemini-2.5-flash"
-
-_MODEL_MAP = {
-    "gemini": "gemini-2.5-flash",
-    "openrouter": "openrouter/free",
-    "claude": "claude-sonnet-4-6",
-}
-
-_COST_RATES = {
-    "gemini": (0.075, 0.30),
-    "openrouter": (0.0, 0.0),
-    "claude": (3.00, 15.00),
-}
 
 _SCOUT_CHAIN = [_call_gemini, _call_openrouter, _call_claude]
 
@@ -41,7 +28,7 @@ def call_gemini(
     run_id: str | None = None,
     stage: str | None = None,
     span_id: str | None = None,
-) -> tuple[str, dict, float, str]:
+) -> tuple[str, dict, float | None, str]:
     """Call the scout provider chain. Returns (raw, tokens, cost, model_used)."""
     call_started = time.monotonic()
 
@@ -90,13 +77,10 @@ def call_gemini(
             "provider_chain", f"[{orchestratorel}] All providers failed: {failures}"
         )
 
-    raw, input_tokens, output_tokens, _ = winning.success
+    raw, input_tokens, output_tokens, cost = winning.success
     provider_name = winning.provider_name or "gemini"
 
-    model_used = _MODEL_MAP.get(provider_name, MODEL)
-
-    cost_in, cost_out = _COST_RATES.get(provider_name, (0.0, 0.0))
-    cost = (input_tokens / 1_000_000) * cost_in + (output_tokens / 1_000_000) * cost_out
+    model_used = _get_model(provider_name)
 
     tokens = {"input": input_tokens, "output": output_tokens}
     latency_ms = int((time.monotonic() - call_started) * 1000)

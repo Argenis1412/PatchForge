@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 from typing import Union
 
+from orchestrator.agents.executor.providers import init_provider_models
 from orchestrator.agents.scout.provider import call_gemini
 from orchestrator.observability.events import FailureType, log_failure
 from orchestrator.schemas.config import TargetConfig
@@ -102,6 +103,7 @@ def run(
 ) -> tuple[ScoutOutput, dict]:
     if isinstance(config, (str, Path)):
         config = TargetConfig.load(target_path=Path(config))
+    init_provider_models(config)
 
     root = config.target_path.resolve()
     logs_dir = config.workspace_path / "logs"
@@ -119,7 +121,8 @@ def run(
         stage="scout",
         span_id="scout_pass1",
     )
-    print(f"[Scout] Pass 1 done | model={model1} | tokens: {tokens1} | cost: ${cost1:.5f}")
+    cost1_display = f"${cost1:.5f}" if cost1 is not None else "unknown"
+    print(f"[Scout] Pass 1 done | model={model1} | tokens: {tokens1} | cost: {cost1_display}")
 
     try:
         selected_raw = json.loads(raw1)
@@ -178,9 +181,11 @@ def run(
         span_id="scout_pass2",
     )
 
-    total_cost = cost1 + cost2
-    print(f"[Scout] Pass 2 done | model={model2} | tokens: {tokens2} | cost: ${cost2:.5f}")
-    print(f"[Scout] Total cost: ${total_cost:.5f}")
+    total_cost = None if cost1 is None or cost2 is None else cost1 + cost2
+    cost2_display = f"${cost2:.5f}" if cost2 is not None else "unknown"
+    total_cost_display = f"${total_cost:.5f}" if total_cost is not None else "unknown"
+    print(f"[Scout] Pass 2 done | model={model2} | tokens: {tokens2} | cost: {cost2_display}")
+    print(f"[Scout] Total cost: {total_cost_display}")
 
     try:
         data = json.loads(raw2)
