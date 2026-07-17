@@ -90,12 +90,19 @@
 - **Discovered by:** Dogfooding-010, Runs B and B2
 - **Resolution:** Issue #245 (PR #247) added `strip_fences()` in `validation.py`, called from `applier.py` right before Python syntax validation. Handles ``` and ~~~ fences (with or without language tags, including `c++`/`f#`/`objective-c`), preamble/trailing text around a single fence pair, and preserves inner backticks. Only strips when exactly one complete fence pair is found — ambiguous content (no fences, unclosed, mismatched types, multiple pairs) passes through unchanged. Skips `.md`/`.markdown` files, where fences are legitimate content. `_strip_markdown()` in `providers.py` is left untouched as a documented known limitation (its naive `split()` can corrupt content with inner backticks before `strip_fences` ever sees it). 16 new tests.
 
-### [2026-07-17] Dogfooding 010 — `--risk-budget high` is functionally a no-op vs. `medium`
+### ✅ [2026-07-17] Dogfooding 010 — `--risk-budget high` is functionally a no-op vs. `medium` (RESOLVED in #254)
 
 - **File:** `src/orchestrator/risk.py:131-141` (`check_plan_gate`), `src/orchestrator/main.py:120-136,238-265` (CLI validation)
 - **Debt:** `check_plan_gate` unconditionally blocks any `risk_level == "high"` task ("High-risk tasks are not applicable in V1"), regardless of `risk_budget`. The only budget comparison in the gate is `medium-risk task vs. budget == "low"`. The CLI accepts `high` as a valid `--risk-budget` value on `scan`/`ci`, but nothing in the gate logic treats it differently from `medium` — confirmed directly in dogfooding Run C (`ci --risk-budget high` on a `schemas/` file blocked with the identical "not applicable in V1" message `medium` would produce).
 - **Discovered by:** Dogfooding-010, Run C
-- **Why deferred:** Product ambiguity (should V1 ever support high-risk under `budget=high`, or should the CLI stop accepting `high` as a value?) — not an implementation bug, needs a scoping decision before a fix issue.
+- **Resolution:** Issue #254 — the CLI (`main.py` scan/ci validation and help text, `commands/ci.py::execute()`) now rejects `"high"` as a `--risk-budget` value; only `low`/`medium` are accepted. `scan.py` and `ci.py`'s duplicated 3-branch limit mappings collapsed to 2 branches. `RunMetadata.risk_budget`'s `Literal["low", "medium", "high"]` deliberately left unchanged (documented via comment in `schemas/artifacts.py`) so `plan`/`preview`/`apply` can still read a `run.json` persisted by a pre-fix `scan --risk-budget high` without a raw `pydantic.ValidationError`. `check_plan_gate`'s logic/message unchanged — it gates on `task.risk_level`, a separate concept from `risk_budget`.
+
+### [2026-07-17] Issue #254 — `scan.execute()` silently accepts any unrecognized `risk_budget` value, unlike `ci.execute()`
+
+- **File:** `src/orchestrator/commands/scan.py:34-38,156-166` (`execute()`) vs. `src/orchestrator/commands/ci.py:56-59` (`execute()`)
+- **Debt:** `ci.execute()` raises `ValueError` for any `risk_budget` not in `("low", "medium")`. `scan.execute()` has no equivalent guard — it trusts the caller (`main.py`'s CLI layer validates before calling it) and its own `if risk_budget == "low": ... else: ...` mapping silently treats *any* unrecognized string (not just `"high"` — also typos like `"hgih"`) as `"medium"`. Pre-existing behavior, not introduced by #254 (the `else` branch already accepted any non-`low`/`medium` string before #254's collapse); #254 only removed the dedicated-but-useless `"high"` branch, it didn't add or remove this silent-fallback property.
+- **Discovered by:** Adversarial review during #254 implementation planning.
+- **Why deferred:** Adding a validation guard to `scan.execute()` symmetric to `ci.execute()`'s is a design decision about error-handling philosophy for the whole module (raise vs. silently normalize), not something #254's narrow CLI-rejection scope asked for. Revisit as its own small issue if a caller other than `main.py`'s CLI ever invokes `scan.execute()` directly with untrusted input.
 
 ### [2026-07-17] Dogfooding 010 — Interrupted `apply` leaves the target in a state that misclassifies as `CONFLICT` on retry
 

@@ -45,7 +45,7 @@ def execute(
     Args:
         config: Fully resolved target configuration (workspace path already
             validated as external to the target repo).
-        risk_budget: Optional risk budget ('low', 'medium', 'high').
+        risk_budget: Optional risk budget ('low', 'medium').
             Defaults to 'low'.
         json_output: When ``True``, emit machine-readable JSON to stdout
             and redirect progress/spinner output to stderr.
@@ -158,12 +158,9 @@ def execute(
     if risk_budget == "low":
         _max_files = 2
         _max_diff_lines = 100
-    elif risk_budget == "medium":
+    else:
         _max_files = 5
         _max_diff_lines = 250
-    else:
-        _max_files = 10
-        _max_diff_lines = 500
 
     triggered_by = resolve_triggered_by(
         repo_root=config.target_path,

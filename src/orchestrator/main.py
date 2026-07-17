@@ -120,15 +120,15 @@ def scan(
     risk_budget: Optional[str] = typer.Option(
         None,
         "--risk-budget",
-        help="Risk budget: 'low', 'medium', or 'high'",
+        help="Risk budget: 'low' or 'medium'",
     ),
     json_output: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
 ) -> None:
     """Scan a target project using deterministic analysis (no AI)."""
     from orchestrator.commands.scan import execute as execute_scan
 
-    if risk_budget is not None and risk_budget not in ("low", "medium", "high"):
-        message = "Invalid value for --risk-budget. Valid options are 'low', 'medium', or 'high'."
+    if risk_budget is not None and risk_budget not in ("low", "medium"):
+        message = "Invalid value for --risk-budget. Valid options are 'low' or 'medium'."
         if json_output:
             print(json.dumps({"error": message}))
         else:
@@ -238,7 +238,7 @@ def ci(
     risk_budget: str = typer.Option(
         "low",
         "--risk-budget",
-        help="Risk budget: low, medium, or high",
+        help="Risk budget: low or medium",
     ),
     allow_dirty: bool = typer.Option(
         False,
@@ -258,10 +258,8 @@ def ci(
     ),
 ) -> None:
     """Run the full CI pipeline: scan, plan, preview, apply. No push."""
-    if risk_budget not in ("low", "medium", "high"):
-        console.print(
-            "[bold red]Error: --risk-budget must be 'low', 'medium', or 'high'.[/bold red]"
-        )
+    if risk_budget not in ("low", "medium"):
+        console.print("[bold red]Error: --risk-budget must be 'low' or 'medium'.[/bold red]")
         raise typer.Exit(code=1)
 
     if issue_number is not None and issue_number < 1:

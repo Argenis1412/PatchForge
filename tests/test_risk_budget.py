@@ -98,7 +98,10 @@ class TestCheckPlanGate:
         assert any("medium-risk" in r for r in result.reasons)
 
     def test_any_budget_high_task_blocked(self):
-        for budget in ["low", "medium"]:
+        # "high" is included even though the CLI no longer produces it (#254) —
+        # RunMetadata.risk_budget still accepts it for read-compat with
+        # pre-existing run.json files, and the gate must keep blocking it.
+        for budget in ["low", "medium", "high"]:
             meta = _run_meta(risk_budget=budget)
             arch = _arch_output(
                 [

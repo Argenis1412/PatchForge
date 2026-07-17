@@ -639,7 +639,34 @@ def test_scan_invalid_risk_budget(valid_repo: Path, workspace_dir: Path):
     assert "Invalid value for --risk-budget" in result.output
     assert "low" in result.output
     assert "medium" in result.output
-    assert "high" in result.output
+
+
+# ---------------------------------------------------------------------------
+# 18. test_scan_rejects_high_risk_budget
+# ---------------------------------------------------------------------------
+
+
+def test_scan_rejects_high_risk_budget(valid_repo: Path, workspace_dir: Path):
+    """--risk-budget high is rejected (#254) — CLI no longer accepts it as valid."""
+    with (
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_mock_tool_run),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "scan",
+                str(valid_repo),
+                "--workspace",
+                str(workspace_dir),
+                "--risk-budget",
+                "high",
+            ],
+        )
+
+    assert result.exit_code == 1
+    assert "Invalid value for --risk-budget" in result.output
+    assert "high" not in result.output
 
 
 # ---------------------------------------------------------------------------

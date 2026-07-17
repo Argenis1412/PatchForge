@@ -27,8 +27,6 @@ logger = logging.getLogger(__name__)
 def _risk_limits(risk_budget: str) -> tuple[int, int]:
     if risk_budget == "medium":
         return 5, 250
-    if risk_budget == "high":
-        return 10, 500
     return 2, 100
 
 
@@ -53,10 +51,8 @@ def execute(
     Does NOT call ``git push`` or any GitHub API — those are the caller's
     (workflow runner) responsibility.
     """
-    if risk_budget not in ("low", "medium", "high"):
-        raise ValueError(
-            f"Invalid risk_budget: {risk_budget!r}. Must be 'low', 'medium', or 'high'."
-        )
+    if risk_budget not in ("low", "medium"):
+        raise ValueError(f"Invalid risk_budget: {risk_budget!r}. Must be 'low' or 'medium'.")
     from orchestrator.agents import architect as architect_agent
     from orchestrator.agents import executor as executor_agent
     from orchestrator.clients.bootstrap import bootstrap_environment

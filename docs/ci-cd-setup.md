@@ -72,7 +72,7 @@ permissions:
 | `issue-number` | number | Yes | — | GitHub issue number |
 | `issue-title` | string | Yes | — | Issue title |
 | `issue-body` | string | Yes | — | Issue body (markdown) |
-| `risk-budget` | string | No | `"low"` | Risk budget: `low`, `medium`, or `high` |
+| `risk-budget` | string | No | `"low"` | Risk budget: `low` or `medium` |
 | `base-branch` | string | No | `"main"` | Branch to check out and target for PRs |
 | `patchforge-image` | string | No | `ghcr.io/argenis1412/patchforge:latest` | Docker image to use |
 
@@ -123,7 +123,7 @@ patchforge ci <path> --workspace <dir> [options]
 | `--workspace` | Workspace directory (must be outside target repo) |
 | `--issue-file` | Markdown issue file with YAML frontmatter |
 | `--issue-number` | GitHub issue number for traceability |
-| `--risk-budget` | `low` (default), `medium`, or `high` |
+| `--risk-budget` | `low` (default) or `medium` |
 | `--allow-dirty` | Allow application on a dirty working tree |
 | `--result-file` | Path to write `ci_result.json` (default: `<workspace>/ci_result.json`) |
 
