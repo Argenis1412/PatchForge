@@ -74,6 +74,8 @@ class RunMetadata(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     v1_supported: bool
     support_reasons: List[str] = Field(default_factory=list)
+    # "high" is retained for read-compat with run.json files persisted before
+    # issue #254; the CLI (scan/ci) no longer accepts it as an input value.
     risk_budget: Literal["low", "medium", "high"] = "low"
     max_files: int = Field(default=2, ge=1)
     max_diff_lines: int = Field(default=100, ge=1)

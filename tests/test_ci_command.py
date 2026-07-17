@@ -69,6 +69,27 @@ def test_ci_rejects_invalid_risk_budget(tmp_path):
     assert "risk-budget" in result.stdout.lower() or "risk-budget" in (result.stderr or "").lower()
 
 
+def test_risk_limits_low_and_medium_unchanged():
+    """_risk_limits() collapsed from 3 branches to 2 (#254) — low/medium values
+    must be unchanged, and "high" no longer has a dedicated branch."""
+    from orchestrator.commands.ci import _risk_limits
+
+    assert _risk_limits("low") == (2, 100)
+    assert _risk_limits("medium") == (5, 250)
+
+
+def test_ci_rejects_high_risk_budget(tmp_path):
+    """--risk-budget high is rejected (#254) — CLI no longer accepts it as valid."""
+    result = runner.invoke(
+        app,
+        ["ci", str(tmp_path), "--workspace", str(tmp_path / "ws"), "--risk-budget", "high"],
+    )
+    assert result.exit_code == 1
+    output = result.stdout.lower() + (result.stderr or "").lower()
+    assert "risk-budget" in output
+    assert "must be 'low' or 'medium'" in output
+
+
 def test_ci_rejects_negative_issue_number(tmp_path):
     result = runner.invoke(
         app,
@@ -756,6 +777,19 @@ class TestCiExecute:
 
         with pytest.raises(ValueError, match="Invalid risk_budget"):
             execute(target_path=repo, workspace_path=ws, risk_budget="extreme")
+
+    def test_execute_rejects_high_risk_budget(self, tmp_path):
+        """execute() called directly (bypassing main.py's CLI check) still
+        rejects "high" (#254) — must not silently reach RunMetadata construction."""
+        from orchestrator.commands.ci import execute
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        ws = tmp_path / "ws"
+        ws.mkdir()
+
+        with pytest.raises(ValueError, match="Invalid risk_budget"):
+            execute(target_path=repo, workspace_path=ws, risk_budget="high")
 
     def test_config_load_failure(self, ci_repo):
         from orchestrator.commands.ci import execute
