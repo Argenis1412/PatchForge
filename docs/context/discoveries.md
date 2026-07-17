@@ -19,6 +19,13 @@
 
 ## Log
 
+### [2026-07-17] Issue #252 (PR #253) — Module-probe cwd is a world-writable shared temp dir
+
+- **File:** `src/orchestrator/tool_probe.py:21-26` (`_PROBE_CWD`, used by `_probe_module`)
+- **Debt:** `_PROBE_CWD = Path(tempfile.gettempdir())` moves the `sys.executable -m <tool> --version` probe out of the scanned repo's directory (issue #250's fix for a malicious `ruff.py` at the repo root shadowing the real package), but the destination — the OS shared temp directory (e.g. `/tmp` on Linux/macOS) — is itself often world-writable. Since `python -m` prepends the process's cwd to `sys.path`, another local user could plant a `ruff.py`/`pytest.py` in that shared temp dir and have it imported and executed under the probing process's account instead of the real installed package (CWE-427, uncontrolled search path).
+- **Discovered by:** CodeRabbit bot review on PR #253 (unrelated `#252` unification work moved this pre-existing code from `scanners/python.py` without changing it).
+- **Why deferred:** The underlying code is unchanged from issue #250 — this is pre-existing risk, not something introduced by #252's extraction, and #252's scope (AC2) was explicitly a "no logic change" move. A proper fix needs its own design: a private, process-owned scratch directory (e.g. `tempfile.mkdtemp()` with restrictive permissions, created and cleaned up per-probe) with Windows-appropriate semantics (POSIX `0700` doesn't map directly to Windows ACLs), plus a regression test placing a shadow module in the shared temp root. Out of scope for both #250 and #252.
+
 ### ✅ [2026-07-15] Issue #232 — Audit bundle manifest mirrors sensitive `RunMetadata` fields unredacted (RESOLVED in #234)
 
 - **File:** `src/orchestrator/commands/export_audit.py` (manifest construction), `src/orchestrator/schemas/audit_manifest.py`
@@ -55,12 +62,12 @@
 - **Discovered by:** Dogfooding-010, Run A
 - **Resolution:** Issue #250 split `_detect_tool` into `_probe_module` (tries `sys.executable -m <tool> --version` first, mirroring the validator's default invocation) and `_probe_path` (the original `shutil.which` + bare-command check, kept as a fallback for `cmd_override` users). Only `rc==0` on the module probe counts as a hit; timeout/OSError/non-zero rc all fall through to PATH, since none of them prove the module isn't importable. This fix does not eliminate the inverse case (tool on PATH but not importable via `-m`) — see the two new discoveries logged below.
 
-### [2026-07-17] Issue #250 — Scanner and doctor now disagree on tool availability on venv-less clones
+### ✅ [2026-07-17] Issue #250 — Scanner and doctor now disagree on tool availability on venv-less clones (RESOLVED in #252)
 
 - **File:** `src/orchestrator/doctor.py:13-32` (`check_command_available`) vs. `src/orchestrator/scanners/python.py` (`_detect_tool`)
 - **Debt:** Issue #250 gave `scan`'s tool detection a `sys.executable -m <tool>` probe before falling back to PATH. `doctor.py`'s `check_command_available()` still only checks PATH via a bare command. Confirmed by grep that `doctor.py` does not call `_detect_tool` — the two are independent implementations. Result: on a venv-less clone where ruff/pytest are only importable (not on PATH), `patchforge scan` now reports `v1_supported: true` while `patchforge doctor` still reports the tools as missing.
 - **Discovered by:** Implementation of #250 (flagged during adversarial plan review, confirmed by grep before implementation)
-- **Why deferred:** Different surface (`doctor.py`), different callers, different test file (`tests/test_doctor.py` presumably). Out of scope for #250's Golden-Rule-minimal diff; the `sys.executable -m` pattern should likely be extended to `check_command_available` in a follow-up issue.
+- **Resolution:** Issue #252 extracted the probe logic (`_probe_module` + `_probe_path`, including the `_PROBE_CWD` cwd-pin and `PYTHONPATH`-stripped env from #250's shadowing fix) into a new shared module, `src/orchestrator/tool_probe.py`. Both `scanners/python.py::_detect_tool` and `doctor.py::check_command_available` now call into it — no duplicated probe implementation remains in either file. `doctor` keeps its own 30-second timeout (vs. the scanner's 10s default) via an explicit `timeout` parameter, so unification did not silently shrink doctor's timeout budget. `doctor` also inherits the scanner's more lenient PATH-probe semantics: a tool on PATH whose `--version` invocation times out or exits non-zero is now reported available (matching what `scan` already did for a `cmd_override`-style install), which is the intended effect of unification, not an accidental one. `check_ruff`/`check_pytest`'s FAIL messages were updated to mention both probe forms. New regression test asserts `scan` and `doctor` agree on a mocked venv-less clone.
 
 ### [2026-07-17] Issue #250 — Scanner cannot distinguish "available via PATH" from "available via the validator's default `-m` invocation"
 

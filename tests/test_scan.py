@@ -83,8 +83,8 @@ def workspace_dir(tmp_path: Path) -> Path:
 # Helpers: patch only within the scanner module to avoid recursion
 #
 # We patch:
-#   orchestrator.scanners.python.shutil.which  — tool availability
-#   orchestrator.scanners.python.subprocess.run — tool version string
+#   orchestrator.tool_probe.shutil.which  — tool availability
+#   orchestrator.tool_probe.subprocess.run — tool version string
 #
 # This leaves orchestrator.git's subprocess.run untouched so real git
 # commands work normally in tests.
@@ -113,13 +113,6 @@ def _mock_tool_run(args, **kwargs):
     result.stdout = f"{cmd} 1.0.0\n"
     result.stderr = ""
     return result
-
-
-# Convenience context manager helpers used across tests.
-_SCANNER_PATCHES = (
-    "orchestrator.scanners.python.shutil.which",
-    "orchestrator.scanners.python.subprocess.run",
-)
 
 
 def _make_module_miss_run(absent_cmd: str):
@@ -151,8 +144,8 @@ def _make_module_miss_run(absent_cmd: str):
 
 def test_deterministic_scanner_full_findings(valid_repo: Path):
     with (
-        patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_mock_tool_run),
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_mock_tool_run),
     ):
         findings = scan(valid_repo)
 
@@ -181,8 +174,8 @@ def test_deterministic_scanner_full_findings(valid_repo: Path):
 
 def test_scan_cli_creates_findings(valid_repo: Path, workspace_dir: Path):
     with (
-        patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_mock_tool_run),
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_mock_tool_run),
     ):
         result = runner.invoke(
             app,
@@ -221,8 +214,8 @@ def test_scan_fails_without_pyproject(tmp_path: Path, workspace_dir: Path):
     (repo / "tests").mkdir()
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_mock_tool_run),
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_mock_tool_run),
     ):
         result = runner.invoke(
             app,
@@ -254,9 +247,9 @@ def test_scan_fails_without_ruff(valid_repo: Path, workspace_dir: Path):
         return None
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", side_effect=_which_no_ruff),
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_which_no_ruff),
         patch(
-            "orchestrator.scanners.python.subprocess.run",
+            "orchestrator.tool_probe.subprocess.run",
             side_effect=_make_module_miss_run("ruff"),
         ),
     ):
@@ -285,9 +278,9 @@ def test_scan_fails_without_pytest(valid_repo: Path, workspace_dir: Path):
         return None
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", side_effect=_which_no_pytest),
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_which_no_pytest),
         patch(
-            "orchestrator.scanners.python.subprocess.run",
+            "orchestrator.tool_probe.subprocess.run",
             side_effect=_make_module_miss_run("pytest"),
         ),
     ):
@@ -317,8 +310,8 @@ def test_scan_fails_without_test_suite(tmp_path: Path, workspace_dir: Path):
     # No tests/ directory, no conftest.py, no test_*.py files
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_mock_tool_run),
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_mock_tool_run),
     ):
         result = runner.invoke(
             app,
@@ -342,8 +335,8 @@ def test_scan_does_not_touch_target(valid_repo: Path, workspace_dir: Path):
     before = {p.name for p in valid_repo.iterdir()}
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_mock_tool_run),
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_mock_tool_run),
     ):
         runner.invoke(
             app,
@@ -379,8 +372,8 @@ def test_hotspots_detected(tmp_path: Path):
     )
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_mock_tool_run),
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_mock_tool_run),
     ):
         findings = scan(repo)
 
@@ -404,8 +397,8 @@ def test_typescript_no_effect_on_v1(valid_repo: Path):
     (valid_repo / "app.ts").write_text("export const x = 1;\n")
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_mock_tool_run),
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_mock_tool_run),
     ):
         findings = scan(valid_repo)
 
@@ -425,8 +418,8 @@ def test_deterministic_scanner_no_api_keys(valid_repo: Path):
 
     with (
         patch.dict(os.environ, cleaned_env, clear=True),
-        patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_mock_tool_run),
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_mock_tool_run),
     ):
         findings = scan(valid_repo)
 
@@ -480,8 +473,8 @@ def test_scanner_handles_syntax_error_in_file(tmp_path: Path):
     good_file.write_text("def bar(): pass\n")
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_mock_tool_run),
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_mock_tool_run),
     ):
         findings = scan(repo)
 
@@ -531,8 +524,8 @@ def test_scan_writes_run_json_on_scanner_failure(valid_repo: Path, workspace_dir
 def test_plan_errors_on_v1_findings(valid_repo: Path, workspace_dir: Path):
     """Running plan on a V1 scan run must print a clear error and exit 1."""
     with (
-        patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_mock_tool_run),
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_mock_tool_run),
     ):
         scan_res = runner.invoke(
             app,
@@ -563,8 +556,8 @@ def test_plan_errors_on_v1_findings(valid_repo: Path, workspace_dir: Path):
 def test_scan_default_risk_budget(valid_repo: Path, workspace_dir: Path):
     """Default scan writes risk_budget='low' and max_files=2."""
     with (
-        patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_mock_tool_run),
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_mock_tool_run),
     ):
         result = runner.invoke(
             app,
@@ -591,8 +584,8 @@ def test_scan_default_risk_budget(valid_repo: Path, workspace_dir: Path):
 def test_scan_medium_risk_budget(valid_repo: Path, workspace_dir: Path):
     """Scan with --risk-budget medium writes risk_budget='medium'."""
     with (
-        patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_mock_tool_run),
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_mock_tool_run),
     ):
         result = runner.invoke(
             app,
@@ -627,8 +620,8 @@ def test_scan_medium_risk_budget(valid_repo: Path, workspace_dir: Path):
 def test_scan_invalid_risk_budget(valid_repo: Path, workspace_dir: Path):
     """Invalid --risk-budget value exits with error listing valid options."""
     with (
-        patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_mock_tool_run),
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_mock_tool_run),
     ):
         result = runner.invoke(
             app,
@@ -678,9 +671,9 @@ def test_scan_captures_triggered_by_from_github_actor(
     monkeypatch.setenv("GITHUB_ACTOR", "octocat")
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
         patch(
-            "orchestrator.scanners.python.subprocess.run",
+            "orchestrator.tool_probe.subprocess.run",
             side_effect=_mock_tool_run_pass_through_git,
         ),
     ):
@@ -703,9 +696,9 @@ def test_scan_captures_triggered_by_from_local_git_config(
     monkeypatch.delenv("GITHUB_ACTOR", raising=False)
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
         patch(
-            "orchestrator.scanners.python.subprocess.run",
+            "orchestrator.tool_probe.subprocess.run",
             side_effect=_mock_tool_run_pass_through_git,
         ),
     ):
@@ -765,8 +758,8 @@ def test_detect_tool_found_via_module_when_not_on_path():
         return result
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", side_effect=_no_which),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_module_hit),
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_no_which),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_module_hit),
     ):
         info = _detect_tool("ruff")
 
@@ -790,10 +783,8 @@ def test_detect_tool_probes_module_form_first():
         return result
 
     with (
-        patch(
-            "orchestrator.scanners.python.shutil.which", return_value="/usr/bin/ruff"
-        ) as mock_which,
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_record),
+        patch("orchestrator.tool_probe.shutil.which", return_value="/usr/bin/ruff") as mock_which,
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_record),
     ):
         _detect_tool("ruff")
 
@@ -814,8 +805,37 @@ def test_detect_tool_module_probe_empty_output_still_available():
         return result
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", return_value=None),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_empty_output),
+        patch("orchestrator.tool_probe.shutil.which", return_value=None),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_empty_output),
+    ):
+        info = _detect_tool("ruff")
+
+    assert info.available is True
+    assert info.version is None
+
+
+def test_detect_tool_path_probe_empty_output_still_available():
+    """rc==0 on the PATH (bare-invocation) probe with empty stdout/stderr
+    must not raise IndexError — regression for a bug flagged during PR #253
+    review where `_probe_path` lacked the `if raw` guard `_probe_module`
+    already had."""
+    from unittest.mock import MagicMock
+
+    def _run(args, **kwargs):
+        result = MagicMock()
+        if args[1] == "-m":
+            result.returncode = 1
+            result.stdout = ""
+            result.stderr = "No module named ruff"
+        else:
+            result.returncode = 0
+            result.stdout = ""
+            result.stderr = ""
+        return result
+
+    with (
+        patch("orchestrator.tool_probe.shutil.which", return_value="/usr/bin/ruff"),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_run),
     ):
         info = _detect_tool("ruff")
 
@@ -843,8 +863,8 @@ def test_detect_tool_falls_back_to_path_when_module_missing():
         return result
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", return_value="/usr/bin/ruff"),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_run),
+        patch("orchestrator.tool_probe.shutil.which", return_value="/usr/bin/ruff"),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_run),
     ):
         info = _detect_tool("ruff")
 
@@ -863,8 +883,8 @@ def test_detect_tool_unavailable_when_both_probes_fail():
         return result
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", return_value=None),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_module_miss),
+        patch("orchestrator.tool_probe.shutil.which", return_value=None),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_module_miss),
     ):
         info = _detect_tool("ruff")
 
@@ -884,8 +904,8 @@ def test_detect_tool_path_probe_nonzero_rc_still_available():
         return result
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", return_value="/usr/bin/ruff"),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_run),
+        patch("orchestrator.tool_probe.shutil.which", return_value="/usr/bin/ruff"),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_run),
     ):
         info = _detect_tool("ruff")
 
@@ -906,8 +926,8 @@ def test_detect_tool_path_probe_timeout_still_available():
         raise subprocess.TimeoutExpired(cmd=args, timeout=10)
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", return_value="/usr/bin/ruff"),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_run),
+        patch("orchestrator.tool_probe.shutil.which", return_value="/usr/bin/ruff"),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_run),
     ):
         info = _detect_tool("ruff")
 
@@ -930,8 +950,8 @@ def test_detect_tool_module_timeout_falls_through():
         return result
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", return_value="/usr/bin/ruff"),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_run),
+        patch("orchestrator.tool_probe.shutil.which", return_value="/usr/bin/ruff"),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_run),
     ):
         info = _detect_tool("ruff")
 
@@ -954,8 +974,8 @@ def test_detect_tool_module_oserror_falls_through():
         return result
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", return_value="/usr/bin/ruff"),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_run),
+        patch("orchestrator.tool_probe.shutil.which", return_value="/usr/bin/ruff"),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_run),
     ):
         info = _detect_tool("ruff")
 
@@ -989,8 +1009,8 @@ def test_scan_unsupported_reason_wording_no_longer_claims_path_only(valid_repo: 
         return _mock_tool_run(args, **kwargs)
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", side_effect=_which_none),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_module_miss_all),
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_which_none),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_module_miss_all),
     ):
         findings = scan(valid_repo)
 

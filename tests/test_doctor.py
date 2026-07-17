@@ -115,6 +115,105 @@ class TestCheckCommandAvailable:
         assert not found
         assert version == ""
 
+    def test_found_via_module_when_not_on_path(self):
+        """Issue #252: doctor must probe `python -m <cmd>` before PATH,
+        mirroring scan's `_detect_tool` (issue #250)."""
+        from unittest.mock import MagicMock, patch
+
+        def _no_which(cmd: str):
+            return None
+
+        def _module_hit(args, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "ruff 1.2.3\n"
+            result.stderr = ""
+            return result
+
+        with (
+            patch("orchestrator.tool_probe.shutil.which", side_effect=_no_which),
+            patch("orchestrator.tool_probe.subprocess.run", side_effect=_module_hit),
+        ):
+            found, version = check_command_available("ruff")
+
+        assert found is True
+        assert version == "ruff 1.2.3"
+
+    def test_agrees_with_scan_detect_tool(self):
+        """Issue #252 regression: on a venv-less clone (module probe hits,
+        PATH probe would miss), scan's _detect_tool and doctor's
+        check_command_available must report the same availability —
+        closing the divergence from discovery #250."""
+        from unittest.mock import MagicMock, patch
+
+        from orchestrator.scanners.python import _detect_tool
+
+        def _no_which(cmd: str):
+            return None
+
+        def _module_hit(args, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "ruff 1.2.3\n"
+            result.stderr = ""
+            return result
+
+        with (
+            patch("orchestrator.tool_probe.shutil.which", side_effect=_no_which),
+            patch("orchestrator.tool_probe.subprocess.run", side_effect=_module_hit),
+        ):
+            scan_result = _detect_tool("ruff")
+            doctor_found, _ = check_command_available("ruff")
+
+        assert scan_result.available is True
+        assert doctor_found is True
+
+    def test_preserves_own_30_second_timeout(self):
+        """Issue #252 AC4: unifying detection strategy must not silently
+        shrink doctor's 30s timeout to the scanner's 10s default."""
+        from unittest.mock import MagicMock, patch
+
+        calls = []
+
+        def _record(args, **kwargs):
+            calls.append(kwargs.get("timeout"))
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "ruff 1.2.3\n"
+            result.stderr = ""
+            return result
+
+        with patch("orchestrator.tool_probe.subprocess.run", side_effect=_record):
+            check_command_available("ruff")
+
+        assert calls[0] == 30
+
+    def test_on_path_but_version_probe_nonzero_still_available(self):
+        """Issue #252 AC10: unifying means doctor inherits scan's more
+        lenient PATH-probe semantics — a `which` hit is reported available
+        even if `--version` exits non-zero, since this now covers a
+        `cmd_override`-style install the same way `scan` already does."""
+        from unittest.mock import MagicMock, patch
+
+        def _which_hit(cmd: str):
+            return f"/usr/bin/{cmd}"
+
+        def _nonzero_exit(args, **kwargs):
+            result = MagicMock()
+            result.returncode = 1
+            result.stdout = ""
+            result.stderr = "unexpected error"
+            return result
+
+        with (
+            patch("orchestrator.tool_probe.shutil.which", side_effect=_which_hit),
+            patch("orchestrator.tool_probe.subprocess.run", side_effect=_nonzero_exit),
+        ):
+            found, version = check_command_available("ruff")
+
+        assert found is True
+        assert version == ""
+
 
 # ---------------------------------------------------------------------------
 # check_git
