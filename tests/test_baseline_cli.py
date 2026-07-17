@@ -150,8 +150,8 @@ def _mock_tool_run(args, **kwargs):
 class TestScanBaseline:
     def test_scan_exit_code_0_when_supported(self, valid_repo: Path):
         with (
-            patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
-            patch("orchestrator.scanners.python.subprocess.run", side_effect=_mock_tool_run),
+            patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
+            patch("orchestrator.tool_probe.subprocess.run", side_effect=_mock_tool_run),
         ):
             result = runner.invoke(app, ["scan", str(valid_repo)])
 
@@ -159,8 +159,8 @@ class TestScanBaseline:
 
     def test_scan_stdout_contains_scanner_header(self, valid_repo: Path):
         with (
-            patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
-            patch("orchestrator.scanners.python.subprocess.run", side_effect=_mock_tool_run),
+            patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
+            patch("orchestrator.tool_probe.subprocess.run", side_effect=_mock_tool_run),
         ):
             result = runner.invoke(app, ["scan", str(valid_repo)])
 
@@ -169,8 +169,8 @@ class TestScanBaseline:
 
     def test_scan_creates_findings_artifact(self, valid_repo: Path, workspace_dir: Path):
         with (
-            patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
-            patch("orchestrator.scanners.python.subprocess.run", side_effect=_mock_tool_run),
+            patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
+            patch("orchestrator.tool_probe.subprocess.run", side_effect=_mock_tool_run),
         ):
             result = runner.invoke(
                 app, ["scan", str(valid_repo), "--workspace", str(workspace_dir)]
@@ -188,8 +188,8 @@ class TestScanBaseline:
 
     def test_scan_does_not_touch_target(self, valid_repo: Path, workspace_dir: Path):
         with (
-            patch("orchestrator.scanners.python.shutil.which", side_effect=_mock_which),
-            patch("orchestrator.scanners.python.subprocess.run", side_effect=_mock_tool_run),
+            patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
+            patch("orchestrator.tool_probe.subprocess.run", side_effect=_mock_tool_run),
         ):
             before = set(valid_repo.iterdir())
             runner.invoke(app, ["scan", str(valid_repo), "--workspace", str(workspace_dir)])

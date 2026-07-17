@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import tomllib
 from pathlib import Path
 from typing import Optional
@@ -13,23 +12,26 @@ from orchestrator.schemas.doctor import CheckResult, CheckStatus, DoctorResult
 def check_command_available(cmd: str) -> tuple[bool, str]:
     """Return (available, version_str) for *cmd*.
 
-    Returns (False, '') when the command is not found or cannot be executed.
-    Returns (False, 'timed out') when the command exceeds the 30-second timeout.
+    Probes ``sys.executable -m cmd --version`` first, falling back to a
+    PATH-based probe (``shutil.which`` + bare invocation) — the same
+    detection strategy `scan` uses (see `orchestrator.tool_probe`), so the
+    two commands agree on tool availability (issue #252). Both probes use a
+    30-second timeout, preserving this function's original budget.
+
+    Returns (False, '') when neither probe finds the command. A PATH hit
+    whose version invocation times out or exits non-zero is still reported
+    as available (matching `scan`'s existing behavior for a `cmd_override`-
+    style installation); this function no longer distinguishes a timeout
+    from any other failure via the returned string.
     """
-    try:
-        res = subprocess.run(
-            [cmd, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if res.returncode == 0:
-            return True, res.stdout.strip()
-        return False, res.stderr.strip()
-    except (FileNotFoundError, OSError):
-        return False, ""
-    except subprocess.TimeoutExpired:
-        return False, "timed out"
+    from orchestrator.tool_probe import _probe_module, _probe_path
+
+    info = _probe_module(cmd, timeout=30)
+    if info is None:
+        info = _probe_path(cmd, timeout=30)
+    if info.available:
+        return True, info.version or ""
+    return False, ""
 
 
 def detect_test_suite(path: Path, pyproject: Optional[dict] = None) -> bool:
@@ -287,7 +289,7 @@ def check_ruff(path: Path, config: Optional[dict] = None) -> CheckResult:
         name="ruff",
         status=CheckStatus.FAIL,
         message="Ruff is not available",
-        detail="'ruff --version' did not return successfully",
+        detail="'python -m ruff --version' and 'ruff --version' both failed",
         fix_hint=("Install ruff with: pip install ruff, or set lint_command in orchestrator.json"),
     )
 
@@ -327,7 +329,7 @@ def check_pytest(
             name="pytest",
             status=CheckStatus.FAIL,
             message="Pytest is not available and no test_command is configured",
-            detail="'pytest --version' did not return successfully",
+            detail="'python -m pytest --version' and 'pytest --version' both failed",
             fix_hint=(
                 "Install pytest with: pip install pytest, or set test_command in orchestrator.json"
             ),
