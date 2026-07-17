@@ -13,17 +13,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
 from typing import Optional
 
 from orchestrator.schemas.findings import ToolInfo
-
-# cwd for the `-m` tool-version probe. `python -m` prepends the process's cwd
-# to sys.path, so if the probe inherited the scanned repo's directory (e.g. a
-# user running `patchforge scan .` from inside the target repo), a malicious
-# `ruff.py`/`ruff/` at the repo root would shadow the real package. Pin the
-# probe to a directory that is never the scanned target.
-_PROBE_CWD = Path(tempfile.gettempdir())
 
 
 def _probe_module(cmd: str, timeout: int = 10) -> Optional[ToolInfo]:
@@ -34,21 +26,25 @@ def _probe_module(cmd: str, timeout: int = 10) -> Optional[ToolInfo]:
     outcome (non-zero exit, timeout, or OSError) — none of those prove the
     module is importable, so the caller must fall back to a PATH probe.
 
-    Runs from :data:`_PROBE_CWD` with ``PYTHONPATH`` stripped so the probe
-    cannot resolve *cmd* from the scanned repository instead of the real
-    installed package (see :data:`_PROBE_CWD`'s docstring).
+    Runs from a private, per-probe scratch directory (never the scanned
+    repo, never the shared OS temp dir) with ``PYTHONPATH`` stripped.
+    ``python -m`` prepends the process's cwd to ``sys.path``, so a scratch
+    dir keeps the probe from resolving *cmd* via a malicious shadow module
+    planted either in the scanned repo or in a world-writable shared temp
+    dir (CWE-427; see issue #250 and issue #256).
     """
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     try:
-        res = subprocess.run(
-            [sys.executable, "-m", cmd, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=_PROBE_CWD,
-            env=env,
-        )
+        with tempfile.TemporaryDirectory(prefix="probe_", ignore_cleanup_errors=True) as probe_dir:
+            res = subprocess.run(
+                [sys.executable, "-m", cmd, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=probe_dir,
+                env=env,
+            )
     except (subprocess.TimeoutExpired, OSError):
         return None
     if res.returncode != 0:

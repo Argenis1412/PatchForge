@@ -19,12 +19,12 @@
 
 ## Log
 
-### [2026-07-17] Issue #252 (PR #253) — Module-probe cwd is a world-writable shared temp dir
+### ✅ [2026-07-17] Issue #252 (PR #253) — Module-probe cwd is a world-writable shared temp dir (RESOLVED in #257)
 
 - **File:** `src/orchestrator/tool_probe.py:21-26` (`_PROBE_CWD`, used by `_probe_module`)
 - **Debt:** `_PROBE_CWD = Path(tempfile.gettempdir())` moves the `sys.executable -m <tool> --version` probe out of the scanned repo's directory (issue #250's fix for a malicious `ruff.py` at the repo root shadowing the real package), but the destination — the OS shared temp directory (e.g. `/tmp` on Linux/macOS) — is itself often world-writable. Since `python -m` prepends the process's cwd to `sys.path`, another local user could plant a `ruff.py`/`pytest.py` in that shared temp dir and have it imported and executed under the probing process's account instead of the real installed package (CWE-427, uncontrolled search path).
 - **Discovered by:** CodeRabbit bot review on PR #253 (unrelated `#252` unification work moved this pre-existing code from `scanners/python.py` without changing it).
-- **Why deferred:** The underlying code is unchanged from issue #250 — this is pre-existing risk, not something introduced by #252's extraction, and #252's scope (AC2) was explicitly a "no logic change" move. A proper fix needs its own design: a private, process-owned scratch directory (e.g. `tempfile.mkdtemp()` with restrictive permissions, created and cleaned up per-probe) with Windows-appropriate semantics (POSIX `0700` doesn't map directly to Windows ACLs), plus a regression test placing a shadow module in the shared temp root. Out of scope for both #250 and #252.
+- **Resolution:** Issue #256 replaced `_PROBE_CWD` with a private, per-probe scratch directory created via `tempfile.TemporaryDirectory(prefix="probe_", ignore_cleanup_errors=True)` used as a context manager inside `_probe_module`, so creation and cleanup are both handled by the stdlib instead of a shared, world-writable directory. `tests/test_tool_probe.py` adds a CWE-427 regression test that plants a shadow module in a simulated shared temp dir (isolated via `monkeypatch`, never the real OS temp dir) and asserts it is never imported.
 
 ### ✅ [2026-07-15] Issue #232 — Audit bundle manifest mirrors sensitive `RunMetadata` fields unredacted (RESOLVED in #234)
 
