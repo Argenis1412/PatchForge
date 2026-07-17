@@ -10,6 +10,7 @@ import ast
 import os
 import shutil
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 from typing import Optional
@@ -49,8 +50,37 @@ _ENTRY_POINTS: frozenset[str] = frozenset({"main.py", "app.py", "cli.py", "__mai
 # ---------------------------------------------------------------------------
 
 
-def _detect_tool(cmd: str) -> ToolInfo:
-    """Return availability and version string for *cmd* using ``shutil.which``."""
+def _probe_module(cmd: str) -> Optional[ToolInfo]:
+    """Probe *cmd* via ``sys.executable -m cmd --version``.
+
+    Mirrors the validator's default invocation (see
+    ``agents/validator/runners.py``). Returns ``None`` on any non-success
+    outcome (non-zero exit, timeout, or OSError) — none of those prove the
+    module is importable, so the caller must fall back to a PATH probe.
+    """
+    try:
+        res = subprocess.run(
+            [sys.executable, "-m", cmd, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if res.returncode != 0:
+        return None
+    raw = (res.stdout or res.stderr).strip()
+    version = raw.splitlines()[0] if raw else None
+    return ToolInfo(available=True, version=version)
+
+
+def _probe_path(cmd: str) -> ToolInfo:
+    """Probe *cmd* via ``shutil.which`` plus a bare invocation.
+
+    A ``which`` hit is treated as available regardless of the version probe
+    outcome — this covers a ``cmd_override`` that relies on a PATH-installed
+    binary rather than the validator's default ``-m`` form.
+    """
     if shutil.which(cmd) is None:
         return ToolInfo(available=False)
     try:
@@ -65,6 +95,21 @@ def _detect_tool(cmd: str) -> ToolInfo:
         return ToolInfo(available=True, version=version)
     except (subprocess.TimeoutExpired, OSError):
         return ToolInfo(available=True, version=None)
+
+
+def _detect_tool(cmd: str) -> ToolInfo:
+    """Return availability and version string for *cmd*.
+
+    Probes ``sys.executable -m cmd`` first so detection predicts what the
+    validator's default invocation will actually do (issue #223 fixed this
+    for the validator; this mirrors it for scan-time detection). Falls back
+    to a PATH-based probe (``shutil.which`` + bare invocation) to cover a
+    ``cmd_override`` that relies on a PATH-installed binary instead.
+    """
+    result = _probe_module(cmd)
+    if result is not None:
+        return result
+    return _probe_path(cmd)
 
 
 def _check_pyproject(target: Path) -> tuple[PyProjectInfo, dict | None]:
@@ -300,12 +345,12 @@ def scan(
     if ruff_info.available:
         support_reasons.append(f"Ruff available: {ruff_info.version}")
     else:
-        unsupported_reasons.append("Ruff not found in PATH")
+        unsupported_reasons.append("Ruff not found (tried python -m ruff and PATH)")
 
     if pytest_info.available:
         support_reasons.append(f"Pytest available: {pytest_info.version}")
     else:
-        unsupported_reasons.append("Pytest not found in PATH")
+        unsupported_reasons.append("Pytest not found (tried python -m pytest and PATH)")
 
     if test_suite.detected:
         support_reasons.append(f"Test suite detected ({test_suite.type})")

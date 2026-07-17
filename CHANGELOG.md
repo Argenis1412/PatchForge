@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Scanner tool detection on venv-less clones**: `_detect_tool()` now probes `sys.executable -m <tool>` before falling back to `PATH`, fixing `v1_supported: false` false negatives when ruff/pytest are importable but not on `PATH` (Issue #250, mirrors the validator's #223 fix)
+
 ## [1.1.0] - 2026-07-12
 
 ### Highlights
