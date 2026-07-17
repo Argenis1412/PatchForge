@@ -75,7 +75,7 @@ def _probe_path(cmd: str, timeout: int = 10) -> ToolInfo:
             timeout=timeout,
         )
         raw = (res.stdout or res.stderr).strip()
-        version = raw.splitlines()[0] if res.returncode == 0 else None
+        version = raw.splitlines()[0] if (res.returncode == 0 and raw) else None
         return ToolInfo(available=True, version=version)
     except (subprocess.TimeoutExpired, OSError):
         return ToolInfo(available=True, version=None)

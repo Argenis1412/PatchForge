@@ -814,6 +814,35 @@ def test_detect_tool_module_probe_empty_output_still_available():
     assert info.version is None
 
 
+def test_detect_tool_path_probe_empty_output_still_available():
+    """rc==0 on the PATH (bare-invocation) probe with empty stdout/stderr
+    must not raise IndexError — regression for a bug flagged during PR #253
+    review where `_probe_path` lacked the `if raw` guard `_probe_module`
+    already had."""
+    from unittest.mock import MagicMock
+
+    def _run(args, **kwargs):
+        result = MagicMock()
+        if args[1] == "-m":
+            result.returncode = 1
+            result.stdout = ""
+            result.stderr = "No module named ruff"
+        else:
+            result.returncode = 0
+            result.stdout = ""
+            result.stderr = ""
+        return result
+
+    with (
+        patch("orchestrator.tool_probe.shutil.which", return_value="/usr/bin/ruff"),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_run),
+    ):
+        info = _detect_tool("ruff")
+
+    assert info.available is True
+    assert info.version is None
+
+
 def test_detect_tool_falls_back_to_path_when_module_missing():
     """Documents the architectural limitation: PATH fallback reports the
     tool available even though the validator's default `-m` invocation
