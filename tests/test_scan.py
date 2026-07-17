@@ -889,6 +889,28 @@ def test_detect_tool_path_probe_nonzero_rc_still_available():
     assert info.version is None
 
 
+def test_detect_tool_path_probe_timeout_still_available():
+    """AC4 guard, timeout sub-case: a which-hit whose bare --version call
+    times out is still available with version=None — this is the PATH
+    branch's own timeout handling in _probe_path, distinct from the
+    module-probe timeout tests below (which cover _probe_module falling
+    through to PATH, not _probe_path's own exception handling)."""
+
+    def _run(args, **kwargs):
+        if args[1] == "-m":
+            raise subprocess.TimeoutExpired(cmd=args, timeout=10)
+        raise subprocess.TimeoutExpired(cmd=args, timeout=10)
+
+    with (
+        patch("orchestrator.scanners.python.shutil.which", return_value="/usr/bin/ruff"),
+        patch("orchestrator.scanners.python.subprocess.run", side_effect=_run),
+    ):
+        info = _detect_tool("ruff")
+
+    assert info.available is True
+    assert info.version is None
+
+
 def test_detect_tool_module_timeout_falls_through():
     """A timeout on the -m probe does not prove importability — it must be
     treated as a miss and fall through to PATH, not as a hit."""
@@ -937,25 +959,37 @@ def test_detect_tool_module_oserror_falls_through():
     assert info.version == "ruff 1.2.3"
 
 
-def test_detect_tool_unsupported_reason_wording_no_longer_claims_path_only():
-    """AC5: the substring check ('ruff' in reason) doesn't enforce the
-    wording change — this test pins the literal new string so a regression
-    back to 'not found in PATH' would be caught."""
+def test_scan_unsupported_reason_wording_no_longer_claims_path_only(valid_repo: Path):
+    """AC5: the existing negative tests only assert a case-insensitive
+    substring ('ruff'/'pytest' in reason), which would not catch a
+    regression back to the old 'not found in PATH' wording. This test
+    exercises scan() (where unsupported_reasons is actually built) and
+    pins the literal new strings for both tools."""
     from unittest.mock import MagicMock
 
-    def _both_miss(args, **kwargs):
-        if args[1] == "-m":
+    def _which_none(cmd: str) -> str | None:
+        return None
+
+    def _module_miss_all(args, **kwargs):
+        # -m ruff / -m pytest both miss; every other subprocess.run call
+        # (git, plus the -m probes falling through to a which()-gated PATH
+        # probe that never fires) is handled by _mock_tool_run, which
+        # tolerates the shared-subprocess-module git calls (see module
+        # docstring above).
+        if len(args) > 2 and args[1] == "-m":
             result = MagicMock()
             result.returncode = 1
             result.stdout = ""
-            result.stderr = "No module named ruff"
+            result.stderr = f"No module named {args[2]}"
             return result
-        raise AssertionError("bare probe should not run when which() misses")
+        return _mock_tool_run(args, **kwargs)
 
     with (
-        patch("orchestrator.scanners.python.shutil.which", return_value=None),
-        patch("orchestrator.scanners.python.subprocess.run", side_effect=_both_miss),
+        patch("orchestrator.scanners.python.shutil.which", side_effect=_which_none),
+        patch("orchestrator.scanners.python.subprocess.run", side_effect=_module_miss_all),
     ):
-        info = _detect_tool("ruff")
+        findings = scan(valid_repo)
 
-    assert info.available is False
+    assert findings.v1_supported is False
+    assert "Ruff not found (tried python -m ruff and PATH)" in findings.unsupported_reasons
+    assert "Pytest not found (tried python -m pytest and PATH)" in findings.unsupported_reasons
