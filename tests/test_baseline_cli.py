@@ -136,11 +136,12 @@ def _mock_which(cmd: str) -> str | None:
 
 
 def _mock_tool_run(args, **kwargs):
+    """Handles both the module form (``-m cmd``) and bare PATH form."""
     from unittest.mock import MagicMock
 
+    cmd = args[2] if args and len(args) > 2 and args[1] == "-m" else (args[0] if args else "tool")
     result = MagicMock()
     result.returncode = 0
-    cmd = args[0] if args else "tool"
     result.stdout = f"{cmd} 1.0.0\n"
     result.stderr = ""
     return result
