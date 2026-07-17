@@ -48,6 +48,41 @@
 - **Resolution:** Issue #236 added a CI step that generates an ephemeral RSA-2048 keypair in an isolated `GNUPGHOME` (via `mktemp -d`, exported through `GITHUB_ENV`) before the test steps run. A post-generation check (`gpg --list-secret-keys | grep -q sec`) fails the step loudly if the key wasn't actually usable, preventing a silent regression back to skip-only behavior. Accepted risk: keyring contention under parallel test execution is avoided today because `pytest -n auto --dist loadfile` groups same-file tests onto one xdist worker, not because of an explicit lock; flagged for revisit if CI flakiness appears or the dist strategy changes.
 - **Bug caught by this fix:** `test_gpg_mutated_signature_fails_verify` simulated tampering by appending `b"\nMUTATED\n"` after `-----END PGP SIGNATURE-----`. gpg's armor parser stops reading at the END marker, so the appended bytes were silently ignored and the original signature still verified successfully — the test asserted a failure that real gpg never produced. Undetected for as long as the test was skip-guarded; surfaced immediately once CI exercised the real binary (first CI run on #236's PR failed with "DID NOT RAISE Exit"). Fixed in the same PR by flipping a byte inside the armored body instead of appending after it, which corrupts the actual signature packet (confirmed against the real gpg binary locally: `gpg --verify` returns exit 2 / "invalid packet").
 
+### [2026-07-17] Dogfooding 010 — Scanner's ruff/pytest availability check breaks on venv-less clones
+
+- **File:** `src/orchestrator/scanners/python.py:53-55` (`_detect_tool`)
+- **Debt:** `_detect_tool()` uses `shutil.which(cmd)` to decide `v1_supported`. A fresh clone with no local `.venv` fails this scan-time check even when the same Python interpreter running PatchForge could invoke `ruff`/`pytest` via `-m` — the exact scenario dogfooding-009 already fixed for the *validator* (`sys.executable -m <tool>` in `runners.py`), but that fix never reached this scanner-side detection.
+- **Discovered by:** Dogfooding-010, Run A
+- **Why deferred:** Out of scope for P4; the dogfooding-009 pattern should likely be extended to `_detect_tool`, but that's a scanner change independent of the P4 items under test.
+
+### [2026-07-17] Dogfooding 010 — Provider Registry (#230) is not wired into the architect stage
+
+- **File:** `src/orchestrator/agents/architect/provider.py:19-33` vs. `src/orchestrator/agents/executor/providers.py:49-63`
+- **Debt:** `init_provider_models(config)` — the function that resolves `orchestrator.json`'s `providers.*.model` pins — is called only from `agents/executor/__init__.py:96` and `agents/validator/__init__.py:44`. The architect's `provider.py` has its own hardcoded `_ARCHITECT_CHAIN` and hardcoded `_MODEL_MAP`, and never reads `TargetConfig.providers` at all, so pinning a model in `orchestrator.json` has zero effect on `plan` — confirmed directly across 5 dogfooding runs, all of which used `claude-sonnet-4-6` for `plan` despite a Gemini pin.
+- **Discovered by:** Dogfooding-010, Runs A through C
+- **Why deferred:** Requires a product decision on whether the architect should honor Provider Registry too (likely yes) before scoping a fix issue; out of scope for this dogfooding.
+
+### [2026-07-17] Dogfooding 010 — Executor has no markdown-fence-stripping fallback for LLM output
+
+- **File:** `src/orchestrator/agents/executor/applier.py:28,51` (prompt), `src/orchestrator/agents/executor/validation.py:19` (`ast.parse` rejects the result)
+- **Debt:** The executor prompt instructs the model not to wrap output in markdown fences, but there is no defensive stripping if it does anyway. When routing falls to a weaker/free model, this produced a reproducible `"LLM output is not valid Python (line 1): invalid syntax"` failure in 3 of 5 preview attempts during this dogfooding session. The `ast.parse` safety net correctly prevents bad content from being applied, but there's no recovery — the task just errors out and burns the call.
+- **Discovered by:** Dogfooding-010, Runs B and B2
+- **Why deferred:** Out of scope for P4/this dogfooding; a stripping helper (detect and strip a leading/trailing fence line before `ast.parse`) would likely fix most cases cheaply.
+
+### [2026-07-17] Dogfooding 010 — `--risk-budget high` is functionally a no-op vs. `medium`
+
+- **File:** `src/orchestrator/risk.py:131-141` (`check_plan_gate`), `src/orchestrator/main.py:120-136,238-265` (CLI validation)
+- **Debt:** `check_plan_gate` unconditionally blocks any `risk_level == "high"` task ("High-risk tasks are not applicable in V1"), regardless of `risk_budget`. The only budget comparison in the gate is `medium-risk task vs. budget == "low"`. The CLI accepts `high` as a valid `--risk-budget` value on `scan`/`ci`, but nothing in the gate logic treats it differently from `medium` — confirmed directly in dogfooding Run C (`ci --risk-budget high` on a `schemas/` file blocked with the identical "not applicable in V1" message `medium` would produce).
+- **Discovered by:** Dogfooding-010, Run C
+- **Why deferred:** Product ambiguity (should V1 ever support high-risk under `budget=high`, or should the CLI stop accepting `high` as a value?) — not an implementation bug, needs a scoping decision before a fix issue.
+
+### [2026-07-17] Dogfooding 010 — Interrupted `apply` leaves the target in a state that misclassifies as `CONFLICT` on retry
+
+- **File:** `src/orchestrator/commands/apply.py:191-227` (lifecycle classification), `:404` (post-apply validator re-run)
+- **Debt:** `apply` re-runs the full validator (`ruff` + `pytest`, ~3 minutes on this repo) after applying the patch and before committing, with no progress output during that window. An `apply` process killed mid-validator-rerun leaves the target repo on the new `patchforge/<run_id>` branch with the patch already written to the working tree but uncommitted. Retrying `apply` on that same state fails with `Patch lifecycle state is CONFLICT... HEAD <sha> has diverged from base commit <sha>` — even though the two SHAs printed in the error message are identical, because the classifier doesn't account for "already-applied-but-uncommitted, matching the pending patch" as a distinct, resumable state.
+- **Discovered by:** Dogfooding-010, Run B2 (`apply` attempt 1, client-side timeout mid-validator-rerun)
+- **Why deferred:** Out of scope for P4; worth its own issue (either make `apply` resumable from a matching dirty state, or make the CONFLICT message clearer when the two SHAs are actually equal).
+
 ### ✅ [2026-07-10] Dogfooding 008 — `plan` CLI gaps and non-determinism (PARTIALLY RESOLVED)
 
 - **File:** `src/orchestrator/main.py`, `src/orchestrator/commands/plan.py`, `src/orchestrator/agents/architect/`
