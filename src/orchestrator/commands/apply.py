@@ -30,13 +30,20 @@ if TYPE_CHECKING:
 console = Console()
 
 
-def _hydrate_apply_result_for_resume(run_dir: Path) -> Optional["ApplyResult"]:
+def _hydrate_apply_result_for_resume(
+    run_dir: Path, run_id: str, patch_path: Path
+) -> Optional["ApplyResult"]:
     """Load and validate apply.json for a resumable ALREADY_APPLIED state.
 
-    Returns the parsed ApplyResult only if status == "applying" and the
-    recorded pre-apply diff backup still exists on disk. Returns None for
-    any other condition (missing/corrupt WAL, wrong status, missing/stale
-    backup pointer) -- callers must treat None as "not resumable, abort".
+    Returns the parsed ApplyResult only if: status == "applying"; the WAL's
+    own run_id matches the run being resumed (rejects a WAL copied in from
+    another run's directory); the backup diff pointer is the canonical
+    run-local path (rejects a pointer redirected elsewhere on disk) and
+    refers to an existing regular file; and that file's bytes are identical
+    to the current patch.diff (rejects a backup that was swapped or
+    corrupted independently of the WAL). Returns None for any other
+    condition (missing/corrupt WAL, wrong status, missing/stale/mismatched
+    backup) -- callers must treat None as "not resumable, abort".
     """
     from orchestrator.schemas.artifacts import APPLY_JSON, ApplyResult
 
@@ -49,12 +56,26 @@ def _hydrate_apply_result_for_resume(run_dir: Path) -> Optional["ApplyResult"]:
     except Exception:
         return None
 
+    if wal_result.run_id != run_id:
+        return None
+
     if wal_result.status != "applying":
         return None
 
     if not wal_result.pre_apply_diff_backup:
         return None
-    if not Path(wal_result.pre_apply_diff_backup).exists():
+
+    backup_path = Path(wal_result.pre_apply_diff_backup)
+    canonical_backup_path = run_dir / "patch.apply-backup.diff"
+    if backup_path.resolve() != canonical_backup_path.resolve():
+        return None
+    if not backup_path.is_file():
+        return None
+
+    try:
+        if backup_path.read_bytes() != patch_path.read_bytes():
+            return None
+    except OSError:
         return None
 
     return wal_result
@@ -168,64 +189,10 @@ def execute(
         console.print(f"[bold red]Error: patch.diff does not exist in {run_dir}[/bold red]")
         raise typer.Exit(code=1) from None
 
-    try:
-        current_head_sha = current_head(target_path)
-    except RuntimeError as exc:
-        console.print(f"[bold red]Git Error: {exc}[/bold red]")
-        failure_path = run_dir / "failure.json"
-        failure_path.write_text(
-            json.dumps(
-                {
-                    "error": "Failed to resolve HEAD",
-                    "message": str(exc),
-                },
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-        raise typer.Exit(code=1) from None
-
-    if current_head_sha != run_metadata.base_commit:
-        expected = run_metadata.base_commit
-        console.print(
-            f"[bold red]Error: Repository HEAD has changed since preview. "
-            f"Expected {expected}, found {current_head_sha}. "
-            "Please re-run scan/preview or rebase/inspect.[/bold red]"
-        )
-        failure_path = run_dir / "failure.json"
-        failure_path.write_text(
-            json.dumps(
-                {
-                    "error": "HEAD has changed",
-                    "expected": run_metadata.base_commit,
-                    "current": current_head_sha,
-                },
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-        raise typer.Exit(code=1) from None
-
-    # 3. Bootstrap target environment. NOTE: TargetConfig.load() is NOT
-    # called here -- it reads orchestrator.json and walks the filesystem,
-    # both of which would observe the patch's own (uncommitted) mutations
-    # on the ALREADY_APPLIED resume path. It is loaded further down, inside
-    # the VALID-only happy path; the resume path loads the pre-apply
-    # snapshot instead (see below).
-    bootstrap_environment(env_file=env_file, target_path=target_path)
-
-    # 4. Verify valid git repo (cleanliness is checked later, VALID-path
-    # only -- ALREADY_APPLIED is expected to have a dirty tree, since the
-    # uncommitted patch IS the dirt).
-    try:
-        git_state = repository_state(target_path)
-    except ValueError as exc:
-        console.print(f"[bold red]Git Error: {exc}[/bold red]")
-        raise typer.Exit(code=1) from None
-
-    # 4b. Acquire repo lock BEFORE any isolation/lifecycle/branch/HEAD
-    # checks. A lock-acquisition failure means contention with another
-    # worker and must abort immediately.
+    # Acquire repo lock BEFORE any isolation/lifecycle/branch/HEAD checks --
+    # including the very first HEAD read immediately below. A
+    # lock-acquisition failure means contention with another worker and
+    # must abort immediately.
     acquired = False
     repo_identity = str(target_path.resolve())
     if coordination_db_dir is not None:
@@ -243,6 +210,52 @@ def execute(
             raise typer.Exit(code=1) from None
 
     try:
+        try:
+            current_head_sha = current_head(target_path)
+        except RuntimeError as exc:
+            console.print(f"[bold red]Git Error: {exc}[/bold red]")
+            failure_path = run_dir / "failure.json"
+            failure_path.write_text(
+                json.dumps(
+                    {
+                        "error": "Failed to resolve HEAD",
+                        "message": str(exc),
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            raise typer.Exit(code=1) from None
+
+        if current_head_sha != run_metadata.base_commit:
+            expected = run_metadata.base_commit
+            console.print(
+                f"[bold red]Error: Repository HEAD has changed since preview. "
+                f"Expected {expected}, found {current_head_sha}. "
+                "Please re-run scan/preview or rebase/inspect.[/bold red]"
+            )
+            failure_path = run_dir / "failure.json"
+            failure_path.write_text(
+                json.dumps(
+                    {
+                        "error": "HEAD has changed",
+                        "expected": run_metadata.base_commit,
+                        "current": current_head_sha,
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            raise typer.Exit(code=1) from None
+
+        # Bootstrap target environment. NOTE: TargetConfig.load() is NOT
+        # called here -- it reads orchestrator.json and walks the filesystem,
+        # both of which would observe the patch's own (uncommitted) mutations
+        # on the ALREADY_APPLIED resume path. It is loaded further down, inside
+        # the VALID-only happy path; the resume path loads the pre-apply
+        # snapshot instead (see below).
+        bootstrap_environment(env_file=env_file, target_path=target_path)
+
         # Classify lifecycle state using the dedicated lifecycle module.
         lifecycle_state = classify_lifecycle(run_id, workspace_mgr)
 
@@ -348,7 +361,7 @@ def execute(
                 "Attempting automatic resume...[/bold yellow]"
             )
 
-            wal_result = _hydrate_apply_result_for_resume(run_dir)
+            wal_result = _hydrate_apply_result_for_resume(run_dir, run_id, patch_path)
             if wal_result is None:
                 console.print(
                     "[bold red]Error: ALREADY_APPLIED detected but apply.json is "
@@ -430,6 +443,16 @@ def execute(
             )
         else:
             # --- HAPPY PATH (VALID) -----------------------------------------
+            # Verify valid git repo and cleanliness here, and only here --
+            # ALREADY_APPLIED is expected to have a dirty tree, since the
+            # uncommitted patch IS the dirt, so this must not run for that
+            # branch at all.
+            try:
+                git_state = repository_state(target_path)
+            except ValueError as exc:
+                console.print(f"[bold red]Git Error: {exc}[/bold red]")
+                raise typer.Exit(code=1) from None
+
             if not git_state.is_clean and not allow_dirty:
                 console.print(
                     "[bold red]Error: Target repository has uncommitted changes. "

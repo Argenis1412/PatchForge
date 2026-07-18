@@ -85,11 +85,15 @@ Scope as implemented (`src/orchestrator/commands/apply.py`,
   first loaded on the happy path. The resume path loads this snapshot via
   `model_validate_json()` and **never calls `TargetConfig.load()`** at all
   (moved entirely into the VALID-only branch — see addendum).
-- Repo-lock acquisition ordering: lock is acquired before lifecycle
-  classification, `is_clean` check, and `TargetConfig.load()`. A
-  lock-acquisition failure now aborts immediately instead of being
-  silently ignored (the old code never checked `acquire_repo_lock`'s
-  return value).
+- Repo-lock acquisition ordering: lock is acquired before the *first* HEAD
+  read (the "HEAD changed since preview" gate), lifecycle classification,
+  the `is_clean` check, and `TargetConfig.load()` -- i.e. before any git
+  read at all, not just before lifecycle classification. `is_clean` itself
+  is computed via `repository_state()`, which now lives entirely inside
+  the VALID-only branch (ALREADY_APPLIED never calls it, since its dirty
+  tree is expected and irrelevant to that path). A lock-acquisition
+  failure aborts immediately instead of being silently ignored (the old
+  code never checked `acquire_repo_lock`'s return value).
 - Checksum verification: unchanged in position (runs once, before the
   ALREADY_APPLIED/VALID branch split), so it now covers the resume path
   simply because the resume path no longer exits before reaching it.
@@ -127,8 +131,11 @@ review, beyond what the original Part 2 scope above anticipated:**
   checkpoint, not after: writing WAL-then-snapshot leaves a crash window
   where the WAL is hydratable but the snapshot is missing — a
   resumable-looking state the resume path could never actually complete.
-  Snapshot-then-WAL means a crash between the two leaves either both
-  files present or neither triggering a resume attempt.
+  Snapshot-then-WAL means a crash between the two writes instead leaves
+  the snapshot present and the new WAL absent (or still showing the
+  previous run's state); a missing or non-`"applying"` WAL fails
+  `_hydrate_apply_result_for_resume`'s checks, so no resume is attempted
+  and the orphaned snapshot is harmless.
 - `acquire_repo_lock`'s return value was previously ignored entirely; a
   `False` return (lock contention) now aborts immediately instead of
   proceeding without the lock.
@@ -267,9 +274,10 @@ Parts 2/3 are (re)implemented:
    isolation/lifecycle/branch/HEAD checks and git mutations began, instead
    of before — a race window between two workers. Also, the lock's return
    value was never checked (contention was silently ignored). Both fixed:
-   lock now acquired before lifecycle classification, and a `False` return
-   aborts immediately. Regression tests: `test_resume_aborts_lock_contention`,
-   `test_lock_released_on_conflict`.
+   lock is now acquired before the very first HEAD read (the
+   "HEAD changed since preview" gate) and before lifecycle classification,
+   and a `False` return aborts immediately. Regression tests:
+   `test_resume_aborts_lock_contention`, `test_lock_released_on_conflict`.
 8. **Fixed in Part 2.** Patch checksum verification was scoped to the
    happy-path only; the resume path never re-verified `patch.diff` against
    the checksum recorded at preview time. Fixed: checksum verification now

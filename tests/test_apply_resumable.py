@@ -139,6 +139,37 @@ def _failing_validator():
 
 
 # ---------------------------------------------------------------------------
+# Checksum gate: shared between VALID and ALREADY_APPLIED, runs before the
+# hydration/isolation checks and before validation is ever invoked.
+# ---------------------------------------------------------------------------
+
+
+def test_resume_aborts_checksum_mismatch_before_hydration(tmp_path: Path) -> None:
+    ctx = _setup_resumable_run(tmp_path)
+    # Mutate patch.diff after setup so its content no longer matches the
+    # checksum recorded in run.json at preview time.
+    (ctx["run_dir"] / "patch.diff").write_text("tampered patch content\n", encoding="utf-8")
+    validator_mock = MagicMock(return_value=_passing_validator())
+
+    with (
+        patch(
+            "orchestrator.lifecycle.classify_lifecycle",
+            return_value=PatchLifecycleState.ALREADY_APPLIED,
+        ),
+        patch("orchestrator.agents.validator.run", validator_mock),
+        pytest.raises(typer.Exit) as exc,
+    ):
+        apply_execute(ctx["run_id"], workspace=ctx["workspace_path"])
+
+    assert exc.value.exit_code == 1
+    validator_mock.assert_not_called()
+
+    run_metadata = ctx["workspace"].read_run_json(ctx["run_id"])
+    assert run_metadata.status == "failed"
+    assert "checksum_mismatch" in (run_metadata.failure_artifacts or [])
+
+
+# ---------------------------------------------------------------------------
 # Resume success / bypass is_clean
 # ---------------------------------------------------------------------------
 
@@ -314,6 +345,80 @@ def test_resume_aborts_wal_backup_missing(tmp_path: Path) -> None:
     validator_mock.assert_not_called()
 
 
+def test_resume_aborts_wal_run_id_mismatch(tmp_path: Path) -> None:
+    """The WAL's own run_id must match the run being resumed -- rejects an
+    apply.json that was copied in from (or belongs to) a different run."""
+    ctx = _setup_resumable_run(tmp_path)
+    apply_json_path = ctx["run_dir"] / "apply.json"
+    tampered = json.loads(apply_json_path.read_text(encoding="utf-8"))
+    tampered["run_id"] = "some-other-run"
+    apply_json_path.write_text(json.dumps(tampered, indent=2), encoding="utf-8")
+    validator_mock = MagicMock(return_value=_passing_validator())
+
+    with (
+        patch(
+            "orchestrator.lifecycle.classify_lifecycle",
+            return_value=PatchLifecycleState.ALREADY_APPLIED,
+        ),
+        patch("orchestrator.agents.validator.run", validator_mock),
+        pytest.raises(typer.Exit) as exc,
+    ):
+        apply_execute(ctx["run_id"], workspace=ctx["workspace_path"])
+
+    assert exc.value.exit_code == 1
+    validator_mock.assert_not_called()
+
+
+def test_resume_aborts_backup_pointer_redirected(tmp_path: Path) -> None:
+    """The backup pointer must be the canonical run-local path -- rejects a
+    WAL redirected to point at some other file on disk, even if that file
+    happens to exist."""
+    ctx = _setup_resumable_run(tmp_path)
+    decoy_backup = tmp_path / "decoy-backup.diff"
+    decoy_backup.write_text("dummy patch content\n", encoding="utf-8")
+    apply_json_path = ctx["run_dir"] / "apply.json"
+    tampered = json.loads(apply_json_path.read_text(encoding="utf-8"))
+    tampered["pre_apply_diff_backup"] = str(decoy_backup)
+    apply_json_path.write_text(json.dumps(tampered, indent=2), encoding="utf-8")
+    validator_mock = MagicMock(return_value=_passing_validator())
+
+    with (
+        patch(
+            "orchestrator.lifecycle.classify_lifecycle",
+            return_value=PatchLifecycleState.ALREADY_APPLIED,
+        ),
+        patch("orchestrator.agents.validator.run", validator_mock),
+        pytest.raises(typer.Exit) as exc,
+    ):
+        apply_execute(ctx["run_id"], workspace=ctx["workspace_path"])
+
+    assert exc.value.exit_code == 1
+    validator_mock.assert_not_called()
+
+
+def test_resume_aborts_backup_content_mismatch(tmp_path: Path) -> None:
+    """The backup file's bytes must exactly match the current patch.diff --
+    rejects a backup that was swapped or corrupted independently of the WAL,
+    even though it sits at the canonical path and the WAL is otherwise
+    well-formed."""
+    ctx = _setup_resumable_run(tmp_path)
+    ctx["backup_path"].write_text("not the same patch content at all\n", encoding="utf-8")
+    validator_mock = MagicMock(return_value=_passing_validator())
+
+    with (
+        patch(
+            "orchestrator.lifecycle.classify_lifecycle",
+            return_value=PatchLifecycleState.ALREADY_APPLIED,
+        ),
+        patch("orchestrator.agents.validator.run", validator_mock),
+        pytest.raises(typer.Exit) as exc,
+    ):
+        apply_execute(ctx["run_id"], workspace=ctx["workspace_path"])
+
+    assert exc.value.exit_code == 1
+    validator_mock.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Isolation checks: branch / HEAD mismatch -> abort
 # ---------------------------------------------------------------------------
@@ -460,19 +565,26 @@ def test_config_snapshot_written_happy_path(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Lock contention -> abort immediately, before lifecycle classification
+# Lock contention -> abort immediately, before ANY git read (HEAD or repo
+# state), not just before lifecycle classification.
 # ---------------------------------------------------------------------------
 
 
 def test_resume_aborts_lock_contention(tmp_path: Path) -> None:
     ctx = _setup_resumable_run(tmp_path)
     lifecycle_mock = MagicMock(return_value=PatchLifecycleState.ALREADY_APPLIED)
+    current_head_mock = MagicMock(side_effect=AssertionError("current_head must not be called"))
+    repository_state_mock = MagicMock(
+        side_effect=AssertionError("repository_state must not be called")
+    )
     coordination_db_dir = tmp_path / "coordination"
     coordination_db_dir.mkdir()
 
     with (
         patch("orchestrator.commands.apply.acquire_repo_lock", return_value=False),
         patch("orchestrator.lifecycle.classify_lifecycle", lifecycle_mock),
+        patch("orchestrator.git.current_head", current_head_mock),
+        patch("orchestrator.git.repository_state", repository_state_mock),
         pytest.raises(typer.Exit) as exc,
     ):
         apply_execute(
@@ -484,6 +596,8 @@ def test_resume_aborts_lock_contention(tmp_path: Path) -> None:
 
     assert exc.value.exit_code == 1
     lifecycle_mock.assert_not_called()
+    current_head_mock.assert_not_called()
+    repository_state_mock.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
