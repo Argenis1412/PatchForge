@@ -19,42 +19,12 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from orchestrator.clients.bootstrap import bootstrap_environment
 from orchestrator.provenance import resolve_approved_by
-from orchestrator.schemas.artifacts import ApplyResult
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.storage import _wal_write
 from orchestrator.storage.lock import acquire_repo_lock, release_repo_lock
 from orchestrator.workspace import WorkspaceManager
 
 console = Console()
-
-
-def _hydrate_apply_result_for_resume(run_dir: Path) -> ApplyResult | None:
-    """Hydrate an ApplyResult from the prior run's apply.json for resume.
-
-    Returns None (refuse to resume) if any precondition fails:
-    - apply.json missing
-    - status is not "applying"
-    - pre_apply_diff_backup is missing or points to a non-existent file
-    """
-    apply_json = run_dir / "apply.json"
-    if not apply_json.exists():
-        return None
-
-    try:
-        data = json.loads(apply_json.read_text(encoding="utf-8"))
-        result = ApplyResult(**data)
-    except Exception:
-        return None
-
-    if result.status != "applying":
-        return None
-
-    if not result.pre_apply_diff_backup:
-        return None
-    if not Path(result.pre_apply_diff_backup).exists():
-        return None
-
-    return result
 
 
 def execute(
@@ -86,8 +56,6 @@ def execute(
         current_branch,
         current_head,
         repository_state,
-        stash_apply,
-        stash_create_untracked,
     )
     from orchestrator.lifecycle import classify_lifecycle
     from orchestrator.observability.events import log_event, log_failure
@@ -97,10 +65,6 @@ def execute(
         compute_auto_apply_eligible,
     )
     from orchestrator.schemas.config import default_workspace_path
-
-    # ===================================================================
-    # PROLOGUE — always runs (both happy-path and resume)
-    # ===================================================================
 
     # 1. Resolve workspace path and ensure run exists
     if workspace is not None:
@@ -117,7 +81,7 @@ def execute(
         console.print(f"[bold red]Error: {exc}[/bold red]")
         raise typer.Exit(code=1) from None
 
-    # 2. Read run.json
+    # 2. Read run.json and patch.diff
     run_metadata = workspace_mgr.read_run_json(run_id)
 
     if issue_number is None and run_metadata.issue_number is not None:
@@ -141,9 +105,11 @@ def execute(
 
     target_path = Path(run_metadata.target_path)
 
+    # This is the actual human gate — record who is approving now, not at
+    # scan/ci time when no approval has happened yet.
     run_metadata.approved_by = resolve_approved_by(target_path)
 
-    # Verify experiment context
+    # 2.5 Verify experiment context if experiment.json is present
     from orchestrator.schemas.experiment import verify_experiment_or_warn
 
     try:
@@ -177,7 +143,28 @@ def execute(
         )
         raise typer.Exit(code=1) from None
 
-    # Bootstrap target environment & load config (required by validator)
+    if current_head_sha != run_metadata.base_commit:
+        expected = run_metadata.base_commit
+        console.print(
+            f"[bold red]Error: Repository HEAD has changed since preview. "
+            f"Expected {expected}, found {current_head_sha}. "
+            "Please re-run scan/preview or rebase/inspect.[/bold red]"
+        )
+        failure_path = run_dir / "failure.json"
+        failure_path.write_text(
+            json.dumps(
+                {
+                    "error": "HEAD has changed",
+                    "expected": run_metadata.base_commit,
+                    "current": current_head_sha,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        raise typer.Exit(code=1) from None
+
+    # 3. Bootstrap target environment & load config
     bootstrap_environment(env_file=env_file, target_path=target_path)
     try:
         config = TargetConfig.load(target_path=target_path, workspace_path=workspace_path)
@@ -185,6 +172,7 @@ def execute(
         console.print(f"[bold red]Error loading target config: {exc}[/bold red]")
         raise typer.Exit(code=1) from None
 
+    # 4. Perform Git Safety Checks
     # Verify valid git repo
     try:
         git_state = repository_state(target_path)
@@ -192,7 +180,15 @@ def execute(
         console.print(f"[bold red]Git Error: {exc}[/bold red]")
         raise typer.Exit(code=1) from None
 
-    # Classify lifecycle state
+    # Check cleanliness
+    if not git_state.is_clean and not allow_dirty:
+        console.print(
+            "[bold red]Error: Target repository has uncommitted changes. "
+            "Please commit, stash them, or run with --allow-dirty.[/bold red]"
+        )
+        raise typer.Exit(code=1) from None
+
+    # Classify lifecycle state using the dedicated lifecycle module.
     lifecycle_state = classify_lifecycle(run_id, workspace_mgr)
 
     run_metadata.lifecycle_state = lifecycle_state
@@ -202,32 +198,25 @@ def execute(
     run_metadata.updated_at = datetime.now(timezone.utc)
     workspace_mgr.write_run_json(run_id, run_metadata)
 
-    # ===================================================================
-    # BIFURCATION BY LIFECYCLE STATE
-    # ===================================================================
-
     if lifecycle_state is PatchLifecycleState.ALREADY_APPLIED:
-        _execute_resume(
-            run_id=run_id,
-            run_metadata=run_metadata,
-            target_path=target_path,
-            workspace_mgr=workspace_mgr,
-            config=config,
-            logs_dir=logs_dir,
-            run_dir=run_dir,
-            patch_path=patch_path,
-            worker_id=worker_id,
-            coordination_db_dir=coordination_db_dir,
-            run_validator=run_validator,
-            rollback_to_commit=rollback_to_commit,
-            rollback_error_cls=RollbackError,
-            log_event=log_event,
-            log_failure=log_failure,
-            current_head=current_head,
-            current_branch=current_branch,
-            stash_apply=stash_apply,
+        # Detected correctly, but auto-resume is not yet implemented — see
+        # docs/context/plan-issue-258-resumable-apply.md (Parts 2-4). Give a
+        # clear, accurate message instead of a misleading CONFLICT error
+        # with identical SHAs.
+        console.print(
+            "[bold yellow]Patch lifecycle state is ALREADY_APPLIED: the patch "
+            "is already present in the working tree (matching HEAD "
+            f"{run_metadata.base_commit}), but has not been committed. This "
+            "usually happens when a previous 'apply' was interrupted after "
+            "writing the patch but before finishing validation.\n\n"
+            "Automatic resume is not yet supported. To proceed manually:\n"
+            "  - Review the working tree (git status / git diff), then\n"
+            "  - Commit the changes yourself, or\n"
+            "  - Discard them ('git reset --hard "
+            f"{run_metadata.base_commit}' and 'git clean -fd') and re-run "
+            "apply.[/bold yellow]"
         )
-        return
+        raise typer.Exit(code=1) from None
 
     if lifecycle_state is PatchLifecycleState.CONFLICT:
         console.print(
@@ -257,11 +246,23 @@ def execute(
         )
         raise typer.Exit(code=1) from None
 
-    # ===================================================================
-    # HAPPY-PATH (lifecycle_state == VALID)
-    # ===================================================================
+    log_event(
+        trace_id=run_id,
+        run_id=run_id,
+        level="info",
+        source="pipeline",
+        stage="apply",
+        event="stage_start",
+        data={
+            "lifecycle_state": lifecycle_state,
+            "base_commit": run_metadata.base_commit,
+            "current_head": current_head(target_path),
+        },
+        logs_dir=logs_dir,
+        run_dir=run_dir,
+    )
 
-    # Verify patch checksum (happy-path only; resume trusts prior validation)
+    # 5. Verify patch checksum
     patch_content = patch_path.read_text(encoding="utf-8")
     actual_checksum = hashlib.sha256(patch_content.encode("utf-8")).hexdigest()
     if not run_metadata.patch_checksum:
@@ -292,67 +293,11 @@ def execute(
         workspace_mgr.write_run_json(run_id, run_metadata)
         raise typer.Exit(code=1) from None
 
-    # HEAD must match base_commit for the happy-path
-    if current_head_sha != run_metadata.base_commit:
-        expected = run_metadata.base_commit
-        console.print(
-            f"[bold red]Error: Repository HEAD has changed since preview. "
-            f"Expected {expected}, found {current_head_sha}. "
-            "Please re-run scan/preview or rebase/inspect.[/bold red]"
-        )
-        failure_path = run_dir / "failure.json"
-        failure_path.write_text(
-            json.dumps(
-                {
-                    "error": "HEAD has changed",
-                    "expected": run_metadata.base_commit,
-                    "current": current_head_sha,
-                },
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-        raise typer.Exit(code=1) from None
-
-    # Check cleanliness (happy-path only)
-    if not git_state.is_clean and not allow_dirty:
-        console.print(
-            "[bold red]Error: Target repository has uncommitted changes. "
-            "Please commit, stash them, or run with --allow-dirty.[/bold red]"
-        )
-        raise typer.Exit(code=1) from None
-
-    log_event(
-        trace_id=run_id,
-        run_id=run_id,
-        level="info",
-        source="pipeline",
-        stage="apply",
-        event="stage_start",
-        data={
-            "lifecycle_state": lifecycle_state,
-            "base_commit": run_metadata.base_commit,
-            "current_head": current_head(target_path),
-        },
-        logs_dir=logs_dir,
-        run_dir=run_dir,
-    )
-
-    # Save pre-apply Git state
+    # 6. Save pre-apply Git state
     pre_apply_head = current_head(target_path)
     pre_apply_branch = current_branch(target_path)
 
-    # Snapshot user dirt if --allow-dirty and tree is dirty (§2.5)
-    dirty_stash_sha: str | None = None
-    dirty_stash_tree: str | None = None
-    if allow_dirty and not git_state.is_clean:
-        dirty_stash_sha = stash_create_untracked(target_path)
-        if dirty_stash_sha:
-            from orchestrator.git import rev_parse_tree
-
-            dirty_stash_tree = rev_parse_tree(target_path, dirty_stash_sha)
-
-    # Acquire repo lock before any git mutation
+    # 6b. Acquire repo lock before any git mutation
     acquired = False
     repo_identity = str(target_path.resolve())
     if coordination_db_dir is not None:
@@ -364,7 +309,7 @@ def execute(
         )
 
     try:
-        # Check out explicit, system-controlled Git branch
+        # 7. Check out explicit, system-controlled Git branch
         if issue_number is not None:
             branch_name = f"patchforge/{run_id}/issue_{issue_number}"
         else:
@@ -378,8 +323,6 @@ def execute(
             success=False,
             pre_apply_head=pre_apply_head,
             pre_apply_branch=pre_apply_branch,
-            pre_apply_dirty_stash=dirty_stash_sha,
-            pre_apply_dirty_stash_tree=dirty_stash_tree,
             status="applying",
         )
         _wal_write(apply_result, run_dir / "apply.json")
@@ -408,7 +351,7 @@ def execute(
             workspace_mgr.write_run_json(run_id, run_metadata)
             raise typer.Exit(code=1) from None
 
-        # Apply patch
+        # 8. Apply patch
         backup_path = run_dir / "patch.apply-backup.diff"
         shutil.copy2(patch_path, backup_path)
         apply_result.pre_apply_diff_backup = str(backup_path)
@@ -426,19 +369,29 @@ def execute(
                 logs_dir=logs_dir,
                 run_dir=run_dir,
             )
-            rollback_succeeded = _rollback_with_stash(
-                target_path,
-                pre_apply_head,
-                backup_path,
-                dirty_stash_sha,
-                rollback_to_commit,
-                RollbackError,
-                console,
-                run_id,
-                log_failure,
-                logs_dir,
-                run_dir,
-            )
+            # Revert: force reset to pre-apply state
+            rollback_succeeded = False
+            try:
+                rollback_to_commit(target_path, pre_apply_head, backup_diff=backup_path)
+                rollback_succeeded = True
+            except RollbackError as exc:
+                console.print(
+                    "[bold red]FATAL: Patch application failed AND the automatic revert also "
+                    "failed. Your repository may be in a partially applied state.\n"
+                    f"Revert stderr: {exc.stderr}\n"
+                    "Please run 'git checkout .' and 'git clean -fd' manually "
+                    "to restore a clean state.[/bold red]"
+                )
+                log_failure(
+                    trace_id=run_id,
+                    run_id=run_id,
+                    stage="apply",
+                    error_type="revert_failed",
+                    message=exc.stderr,
+                    logs_dir=logs_dir,
+                    run_dir=run_dir,
+                )
+            # Write apply.json failure using ApplyResult model
             apply_result = ApplyResult(
                 run_id=run_id,
                 applied_at=datetime.now(timezone.utc),
@@ -449,8 +402,6 @@ def execute(
                 error=apply_res.stderr,
                 pre_apply_head=pre_apply_head,
                 pre_apply_branch=pre_apply_branch,
-                pre_apply_dirty_stash=dirty_stash_sha,
-                pre_apply_dirty_stash_tree=dirty_stash_tree,
                 rollback_head=pre_apply_head if rollback_succeeded else None,
             )
             _wal_write(apply_result, run_dir / "apply.json")
@@ -464,39 +415,55 @@ def execute(
             workspace_mgr.write_run_json(run_id, run_metadata)
             raise typer.Exit(code=1) from None
 
-        # Run post-apply validation checks
-        post_val_output = _run_post_apply_validation(
-            run_id,
-            config,
-            run_validator,
-            log_event,
-            logs_dir,
-            run_dir,
-        )
+        # 9. Run post-apply validation checks
+        with Progress(
+            SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console
+        ) as progress:
+            task = progress.add_task("[green]Running post-apply validation checks...", total=None)
+            try:
+                post_val_output, _ = run_validator(config=config)
+                progress.update(task, completed=100)
+            except Exception as exc:
+                progress.update(task, completed=100)
+                console.print(
+                    "[bold yellow]Warning: post-apply validation failed to execute: "
+                    f"{exc}[/bold yellow]"
+                )
+                post_val_output = None
 
         if post_val_output is not None:
             workspace_mgr.write_artifact(
                 run_id, "post_apply_validation.json", post_val_output.model_dump_json(indent=2)
             )
 
-        # Handle post-apply validation failure: rollback
+        # 10. Handle post-apply validation failure: rollback automatically
         if post_val_output is not None and not post_val_output.overall_passed:
             console.print(
                 "[bold yellow]Post-apply validation failed. Rolling back...[/bold yellow]"
             )
-            rollback_succeeded = _rollback_with_stash(
-                target_path,
-                pre_apply_head,
-                backup_path,
-                dirty_stash_sha,
-                rollback_to_commit,
-                RollbackError,
-                console,
-                run_id,
-                log_failure,
-                logs_dir,
-                run_dir,
-            )
+            rollback_succeeded = False
+            try:
+                rollback_to_commit(target_path, pre_apply_head, backup_diff=backup_path)
+                rollback_succeeded = True
+            except RollbackError as exc:
+                console.print(
+                    "[bold red]FATAL: Post-apply validation failed AND automatic rollback "
+                    "also failed. Your repository may be in a partially applied state.\n"
+                    f"Revert stderr: {exc.stderr}\n"
+                    "Please run 'git checkout .' and 'git clean -fd' manually "
+                    "to restore a clean state.[/bold red]"
+                )
+                log_failure(
+                    trace_id=run_id,
+                    run_id=run_id,
+                    stage="apply",
+                    error_type="rollback_failed",
+                    message=exc.stderr,
+                    logs_dir=logs_dir,
+                    run_dir=run_dir,
+                )
+
+            # Write post_apply_failure.json
             failure_detail = {
                 "stage": "post_apply_validation",
                 "reason": "validation_failed",
@@ -506,6 +473,7 @@ def execute(
             workspace_mgr.write_artifact(
                 run_id, "post_apply_failure.json", json.dumps(failure_detail, indent=2)
             )
+
             error_msg = (
                 "Post-apply validation failed; rollback also failed"
                 if not rollback_succeeded
@@ -521,8 +489,6 @@ def execute(
                 error=error_msg,
                 pre_apply_head=pre_apply_head,
                 pre_apply_branch=pre_apply_branch,
-                pre_apply_dirty_stash=dirty_stash_sha,
-                pre_apply_dirty_stash_tree=dirty_stash_tree,
                 rollback_head=pre_apply_head if rollback_succeeded else None,
             )
             _wal_write(apply_result, run_dir / "apply.json")
@@ -537,12 +503,13 @@ def execute(
             workspace_mgr.write_run_json(run_id, run_metadata)
             raise typer.Exit(code=1) from None
 
-        # Checkpoint: status="applied", success=True
+        # 11. Checkpoint 5: status="applied", success=True
         apply_result.applied_at = datetime.now(timezone.utc)
         apply_result.success = True
         apply_result.status = "applied"
         _wal_write(apply_result, run_dir / "apply.json")
 
+        # 12. Update metadata
         run_metadata.status = "applied"
         run_metadata.apply_status = "success"
         run_metadata.updated_at = datetime.now(timezone.utc)
@@ -566,307 +533,12 @@ def execute(
         if coordination_db_dir is not None and acquired:
             release_repo_lock(repo_identity, worker_id or "unknown", db_dir=coordination_db_dir)
 
-    _print_success(run_id, branch_name, run_metadata)
-
-
-def _execute_resume(
-    *,
-    run_id,
-    run_metadata,
-    target_path,
-    workspace_mgr,
-    config,
-    logs_dir,
-    run_dir,
-    patch_path,
-    worker_id,
-    coordination_db_dir,
-    run_validator,
-    rollback_to_commit,
-    rollback_error_cls,
-    log_event,
-    log_failure,
-    current_head,
-    current_branch,
-    stash_apply,
-):
-    """Resume an interrupted apply from the ALREADY_APPLIED state."""
-    from datetime import datetime, timezone
-
-    # Hydrate WAL from prior run (Ataque 2 defense)
-    apply_result = _hydrate_apply_result_for_resume(run_dir)
-    if apply_result is None:
-        console.print(
-            "[bold red]Error: Cannot resume — apply.json is missing, corrupt, "
-            "or not in 'applying' state. The backup diff may also be missing. "
-            "Please reset the target repo manually and run preview again.[/bold red]"
-        )
-        raise typer.Exit(code=1) from None
-
-    # Triple isolation verification (Ataque 3 defense)
-    actual_branch = current_branch(target_path)
-    if actual_branch != apply_result.branch:
-        console.print(
-            f"[bold red]Error: Split-brain detected — WAL expects branch "
-            f"'{apply_result.branch}', but target is on '{actual_branch}'. "
-            "Cannot resume safely. Please reset the target repo manually "
-            "and run preview again.[/bold red]"
-        )
-        raise typer.Exit(code=1) from None
-
-    actual_head = current_head(target_path)
-    if actual_head != apply_result.pre_apply_head:
-        console.print(
-            f"[bold red]Error: Split-brain detected — WAL expects HEAD "
-            f"'{apply_result.pre_apply_head}', but target HEAD is "
-            f"'{actual_head}'. Cannot resume safely.[/bold red]"
-        )
-        raise typer.Exit(code=1) from None
-
-    console.print(
-        "[bold cyan]Resuming interrupted apply — patch already in working tree, "
-        "skipping to post-apply validation...[/bold cyan]"
-    )
-
-    log_event(
-        trace_id=run_id,
-        run_id=run_id,
-        level="info",
-        source="pipeline",
-        stage="apply",
-        event="stage_start",
-        data={
-            "lifecycle_state": "ALREADY_APPLIED",
-            "resumed": True,
-            "base_commit": run_metadata.base_commit,
-            "current_head": actual_head,
-        },
-        logs_dir=logs_dir,
-        run_dir=run_dir,
-    )
-
-    # Acquire repo lock for the resume path too
-    acquired = False
-    repo_identity = str(target_path.resolve())
-    if coordination_db_dir is not None:
-        acquired = acquire_repo_lock(
-            repo_identity,
-            worker_id or "unknown",
-            ttl_seconds=300,
-            db_dir=coordination_db_dir,
-        )
-
-    try:
-        backup_path = Path(apply_result.pre_apply_diff_backup)
-        dirty_stash_sha = apply_result.pre_apply_dirty_stash
-
-        # Run post-apply validation checks (the step that was interrupted)
-        post_val_output = _run_post_apply_validation(
-            run_id,
-            config,
-            run_validator,
-            log_event,
-            logs_dir,
-            run_dir,
-        )
-
-        if post_val_output is not None:
-            workspace_mgr.write_artifact(
-                run_id, "post_apply_validation.json", post_val_output.model_dump_json(indent=2)
-            )
-
-        # Handle validation failure: rollback
-        if post_val_output is not None and not post_val_output.overall_passed:
-            console.print(
-                "[bold yellow]Post-apply validation failed on resume. Rolling back...[/bold yellow]"
-            )
-            rollback_succeeded = _rollback_with_stash(
-                target_path,
-                apply_result.pre_apply_head,
-                backup_path,
-                dirty_stash_sha,
-                rollback_to_commit,
-                rollback_error_cls,
-                console,
-                run_id,
-                log_failure,
-                logs_dir,
-                run_dir,
-            )
-            failure_detail = {
-                "stage": "post_apply_validation",
-                "reason": "validation_failed_on_resume",
-                "validation_output": post_val_output.model_dump(),
-                "rollback_succeeded": rollback_succeeded,
-            }
-            workspace_mgr.write_artifact(
-                run_id, "post_apply_failure.json", json.dumps(failure_detail, indent=2)
-            )
-            error_msg = (
-                "Post-apply validation failed on resume; rollback also failed"
-                if not rollback_succeeded
-                else "Post-apply validation failed on resume"
-            )
-            # Update WAL incrementally (preserve prior pointers)
-            apply_result.applied_at = datetime.now(timezone.utc)
-            apply_result.success = False
-            apply_result.status = "apply_failed"
-            apply_result.rolled_back = rollback_succeeded
-            apply_result.error = error_msg
-            apply_result.rollback_head = apply_result.pre_apply_head if rollback_succeeded else None
-            _wal_write(apply_result, run_dir / "apply.json")
-            run_metadata.status = "failed"
-            run_metadata.apply_status = "rolled_back" if rollback_succeeded else "rollback_failed"
-            run_metadata.updated_at = datetime.now(timezone.utc)
-            if run_metadata.failure_artifacts is None:
-                run_metadata.failure_artifacts = []
-            for artifact in ["apply.json", "post_apply_failure.json"]:
-                if artifact not in run_metadata.failure_artifacts:
-                    run_metadata.failure_artifacts.append(artifact)
-            workspace_mgr.write_run_json(run_id, run_metadata)
-            raise typer.Exit(code=1) from None
-
-        # Success: update WAL incrementally
-        apply_result.applied_at = datetime.now(timezone.utc)
-        apply_result.success = True
-        apply_result.status = "applied"
-        _wal_write(apply_result, run_dir / "apply.json")
-
-        run_metadata.status = "applied"
-        run_metadata.apply_status = "success"
-        run_metadata.updated_at = datetime.now(timezone.utc)
-        workspace_mgr.write_run_json(run_id, run_metadata)
-
-        log_event(
-            trace_id=run_id,
-            run_id=run_id,
-            level="info",
-            source="pipeline",
-            stage="apply",
-            event="stage_end",
-            data={
-                "success": True,
-                "resumed": True,
-                "post_apply_passed": (post_val_output.overall_passed if post_val_output else None),
-            },
-            logs_dir=logs_dir,
-            run_dir=run_dir,
-        )
-    finally:
-        if coordination_db_dir is not None and acquired:
-            release_repo_lock(repo_identity, worker_id or "unknown", db_dir=coordination_db_dir)
-
-    _print_success(run_id, apply_result.branch, run_metadata)
-
-
-def _run_post_apply_validation(
-    run_id,
-    config,
-    run_validator,
-    log_event,
-    logs_dir,
-    run_dir,
-):
-    """Run post-apply validation with progress spinner and observability events."""
-    log_event(
-        trace_id=run_id,
-        run_id=run_id,
-        level="info",
-        source="pipeline",
-        stage="apply",
-        event="post_apply_validation_start",
-        data={},
-        logs_dir=logs_dir,
-        run_dir=run_dir,
-    )
-    with Progress(
-        SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console
-    ) as progress:
-        task = progress.add_task("[green]Running post-apply validation checks...", total=None)
-        try:
-            post_val_output, _ = run_validator(config=config)
-            progress.update(task, completed=100)
-        except Exception as exc:
-            progress.update(task, completed=100)
-            console.print(
-                "[bold yellow]Warning: post-apply validation failed to execute: "
-                f"{exc}[/bold yellow]"
-            )
-            post_val_output = None
-
-    log_event(
-        trace_id=run_id,
-        run_id=run_id,
-        level="info",
-        source="pipeline",
-        stage="apply",
-        event="post_apply_validation_end",
-        data={
-            "passed": post_val_output.overall_passed if post_val_output else None,
-        },
-        logs_dir=logs_dir,
-        run_dir=run_dir,
-    )
-    return post_val_output
-
-
-def _rollback_with_stash(
-    target_path,
-    pre_apply_head,
-    backup_path,
-    dirty_stash_sha,
-    rollback_to_commit,
-    rollback_error_cls,
-    console_obj,
-    run_id,
-    log_failure,
-    logs_dir,
-    run_dir,
-) -> bool:
-    """Rollback to pre-apply state, restoring user dirt from stash if applicable."""
-    from orchestrator.git import stash_apply
-
-    rollback_succeeded = False
-    try:
-        rollback_to_commit(target_path, pre_apply_head, backup_diff=backup_path)
-        rollback_succeeded = True
-    except rollback_error_cls as exc:
-        console_obj.print(
-            "[bold red]FATAL: Rollback failed. Your repository may be in a "
-            "partially applied state.\n"
-            f"Revert stderr: {exc.stderr}\n"
-            "Please run 'git checkout .' and 'git clean -fd' manually "
-            "to restore a clean state.[/bold red]"
-        )
-        log_failure(
-            trace_id=run_id,
-            run_id=run_id,
-            stage="apply",
-            error_type="rollback_failed",
-            message=exc.stderr,
-            logs_dir=logs_dir,
-            run_dir=run_dir,
-        )
-        return False
-
-    if dirty_stash_sha and rollback_succeeded:
-        stash_res = stash_apply(target_path, dirty_stash_sha)
-        if stash_res.return_code != 0:
-            console_obj.print(
-                "[bold yellow]Warning: rollback succeeded but initial user dirt "
-                "could not be reapplied. Stash SHA preserved as dangling commit — "
-                f"recover with 'git stash apply {dirty_stash_sha}'[/bold yellow]"
-            )
-
-    return rollback_succeeded
-
-
-def _print_success(run_id: str, branch_name: str, run_metadata) -> None:
     eligibility_line = (
         "[green]✔ Auto-apply eligible[/green]"
         if run_metadata.auto_apply_eligible
         else "[yellow]⚠ Manual review recommended[/yellow]"
     )
+
     console.print(
         Panel(
             "[bold green]Patch applied successfully to branch "

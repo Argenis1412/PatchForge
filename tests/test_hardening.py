@@ -145,11 +145,11 @@ def test_apply_aborts_if_head_changed(tmp_path: Path) -> None:
 
     assert exc.value.exit_code == 1
 
-    # With lifecycle classification, HEAD divergence is caught as STALE
-    # (invalid patch format) or CONFLICT before the explicit HEAD check.
-    # The essential invariant is: apply aborts with exit code 1.
-    run_json = workspace.read_run_json(run_id)
-    assert run_json.lifecycle_state is not None
+    failure_json = run_dir / "failure.json"
+    assert failure_json.exists()
+    failure_data = json.loads(failure_json.read_text(encoding="utf-8"))
+    assert failure_data["error"] == "HEAD has changed"
+    assert failure_data["expected"] == commit1
 
 
 def test_apply_aborts_if_head_resolution_fails(

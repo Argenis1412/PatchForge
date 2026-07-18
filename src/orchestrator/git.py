@@ -422,7 +422,8 @@ def repository_identity(repo_root: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Helpers for apply-resume detection (issue #258)
+# Helpers for apply lifecycle detection (issue #258, Part 1 — detection only;
+# see docs/context/plan-issue-258-resumable-apply.md for the full scope)
 # ---------------------------------------------------------------------------
 
 
@@ -466,65 +467,6 @@ def head_tree_sha(repo_path: Path) -> str | None:
         return None
 
 
-def stash_create_untracked(repo_path: Path) -> str | None:
-    """Create a stash commit (dangling) that includes untracked files.
-
-    Uses ``git stash create -u`` which captures tracked modifications AND
-    untracked non-ignored files without mutating the working tree.  Returns
-    the stash commit SHA, or None if the tree is clean (nothing to stash) or
-    on any error.
-    """
-    try:
-        res = subprocess.run(
-            ["git", "-C", str(repo_path), "stash", "create", "--include-untracked"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        sha = res.stdout.strip()
-        if res.returncode == 0 and sha:
-            return sha
-        return None
-    except Exception:
-        return None
-
-
-def rev_parse_tree(repo_path: Path, commitish: str) -> str | None:
-    """Return the tree SHA for an arbitrary commit-ish, or None on failure."""
-    try:
-        res = subprocess.run(
-            ["git", "-C", str(repo_path), "rev-parse", f"{commitish}^{{tree}}"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if res.returncode == 0:
-            return res.stdout.strip()
-        return None
-    except Exception:
-        return None
-
-
-def stash_apply(repo_path: Path, stash_sha: str) -> GitCommandResult:
-    """Apply a stash commit (including untracked files) without dropping it."""
-    try:
-        res = subprocess.run(
-            ["git", "-C", str(repo_path), "stash", "apply", "--index", stash_sha],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        return GitCommandResult(
-            return_code=res.returncode,
-            stdout=res.stdout,
-            stderr=res.stderr,
-        )
-    except FileNotFoundError as e:
-        return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {e}")
-    except Exception as e:
-        return GitCommandResult(return_code=1, stdout="", stderr=str(e))
-
-
 def _list_untracked(repo_path: Path) -> set[str] | None:
     """Return the set of untracked non-ignored files, or None on error."""
     try:
@@ -548,39 +490,10 @@ def _list_untracked(repo_path: Path) -> set[str] | None:
         return None
 
 
-def _list_stash_untracked(repo_path: Path, stash_sha: str) -> set[str] | None:
-    """Return the set of files in a stash's third parent (untracked tree).
-
-    Returns an empty set (not None) if the stash has no third parent (i.e.
-    stash was created without ``-u``).
-    """
-    try:
-        res = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(repo_path),
-                "ls-tree",
-                "-r",
-                "--name-only",
-                f"{stash_sha}^3",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if res.returncode != 0:
-            return set()
-        return {line for line in res.stdout.splitlines() if line}
-    except Exception:
-        return set()
-
-
 def working_tree_equals_expected_state(
     patch_path: Path,
     repo_path: Path,
     expected_baseline_tree_sha: str,
-    stash_sha: str | None = None,
 ) -> bool:
     """Check that the working tree equals baseline + patch with no residue.
 
@@ -589,14 +502,18 @@ def working_tree_equals_expected_state(
 
     1. ``read-tree <baseline>`` into temp index.
     2. ``apply --cached patch.diff`` (forward) into temp index.
-    3. Check untracked files: clean case must have none; dirty case must
-       match the stash's third parent exactly.
+    3. Check untracked files: the working tree must have none beyond what
+       the patch itself adds.
     4. ``git -c core.filemode=false diff-files --quiet`` against temp index.
 
     Returns False on any error (never raises).
+
+    Only handles the clean-tree case (the initial run was on a clean
+    working tree). Preserving pre-existing dirt across a resume is future
+    scope — see docs/context/plan-issue-258-resumable-apply.md (Part 3).
     """
     try:
-        return _working_tree_check(patch_path, repo_path, expected_baseline_tree_sha, stash_sha)
+        return _working_tree_check(patch_path, repo_path, expected_baseline_tree_sha)
     except Exception:
         return False
 
@@ -605,7 +522,6 @@ def _working_tree_check(
     patch_path: Path,
     repo_path: Path,
     expected_baseline_tree_sha: str,
-    stash_sha: str | None,
 ) -> bool:
     with tempfile.TemporaryDirectory(prefix="pf_resume_") as scratch:
         index_path = str(Path(scratch) / "index")
@@ -646,20 +562,48 @@ def _working_tree_check(
         if res.returncode != 0:
             return False
 
-        # Step 3: untracked file comparison
+        # `read-tree`/`apply --cached` populate index entries with zeroed
+        # stat info (size, mtime, ...) since they never touch the working
+        # tree. `diff-files` uses cached size as a fast-reject before
+        # hashing — a cached size of 0 against a real, non-empty file is
+        # treated as conclusive proof of a difference, so Step 4 below would
+        # report every legitimately-matching file as residue (verified
+        # empirically). Refreshing the temp index against the real working
+        # tree files fixes the cached stat so the later hash comparison
+        # actually runs.
+        subprocess.run(
+            ["git", "-C", str(repo_path), "update-index", "--refresh"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+
+        # `apply_patch` (used by the actual apply command) runs plain
+        # `git apply`, which never touches the real index — so any new file
+        # the patch added shows up as untracked in the real working tree
+        # even when nothing is actually wrong. Files the temp index (built
+        # from baseline + patch above) already tracks are expected, not
+        # residue, and must be excluded from the untracked comparison below.
+        patch_tracked_res = subprocess.run(
+            ["git", "-C", str(repo_path), "ls-files"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+        if patch_tracked_res.returncode != 0:
+            return False
+        patch_tracked_paths = {line for line in patch_tracked_res.stdout.splitlines() if line}
+
+        # Step 3: untracked file comparison -- clean case must have none
+        # beyond what the patch itself introduced.
         current_untracked = _list_untracked(repo_path)
         if current_untracked is None:
             return False
-
-        if stash_sha is not None:
-            expected_untracked = _list_stash_untracked(repo_path, stash_sha)
-            if expected_untracked is None:
-                return False
-            if current_untracked != expected_untracked:
-                return False
-        else:
-            if current_untracked:
-                return False
+        current_untracked -= patch_tracked_paths
+        if current_untracked:
+            return False
 
         # Step 4: diff-files --quiet (content only, ignore mode)
         res = subprocess.run(
