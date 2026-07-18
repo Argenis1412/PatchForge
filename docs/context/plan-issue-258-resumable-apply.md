@@ -50,44 +50,95 @@ Non-goals for Part 1 (deferred): resuming execution, dirt snapshot,
 untracked-file preservation, stash plumbing, lock reordering, config
 reload from base commit, checksum-on-resume.
 
-## Part 2 — Resume execution, clean case only (future issue)
+## Part 2 — Resume execution, clean case only ✅ DONE
+
+Implemented on branch `fix/issue-260-resume-execution-part2`, tracked as
+issue [#260](https://github.com/Argenis1412/PatchForge/issues/260) (opened
+as its own issue rather than continuing under #258, per the split
+rationale above).
 
 **Goal:** `apply` actually resumes from `ALREADY_APPLIED` when the initial
-run was on a clean tree (no `--allow-dirty`).
+run was on a clean tree (no `--allow-dirty`). Achieved.
 
-Scope:
+Scope as implemented (`src/orchestrator/commands/apply.py`,
+`src/orchestrator/schemas/artifacts.py`):
 
 - `_hydrate_apply_result_for_resume(run_dir)` — WAL hydration from
-  `apply.json`, refusing to resume if `status != "applying"` or the backup
-  diff pointer is missing/stale.
-- Triple isolation verification before resuming: branch name, HEAD SHA, and
-  residue-free tree (from Part 1's classifier) must all match the WAL.
-  Zero remediation mutations on mismatch — abort only.
+  `apply.json`, refusing to resume if `status != "applying"`, the backup
+  diff pointer is missing/stale, or the file is unparseable/corrupt.
+- Triple isolation verification before resuming: **live current branch**
+  (via `current_branch(target_path)`, not a locally re-derived constant —
+  see the adversarial-review addendum below), HEAD SHA, and residue-free
+  tree (from Part 1's classifier) must all match the WAL. Zero remediation
+  mutations on mismatch — abort only.
 - Re-run the post-apply validator and route its outcome (pass/fail/**error**)
-  through the same rollback path the happy-path already uses.
-  **Must fix the validator-exception-swallowing bug from the review before
-  merging this part** (see below) — an exception from the validator must
-  never be treated as "nothing to roll back."
-- `bootstrap_environment` + `TargetConfig.load` must run before the
-  validator on the resume path too, but **must not reload `TargetConfig`
-  from the mutated (patch-already-applied) tree** — see the config-reload
-  bug below. Simplest correct approach: persist the pre-apply
-  `TargetConfig` (it's a Pydantic model — `model_dump_json()` round-trips
-  cleanly) to a run-dir snapshot file at the moment it's first loaded in
-  the happy-path, before `git apply` runs; the resume path loads that
-  snapshot instead of calling `TargetConfig.load()` again.
-- Repo-lock acquisition ordering: acquire the lock **before** any
-  isolation/lifecycle/branch/HEAD checks (including on the resume path),
-  not after. A lock-acquisition failure means contention with another
-  worker and must abort immediately.
-- Checksum verification: must also run on the resume path (verify
-  `patch.diff` still matches the checksum recorded at preview time) before
-  trusting anything the WAL says.
-- Tests: resume success, resume+validator-failure+rollback,
-  split-brain (branch/HEAD mismatch) aborts, WAL-not-hydratable aborts,
-  validator-exception-during-resume triggers rollback (not false success),
-  config used by the resumed validator matches the pre-apply snapshot (not
-  the patched tree).
+  through the same rollback path the happy-path already uses, by sharing
+  one validation/outcome code block between both paths (`if
+  lifecycle_state is ALREADY_APPLIED: ... else: ...` then falls through to
+  shared validation) — no duplicated rollback logic to keep in sync.
+  Validator exceptions route through the same "treat `None` as failure"
+  check the happy path already had, so the swallowing bug from the review
+  is avoided by construction rather than by a new special case.
+- `TargetConfig` snapshot: persisted to `target_config_snapshot.json` in
+  the run dir via `model_dump_json()` **before** the WAL's first
+  checkpoint write (not after — see addendum below), at the moment it's
+  first loaded on the happy path. The resume path loads this snapshot via
+  `model_validate_json()` and **never calls `TargetConfig.load()`** at all
+  (moved entirely into the VALID-only branch — see addendum).
+- Repo-lock acquisition ordering: lock is acquired before the *first* HEAD
+  read (the "HEAD changed since preview" gate), lifecycle classification,
+  the `is_clean` check, and `TargetConfig.load()` -- i.e. before any git
+  read at all, not just before lifecycle classification. `is_clean` itself
+  is computed via `repository_state()`, which now lives entirely inside
+  the VALID-only branch (ALREADY_APPLIED never calls it, since its dirty
+  tree is expected and irrelevant to that path). A lock-acquisition
+  failure aborts immediately instead of being silently ignored (the old
+  code never checked `acquire_repo_lock`'s return value).
+- Checksum verification: unchanged in position (runs once, before the
+  ALREADY_APPLIED/VALID branch split), so it now covers the resume path
+  simply because the resume path no longer exits before reaching it.
+- Tests (`tests/test_apply_resumable.py`, 19 cases): resume success, resume
+  bypasses `is_clean`, resume+validator-failure+rollback,
+  resume+validator-exception+rollback, WAL-not-hydratable aborts (missing
+  file, wrong status, corrupt JSON), backup-pointer aborts (missing,
+  stale-path-but-file-deleted), branch/HEAD mismatch aborts, config
+  snapshot missing/corrupt aborts, config used by the resumed validator
+  matches the pre-apply snapshot (not the patched tree, and
+  `TargetConfig.load` is asserted never called on resume), happy-path
+  snapshot is written before `git apply`, lock-contention aborts before
+  lifecycle classification, lock is released via `finally` on
+  CONFLICT/STALE/REBASEABLE, and — the highest-risk regression check —
+  `VALID` + dirty tree without `--allow-dirty` still blocks (proving the
+  `is_clean` relocation didn't invert or drop the gate).
+
+**Addendum — bugs found and fixed during two rounds of adversarial plan
+review, beyond what the original Part 2 scope above anticipated:**
+
+- The `is_clean` gate and the `TargetConfig.load()` call both originally
+  ran *before* `classify_lifecycle`, in the shared prologue. Since
+  ALREADY_APPLIED's working tree is dirty by definition (the uncommitted
+  patch is the dirt) and a patch can leave `orchestrator.json` transiently
+  invalid, either check running unconditionally would have made the
+  resume path unreachable 100% of the time. Both were moved into the
+  VALID-only branch.
+- The branch-isolation check was initially specified as `branch_name ==
+  WAL.branch` — but both sides are computed by the same deterministic
+  formula from `run_id`/`issue_number`, so that comparison can never fail.
+  Replaced with `current_branch(target_path) == WAL.branch` (live git
+  state vs. what the original run recorded), which actually catches a
+  user switching branches between the crash and the resume attempt.
+- The config snapshot must be written **before** the WAL's first
+  checkpoint, not after: writing WAL-then-snapshot leaves a crash window
+  where the WAL is hydratable but the snapshot is missing — a
+  resumable-looking state the resume path could never actually complete.
+  Snapshot-then-WAL means a crash between the two writes instead leaves
+  the snapshot present and the new WAL absent (or still showing the
+  previous run's state); a missing or non-`"applying"` WAL fails
+  `_hydrate_apply_result_for_resume`'s checks, so no resume is attempted
+  and the orphaned snapshot is harmless.
+- `acquire_repo_lock`'s return value was previously ignored entirely; a
+  `False` return (lock contention) now aborts immediately instead of
+  proceeding without the lock.
 
 ## Part 3 — Dirt snapshot for `--allow-dirty` (future issue)
 
@@ -188,21 +239,26 @@ present in Part 1** (the resume-execution and dirt-snapshot code they
 apply to has been stripped from this branch), but must be fixed when
 Parts 2/3 are (re)implemented:
 
-1. `_run_post_apply_validation` converted validator exceptions to `None`,
-   and both callers only checked `post_val_output is not None and not
-   .overall_passed` before rolling back — meaning a validator that
-   **crashed** (raised an exception) was silently treated as if it had
-   never been asked to validate, and the apply flow fell through to
-   `status="applied"`, `success=True`. This is the most severe finding;
-   any Part 2 re-implementation must propagate validator exceptions as an
-   explicit failure that routes through the rollback path.
-2. `TargetConfig.load()` was called once in a shared prologue and reused
-   for both the happy-path (tree at `base_commit`, correct) and the resume
-   path (tree already has the uncommitted patch applied from the prior
-   run) — meaning a patch that modifies `orchestrator.json` or files
-   `detect_capabilities` inspects could alter its own post-apply
-   validation config. Part 2 must snapshot the pre-apply config and reuse
-   that snapshot on resume, never reloading from the mutated tree.
+1. **Fixed in Part 2.** `_run_post_apply_validation` converted validator
+   exceptions to `None`, and both callers only checked `post_val_output is
+   not None and not .overall_passed` before rolling back — meaning a
+   validator that **crashed** (raised an exception) was silently treated
+   as if it had never been asked to validate, and the apply flow fell
+   through to `status="applied"`, `success=True`. Fixed by construction:
+   the resume path shares the exact same validation/outcome code block as
+   the happy path, so there is only one "treat `None` as failure" check to
+   keep correct, not two to keep in sync. Regression test:
+   `test_resume_validator_exception_rollback`.
+2. **Fixed in Part 2.** `TargetConfig.load()` was called once in a shared
+   prologue and reused for both the happy-path (tree at `base_commit`,
+   correct) and the resume path (tree already has the uncommitted patch
+   applied from the prior run) — meaning a patch that modifies
+   `orchestrator.json` or files `detect_capabilities` inspects could alter
+   its own post-apply validation config. Fixed by snapshotting the
+   pre-apply config to `target_config_snapshot.json` and moving
+   `TargetConfig.load()` entirely into the VALID-only branch — the resume
+   path never calls it. Regression tests: `test_resume_uses_config_snapshot`,
+   `test_resume_never_calls_target_config_load`.
 3. `git stash create --include-untracked` silently no-ops (confirmed
    empirically) — the entire dirt-snapshot feature from the original
    implementation never actually captured untracked files. See Part 3's
@@ -214,12 +270,19 @@ Parts 2/3 are (re)implemented:
    Part 3.
 6. `_rollback_with_stash` returned `True` even when the dirt-stash restore
    step failed, misreporting a partial rollback as complete. See Part 3.
-7. Repo-lock acquisition happened *after* isolation/lifecycle/branch/HEAD
-   checks and git mutations began, instead of before — a race window
-   between two workers. See Part 2.
-8. Patch checksum verification was scoped to the happy-path only; the
-   resume path never re-verified `patch.diff` against the checksum
-   recorded at preview time. See Part 2.
+7. **Fixed in Part 2.** Repo-lock acquisition happened *after*
+   isolation/lifecycle/branch/HEAD checks and git mutations began, instead
+   of before — a race window between two workers. Also, the lock's return
+   value was never checked (contention was silently ignored). Both fixed:
+   lock is now acquired before the very first HEAD read (the
+   "HEAD changed since preview" gate) and before lifecycle classification,
+   and a `False` return aborts immediately. Regression tests:
+   `test_resume_aborts_lock_contention`, `test_lock_released_on_conflict`.
+8. **Fixed in Part 2.** Patch checksum verification was scoped to the
+   happy-path only; the resume path never re-verified `patch.diff` against
+   the checksum recorded at preview time. Fixed: checksum verification now
+   runs once, before the ALREADY_APPLIED/VALID split, so both paths flow
+   through it.
 9. `test_apply_aborts_if_head_changed` (test_hardening.py) used a
    syntactically-invalid dummy patch, so after the lifecycle-classification
    reorder it now exercises the STALE path instead of the intended
@@ -231,8 +294,12 @@ Parts 2/3 are (re)implemented:
 
 ## Status
 
-- Branch `fix/issue-258-apply-resume-already-applied` is being reduced to
-  Part 1 scope only (this document was added in that same pass).
-- Parts 2-4 need their own issues before implementation starts, each
+- Part 1 merged to `main` via PR
+  [#259](https://github.com/Argenis1412/PatchForge/pull/259) (issue
+  [#258](https://github.com/Argenis1412/PatchForge/issues/258)).
+- Part 2 implemented on branch `fix/issue-260-resume-execution-part2`,
+  tracked as issue [#260](https://github.com/Argenis1412/PatchForge/issues/260).
+  Confirmed bugs 1, 2, 7, and 8 above are fixed as part of this work.
+- Parts 3-4 still need their own issues before implementation starts, each
   following the standard workflow (clarify → criteria → challenge → plan
   → adversarial review → approval → implement → diff review → tests → QA).

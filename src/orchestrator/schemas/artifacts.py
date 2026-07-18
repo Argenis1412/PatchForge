@@ -14,6 +14,7 @@ __all__ = [
     "PatchLifecycleState",
     "RUN_JSON",
     "RunMetadata",
+    "TARGET_CONFIG_SNAPSHOT_JSON",
     "VALIDATION_JSON",
     "compute_auto_apply_eligible",
 ]
@@ -57,6 +58,7 @@ APPLY_JSON = "apply.json"
 POST_APPLY_VALIDATION_JSON = "post_apply_validation.json"
 ISSUE_MD = "issue.md"
 EXPERIMENT_JSON = "experiment.json"
+TARGET_CONFIG_SNAPSHOT_JSON = "target_config_snapshot.json"
 
 
 CURRENT_SCHEMA_VERSION: int = 1
