@@ -426,8 +426,7 @@ def execute(
             except Exception as exc:
                 progress.update(task, completed=100)
                 console.print(
-                    "[bold yellow]Warning: post-apply validation failed to execute: "
-                    f"{exc}[/bold yellow]"
+                    f"[bold red]Error: post-apply validation failed to execute: {exc}[/bold red]"
                 )
                 post_val_output = None
 
@@ -436,8 +435,10 @@ def execute(
                 run_id, "post_apply_validation.json", post_val_output.model_dump_json(indent=2)
             )
 
-        # 10. Handle post-apply validation failure: rollback automatically
-        if post_val_output is not None and not post_val_output.overall_passed:
+        # 10. Handle post-apply validation failure or execution error: roll
+        # back automatically. post_val_output is None only when run_validator
+        # raised, which must never be treated as an implicit pass.
+        if post_val_output is None or not post_val_output.overall_passed:
             console.print(
                 "[bold yellow]Post-apply validation failed. Rolling back...[/bold yellow]"
             )
@@ -464,20 +465,30 @@ def execute(
                 )
 
             # Write post_apply_failure.json
+            validation_reason = (
+                "validator_errored" if post_val_output is None else "validation_failed"
+            )
             failure_detail = {
                 "stage": "post_apply_validation",
-                "reason": "validation_failed",
-                "validation_output": post_val_output.model_dump(),
+                "reason": validation_reason,
+                "validation_output": (
+                    post_val_output.model_dump() if post_val_output is not None else None
+                ),
                 "rollback_succeeded": rollback_succeeded,
             }
             workspace_mgr.write_artifact(
                 run_id, "post_apply_failure.json", json.dumps(failure_detail, indent=2)
             )
 
-            error_msg = (
-                "Post-apply validation failed; rollback also failed"
-                if not rollback_succeeded
+            base_error_msg = (
+                "Post-apply validation failed to execute"
+                if post_val_output is None
                 else "Post-apply validation failed"
+            )
+            error_msg = (
+                f"{base_error_msg}; rollback also failed"
+                if not rollback_succeeded
+                else base_error_msg
             )
             apply_result = ApplyResult(
                 run_id=run_id,
