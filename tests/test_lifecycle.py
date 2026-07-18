@@ -140,3 +140,110 @@ class TestClassifyLifecycle:
             result = classify_lifecycle(self.RUN_ID, ws)
 
         assert result is PatchLifecycleState.REBASEABLE
+
+    def test_already_applied_when_tree_equals_head_plus_patch(self, tmp_path):
+        """Reverse PASSED + HEAD == base + residue-free → ALREADY_APPLIED."""
+        from orchestrator.lifecycle import classify_lifecycle
+
+        base = "a" * 40
+        tree_sha = "c" * 40
+        ws = _make_workspace(self.RUN_ID, tmp_path, base_commit=base)
+        _write_patch(tmp_path / "runs" / self.RUN_ID)
+
+        with (
+            patch(
+                "orchestrator.lifecycle.try_apply_dry_run",
+                return_value=ApplyCheckStatus.CONFLICT,
+            ),
+            patch(
+                "orchestrator.lifecycle.try_apply_dry_run_reverse",
+                return_value=ApplyCheckStatus.PASSED,
+            ),
+            patch("orchestrator.lifecycle.get_current_head", return_value=base),
+            patch("orchestrator.lifecycle.head_tree_sha", return_value=tree_sha),
+            patch(
+                "orchestrator.lifecycle.working_tree_equals_expected_state",
+                return_value=True,
+            ),
+        ):
+            result = classify_lifecycle(self.RUN_ID, ws)
+
+        assert result is PatchLifecycleState.ALREADY_APPLIED
+
+    def test_conflict_when_reverse_check_fails(self, tmp_path):
+        """Reverse CONFLICT → stays CONFLICT even if HEAD matches."""
+        from orchestrator.lifecycle import classify_lifecycle
+
+        base = "a" * 40
+        ws = _make_workspace(self.RUN_ID, tmp_path, base_commit=base)
+        _write_patch(tmp_path / "runs" / self.RUN_ID)
+
+        with (
+            patch(
+                "orchestrator.lifecycle.try_apply_dry_run",
+                return_value=ApplyCheckStatus.CONFLICT,
+            ),
+            patch(
+                "orchestrator.lifecycle.try_apply_dry_run_reverse",
+                return_value=ApplyCheckStatus.CONFLICT,
+            ),
+        ):
+            result = classify_lifecycle(self.RUN_ID, ws)
+
+        assert result is PatchLifecycleState.CONFLICT
+
+    def test_conflict_when_head_diverged_from_base(self, tmp_path):
+        """Reverse PASSED but HEAD != base → CONFLICT."""
+        from orchestrator.lifecycle import classify_lifecycle
+
+        base = "a" * 40
+        different_head = "b" * 40
+        ws = _make_workspace(self.RUN_ID, tmp_path, base_commit=base)
+        _write_patch(tmp_path / "runs" / self.RUN_ID)
+
+        with (
+            patch(
+                "orchestrator.lifecycle.try_apply_dry_run",
+                return_value=ApplyCheckStatus.CONFLICT,
+            ),
+            patch(
+                "orchestrator.lifecycle.try_apply_dry_run_reverse",
+                return_value=ApplyCheckStatus.PASSED,
+            ),
+            patch(
+                "orchestrator.lifecycle.get_current_head",
+                return_value=different_head,
+            ),
+        ):
+            result = classify_lifecycle(self.RUN_ID, ws)
+
+        assert result is PatchLifecycleState.CONFLICT
+
+    def test_conflict_when_tree_has_extraneous_changes(self, tmp_path):
+        """Reverse PASSED + HEAD match but residue in tree → CONFLICT."""
+        from orchestrator.lifecycle import classify_lifecycle
+
+        base = "a" * 40
+        tree_sha = "c" * 40
+        ws = _make_workspace(self.RUN_ID, tmp_path, base_commit=base)
+        _write_patch(tmp_path / "runs" / self.RUN_ID)
+
+        with (
+            patch(
+                "orchestrator.lifecycle.try_apply_dry_run",
+                return_value=ApplyCheckStatus.CONFLICT,
+            ),
+            patch(
+                "orchestrator.lifecycle.try_apply_dry_run_reverse",
+                return_value=ApplyCheckStatus.PASSED,
+            ),
+            patch("orchestrator.lifecycle.get_current_head", return_value=base),
+            patch("orchestrator.lifecycle.head_tree_sha", return_value=tree_sha),
+            patch(
+                "orchestrator.lifecycle.working_tree_equals_expected_state",
+                return_value=False,
+            ),
+        ):
+            result = classify_lifecycle(self.RUN_ID, ws)
+
+        assert result is PatchLifecycleState.CONFLICT

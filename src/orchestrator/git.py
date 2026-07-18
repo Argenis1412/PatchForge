@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 from orchestrator.schemas.git import (
@@ -417,3 +419,262 @@ def repository_identity(repo_root: Path) -> str:
     except Exception:
         pass
     return str(Path(repo_root).resolve().as_posix())
+
+
+# ---------------------------------------------------------------------------
+# Helpers for apply-resume detection (issue #258)
+# ---------------------------------------------------------------------------
+
+
+def try_apply_dry_run_reverse(patch_path: Path, repo_path: Path) -> ApplyCheckStatus:
+    """Run ``git apply --check --reverse`` against *patch_path*.
+
+    Returns the same tri-state as :func:`try_apply_dry_run`.  PASSED means
+    the reverse of the patch applies cleanly, which is evidence that the
+    forward patch is already present in the working tree.
+    """
+    try:
+        res = subprocess.run(
+            ["git", "apply", "--check", "--reverse", str(patch_path)],
+            capture_output=True,
+            text=True,
+            cwd=repo_path,
+            timeout=30,
+        )
+        if res.returncode == 0:
+            return ApplyCheckStatus.PASSED
+        return ApplyCheckStatus.CONFLICT
+    except FileNotFoundError:
+        return ApplyCheckStatus.ERROR
+    except Exception:
+        return ApplyCheckStatus.ERROR
+
+
+def head_tree_sha(repo_path: Path) -> str | None:
+    """Return the tree SHA of HEAD (``HEAD^{tree}``), or None on failure."""
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_path), "rev-parse", "HEAD^{tree}"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if res.returncode == 0:
+            return res.stdout.strip()
+        return None
+    except Exception:
+        return None
+
+
+def stash_create_untracked(repo_path: Path) -> str | None:
+    """Create a stash commit (dangling) that includes untracked files.
+
+    Uses ``git stash create -u`` which captures tracked modifications AND
+    untracked non-ignored files without mutating the working tree.  Returns
+    the stash commit SHA, or None if the tree is clean (nothing to stash) or
+    on any error.
+    """
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_path), "stash", "create", "--include-untracked"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        sha = res.stdout.strip()
+        if res.returncode == 0 and sha:
+            return sha
+        return None
+    except Exception:
+        return None
+
+
+def rev_parse_tree(repo_path: Path, commitish: str) -> str | None:
+    """Return the tree SHA for an arbitrary commit-ish, or None on failure."""
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_path), "rev-parse", f"{commitish}^{{tree}}"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if res.returncode == 0:
+            return res.stdout.strip()
+        return None
+    except Exception:
+        return None
+
+
+def stash_apply(repo_path: Path, stash_sha: str) -> GitCommandResult:
+    """Apply a stash commit (including untracked files) without dropping it."""
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_path), "stash", "apply", "--index", stash_sha],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        return GitCommandResult(
+            return_code=res.returncode,
+            stdout=res.stdout,
+            stderr=res.stderr,
+        )
+    except FileNotFoundError as e:
+        return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {e}")
+    except Exception as e:
+        return GitCommandResult(return_code=1, stdout="", stderr=str(e))
+
+
+def _list_untracked(repo_path: Path) -> set[str] | None:
+    """Return the set of untracked non-ignored files, or None on error."""
+    try:
+        res = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if res.returncode != 0:
+            return None
+        return {line for line in res.stdout.splitlines() if line}
+    except Exception:
+        return None
+
+
+def _list_stash_untracked(repo_path: Path, stash_sha: str) -> set[str] | None:
+    """Return the set of files in a stash's third parent (untracked tree).
+
+    Returns an empty set (not None) if the stash has no third parent (i.e.
+    stash was created without ``-u``).
+    """
+    try:
+        res = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "ls-tree",
+                "-r",
+                "--name-only",
+                f"{stash_sha}^3",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if res.returncode != 0:
+            return set()
+        return {line for line in res.stdout.splitlines() if line}
+    except Exception:
+        return set()
+
+
+def working_tree_equals_expected_state(
+    patch_path: Path,
+    repo_path: Path,
+    expected_baseline_tree_sha: str,
+    stash_sha: str | None = None,
+) -> bool:
+    """Check that the working tree equals baseline + patch with no residue.
+
+    Uses a temporary Git index in a scratch directory (never copies the
+    working tree).  Algorithm:
+
+    1. ``read-tree <baseline>`` into temp index.
+    2. ``apply --cached patch.diff`` (forward) into temp index.
+    3. Check untracked files: clean case must have none; dirty case must
+       match the stash's third parent exactly.
+    4. ``git -c core.filemode=false diff-files --quiet`` against temp index.
+
+    Returns False on any error (never raises).
+    """
+    try:
+        return _working_tree_check(patch_path, repo_path, expected_baseline_tree_sha, stash_sha)
+    except Exception:
+        return False
+
+
+def _working_tree_check(
+    patch_path: Path,
+    repo_path: Path,
+    expected_baseline_tree_sha: str,
+    stash_sha: str | None,
+) -> bool:
+    with tempfile.TemporaryDirectory(prefix="pf_resume_") as scratch:
+        index_path = str(Path(scratch) / "index")
+        env = {**os.environ, "GIT_INDEX_FILE": index_path}
+
+        # Step 1: read-tree baseline into temp index
+        res = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "read-tree",
+                expected_baseline_tree_sha,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+        if res.returncode != 0:
+            return False
+
+        # Step 2: apply patch FORWARD into temp index (--cached)
+        res = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "apply",
+                "--cached",
+                str(patch_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+        if res.returncode != 0:
+            return False
+
+        # Step 3: untracked file comparison
+        current_untracked = _list_untracked(repo_path)
+        if current_untracked is None:
+            return False
+
+        if stash_sha is not None:
+            expected_untracked = _list_stash_untracked(repo_path, stash_sha)
+            if expected_untracked is None:
+                return False
+            if current_untracked != expected_untracked:
+                return False
+        else:
+            if current_untracked:
+                return False
+
+        # Step 4: diff-files --quiet (content only, ignore mode)
+        res = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "-c",
+                "core.filemode=false",
+                "diff-files",
+                "--quiet",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+        return res.returncode == 0

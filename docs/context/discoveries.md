@@ -104,12 +104,12 @@
 - **Discovered by:** Adversarial review during #254 implementation planning.
 - **Why deferred:** Adding a validation guard to `scan.execute()` symmetric to `ci.execute()`'s is a design decision about error-handling philosophy for the whole module (raise vs. silently normalize), not something #254's narrow CLI-rejection scope asked for. Revisit as its own small issue if a caller other than `main.py`'s CLI ever invokes `scan.execute()` directly with untrusted input.
 
-### [2026-07-17] Dogfooding 010 — Interrupted `apply` leaves the target in a state that misclassifies as `CONFLICT` on retry
+### ✅ [2026-07-17] Dogfooding 010 — Interrupted `apply` leaves the target in a state that misclassifies as `CONFLICT` on retry (RESOLVED)
 
 - **File:** `src/orchestrator/commands/apply.py:191-227` (lifecycle classification), `:404` (post-apply validator re-run)
 - **Debt:** `apply` re-runs the full validator (`ruff` + `pytest`, ~3 minutes on this repo) after applying the patch and before committing, with no progress output during that window. An `apply` process killed mid-validator-rerun leaves the target repo on the new `patchforge/<run_id>` branch with the patch already written to the working tree but uncommitted. Retrying `apply` on that same state fails with `Patch lifecycle state is CONFLICT... HEAD <sha> has diverged from base commit <sha>` — even though the two SHAs printed in the error message are identical, because the classifier doesn't account for "already-applied-but-uncommitted, matching the pending patch" as a distinct, resumable state.
 - **Discovered by:** Dogfooding-010, Run B2 (`apply` attempt 1, client-side timeout mid-validator-rerun)
-- **Why deferred:** Out of scope for P4; worth its own issue (either make `apply` resumable from a matching dirty state, or make the CONFLICT message clearer when the two SHAs are actually equal).
+- **Resolution:** Issue #258 — new `PatchLifecycleState.ALREADY_APPLIED` state detected via reverse-check (`git apply --check --reverse`) + HEAD stability + a residue-free working tree check (temporary Git index: `read-tree` baseline → `apply --cached` forward → untracked-file comparison → `diff-files --quiet` with `core.filemode=false`). `apply.execute()` refactored into an always-run prologue (bootstrap + config load + lifecycle classification) followed by bifurcation: `ALREADY_APPLIED` resumes from a hydrated WAL (`apply.json`) with triple isolation verification (branch, HEAD, residue) before re-running the post-apply validator; `VALID` follows the original happy-path, now with an optional `git stash create -u` snapshot of pre-existing user dirt (for `--allow-dirty` runs) so rollback can restore it after a failed resume.
 
 ### ✅ [2026-07-10] Dogfooding 008 — `plan` CLI gaps and non-determinism (PARTIALLY RESOLVED)
 
