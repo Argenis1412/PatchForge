@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 from orchestrator.schemas.git import (
@@ -417,3 +419,206 @@ def repository_identity(repo_root: Path) -> str:
     except Exception:
         pass
     return str(Path(repo_root).resolve().as_posix())
+
+
+# ---------------------------------------------------------------------------
+# Helpers for apply lifecycle detection (issue #258, Part 1 — detection only;
+# see docs/context/plan-issue-258-resumable-apply.md for the full scope)
+# ---------------------------------------------------------------------------
+
+
+def try_apply_dry_run_reverse(patch_path: Path, repo_path: Path) -> ApplyCheckStatus:
+    """Run ``git apply --check --reverse`` against *patch_path*.
+
+    Returns the same tri-state as :func:`try_apply_dry_run`.  PASSED means
+    the reverse of the patch applies cleanly, which is evidence that the
+    forward patch is already present in the working tree.
+    """
+    try:
+        res = subprocess.run(
+            ["git", "apply", "--check", "--reverse", str(patch_path)],
+            capture_output=True,
+            text=True,
+            cwd=repo_path,
+            timeout=30,
+        )
+        if res.returncode == 0:
+            return ApplyCheckStatus.PASSED
+        return ApplyCheckStatus.CONFLICT
+    except FileNotFoundError:
+        return ApplyCheckStatus.ERROR
+    except Exception:
+        return ApplyCheckStatus.ERROR
+
+
+def head_tree_sha(repo_path: Path) -> str | None:
+    """Return the tree SHA of HEAD (``HEAD^{tree}``), or None on failure."""
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_path), "rev-parse", "HEAD^{tree}"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if res.returncode == 0:
+            return res.stdout.strip()
+        return None
+    except Exception:
+        return None
+
+
+def _list_untracked(repo_path: Path) -> set[str] | None:
+    """Return the set of untracked non-ignored files, or None on error."""
+    try:
+        res = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if res.returncode != 0:
+            return None
+        return {line for line in res.stdout.splitlines() if line}
+    except Exception:
+        return None
+
+
+def working_tree_equals_expected_state(
+    patch_path: Path,
+    repo_path: Path,
+    expected_baseline_tree_sha: str,
+) -> bool:
+    """Check that the working tree equals baseline + patch with no residue.
+
+    Uses a temporary Git index in a scratch directory (never copies the
+    working tree).  Algorithm:
+
+    1. ``read-tree <baseline>`` into temp index.
+    2. ``apply --cached patch.diff`` (forward) into temp index.
+    3. Check untracked files: the working tree must have none beyond what
+       the patch itself adds.
+    4. ``git -c core.filemode=false diff-files --quiet`` against temp index.
+
+    Returns False on any error (never raises).
+
+    Only handles the clean-tree case (the initial run was on a clean
+    working tree). Preserving pre-existing dirt across a resume is future
+    scope — see docs/context/plan-issue-258-resumable-apply.md (Part 3).
+    """
+    try:
+        return _working_tree_check(patch_path, repo_path, expected_baseline_tree_sha)
+    except Exception:
+        return False
+
+
+def _working_tree_check(
+    patch_path: Path,
+    repo_path: Path,
+    expected_baseline_tree_sha: str,
+) -> bool:
+    with tempfile.TemporaryDirectory(prefix="pf_resume_") as scratch:
+        index_path = str(Path(scratch) / "index")
+        env = {**os.environ, "GIT_INDEX_FILE": index_path}
+
+        # Step 1: read-tree baseline into temp index
+        res = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "read-tree",
+                expected_baseline_tree_sha,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+        if res.returncode != 0:
+            return False
+
+        # Step 2: apply patch FORWARD into temp index (--cached)
+        res = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "apply",
+                "--cached",
+                str(patch_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+        if res.returncode != 0:
+            return False
+
+        # `read-tree`/`apply --cached` populate index entries with zeroed
+        # stat info (size, mtime, ...) since they never touch the working
+        # tree. `diff-files` uses cached size as a fast-reject before
+        # hashing — a cached size of 0 against a real, non-empty file is
+        # treated as conclusive proof of a difference, so Step 4 below would
+        # report every legitimately-matching file as residue (verified
+        # empirically). Refreshing the temp index against the real working
+        # tree files fixes the cached stat so the later hash comparison
+        # actually runs.
+        subprocess.run(
+            ["git", "-C", str(repo_path), "update-index", "--refresh"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+
+        # `apply_patch` (used by the actual apply command) runs plain
+        # `git apply`, which never touches the real index — so any new file
+        # the patch added shows up as untracked in the real working tree
+        # even when nothing is actually wrong. Files the temp index (built
+        # from baseline + patch above) already tracks are expected, not
+        # residue, and must be excluded from the untracked comparison below.
+        patch_tracked_res = subprocess.run(
+            ["git", "-C", str(repo_path), "ls-files"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+        if patch_tracked_res.returncode != 0:
+            return False
+        patch_tracked_paths = {line for line in patch_tracked_res.stdout.splitlines() if line}
+
+        # Step 3: untracked file comparison -- clean case must have none
+        # beyond what the patch itself introduced.
+        current_untracked = _list_untracked(repo_path)
+        if current_untracked is None:
+            return False
+        current_untracked -= patch_tracked_paths
+        if current_untracked:
+            return False
+
+        # Step 4: diff-files --quiet (content only, ignore mode)
+        res = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "-c",
+                "core.filemode=false",
+                "diff-files",
+                "--quiet",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+        return res.returncode == 0

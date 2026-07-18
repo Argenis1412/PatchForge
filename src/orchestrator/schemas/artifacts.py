@@ -35,6 +35,13 @@ class PatchLifecycleState(str, Enum):
     REBASEABLE = "REBASEABLE"
     # git apply --check fails with a merge conflict.
     CONFLICT = "CONFLICT"
+    # Patch is already present in the working tree (byte-exact match via
+    # reverse-check), HEAD == base_commit, and the working tree has no
+    # extraneous changes beyond the patch -- typically left behind by an
+    # apply that was interrupted after git-apply but before the final
+    # commit. Reported with a clear, dedicated message; automatic resume is
+    # not yet implemented (see docs/context/plan-issue-258-resumable-apply.md).
+    ALREADY_APPLIED = "ALREADY_APPLIED"
     # patch.diff is missing/empty, or git apply --check fails due to a process
     # error (git not found, invalid patch format, etc.).
     STALE = "STALE"
