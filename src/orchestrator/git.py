@@ -860,7 +860,7 @@ def check_orphaned_dirt_stash(repo_path: Path, run_id_prefix: str = "patchforge:
     is stable for comparison and for the recovery command shown to users.
     """
     res = subprocess.run(
-        ["git", "-C", str(repo_path), "stash", "list", f"--grep={run_id_prefix}"],
+        ["git", "-C", str(repo_path), "stash", "list", f"--grep-reflog={run_id_prefix}"],
         capture_output=True,
         text=True,
         timeout=30,

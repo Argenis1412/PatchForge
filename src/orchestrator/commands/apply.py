@@ -514,7 +514,13 @@ def execute(
                     console.print(f"[bold red]Cannot capture working tree state: {exc}[/bold red]")
                     raise typer.Exit(code=1) from None
                 if dirt_stash_sha is not None:
-                    stash_store_ref(target_path, dirt_stash_sha, f"patchforge:{run_id}")
+                    if not stash_store_ref(target_path, dirt_stash_sha, f"patchforge:{run_id}"):
+                        console.print(
+                            "[bold red]Cannot capture working tree state: failed to record "
+                            "the dirt capture as a stash entry. Aborting before any mutation "
+                            "to avoid leaving your changes unreferenced.[/bold red]"
+                        )
+                        raise typer.Exit(code=1) from None
                     run_metadata.dirt_stash_sha = dirt_stash_sha
                     workspace_mgr.write_run_json(run_id, run_metadata)
                     force_reset_apply(target_path, git_state.head)
@@ -563,6 +569,19 @@ def execute(
                     logs_dir=logs_dir,
                     run_dir=run_dir,
                 )
+                # No code mutation happened yet (branch checkout itself
+                # failed), so there is nothing to code-rollback -- just
+                # restore the captured dirt directly onto the still-clean
+                # tree left by force_reset_apply above.
+                if dirt_stash_sha:
+                    if stash_apply_dirt(target_path, dirt_stash_sha):
+                        stash_drop(target_path, index=0)
+                    else:
+                        console.print(
+                            "[bold red]FATAL: Branch checkout failed AND restoring your "
+                            "pre-existing working-tree changes also failed. Recover them "
+                            f"with:\n  git stash apply --index {dirt_stash_sha}[/bold red]"
+                        )
                 run_metadata.status = "failed"
                 run_metadata.apply_status = "failed"
                 run_metadata.updated_at = datetime.now(timezone.utc)

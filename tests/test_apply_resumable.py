@@ -1002,3 +1002,153 @@ def test_stash_structure_valid(tmp_path: Path) -> None:
     assert apply_res.returncode == 0
     assert (repo_dir / "file.txt").read_text(encoding="utf-8") == "modified"
     assert (repo_dir / "untracked.txt").read_text(encoding="utf-8") == "untracked"
+
+
+def test_orphaned_stash_warning_shown_when_no_active_run_matches(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A prior --allow-dirty run captured dirt and crashed before restoring
+    it, leaving a `patchforge:*` stash entry with no corresponding run.json
+    (e.g. the run directory was already cleaned up). The advisory must
+    still fire, since there's nothing to cross-reference against."""
+    ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True)
+    from orchestrator.git import stash_create_dirt, stash_store_ref
+
+    sha = stash_create_dirt(ctx["repo_dir"])
+    assert sha is not None
+    assert stash_store_ref(ctx["repo_dir"], sha, "patchforge:some-other-run")
+    _git("reset", "--hard", "HEAD", cwd=ctx["repo_dir"])
+    _git("clean", "-fd", cwd=ctx["repo_dir"])
+
+    with (
+        patch(
+            "orchestrator.lifecycle.classify_lifecycle",
+            return_value=PatchLifecycleState.VALID,
+        ),
+        patch("orchestrator.agents.validator.run", return_value=_passing_validator()),
+    ):
+        apply_execute(ctx["run_id"], allow_dirty=False, workspace=ctx["workspace_path"])
+
+    out = capsys.readouterr().out
+    assert "unresumed --allow-dirty dirt" in out
+    assert sha in out
+
+
+def test_orphaned_stash_warning_suppressed_on_name_collision(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A user-named stash that happens to start with `patchforge:` but does
+    not match any known dirt_stash_sha in an active run.json must not
+    trigger the advisory -- otherwise a manually named stash produces a
+    false positive warning."""
+    ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True)
+    from orchestrator.git import stash_create_dirt, stash_store_ref
+
+    # Write a run.json (for a *different*, unrelated run) that itself has a
+    # dirt_stash_sha recorded, so known_shas is non-empty but won't contain
+    # the user-named stash's SHA below.
+    other_run_dir = ctx["workspace"].create_run_directory("other-run")
+    other_meta = RunMetadata(
+        run_id="other-run",
+        target_path=str(ctx["repo_dir"]),
+        workspace_path=str(ctx["workspace_path"]),
+        base_commit=ctx["commit1"],
+        branch=ctx["original_branch"],
+        status="applied",
+        v1_supported=True,
+        dirt_stash_sha="0" * 40,
+    )
+    ctx["workspace"].write_run_json("other-run", other_meta)
+    assert other_run_dir.exists()
+
+    sha = stash_create_dirt(ctx["repo_dir"])
+    assert sha is not None
+    assert stash_store_ref(ctx["repo_dir"], sha, "patchforge:manually-named-by-user")
+    _git("reset", "--hard", "HEAD", cwd=ctx["repo_dir"])
+    _git("clean", "-fd", cwd=ctx["repo_dir"])
+
+    with (
+        patch(
+            "orchestrator.lifecycle.classify_lifecycle",
+            return_value=PatchLifecycleState.VALID,
+        ),
+        patch("orchestrator.agents.validator.run", return_value=_passing_validator()),
+    ):
+        apply_execute(ctx["run_id"], allow_dirty=False, workspace=ctx["workspace_path"])
+
+    out = capsys.readouterr().out
+    assert "unresumed --allow-dirty dirt" not in out
+
+
+def test_capture_aborts_if_stash_store_ref_fails(tmp_path: Path) -> None:
+    """If recording the dirt capture as a stash-list entry fails, the apply
+    must abort before any mutation rather than proceed with an unreferenced
+    (gc-eligible) dirt commit."""
+    ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True)
+
+    with (
+        patch(
+            "orchestrator.lifecycle.classify_lifecycle",
+            return_value=PatchLifecycleState.VALID,
+        ),
+        patch("orchestrator.git.stash_store_ref", return_value=False),
+        pytest.raises(typer.Exit) as exc,
+    ):
+        apply_execute(ctx["run_id"], allow_dirty=True, workspace=ctx["workspace_path"])
+
+    assert exc.value.exit_code == 1
+    # Working tree must be untouched -- capture must abort before
+    # force_reset_apply runs.
+    assert (ctx["repo_dir"] / "file.txt").read_text(encoding="utf-8") == "v1-dirty"
+
+
+def test_branch_checkout_failure_restores_dirt(tmp_path: Path) -> None:
+    """If create_controlled_branch fails after dirt was already captured
+    and the tree reset to clean, the dirt must be restored before exiting
+    -- not silently left in an unreferenced-looking state."""
+    ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True)
+
+    with (
+        patch(
+            "orchestrator.lifecycle.classify_lifecycle",
+            return_value=PatchLifecycleState.VALID,
+        ),
+        patch(
+            "orchestrator.git.create_controlled_branch",
+            return_value=MagicMock(return_code=1, stderr="branch already exists"),
+        ),
+        pytest.raises(typer.Exit) as exc,
+    ):
+        apply_execute(ctx["run_id"], allow_dirty=True, workspace=ctx["workspace_path"])
+
+    assert exc.value.exit_code == 1
+    assert (ctx["repo_dir"] / "file.txt").read_text(encoding="utf-8") == "v1-dirty"
+    stash_list = _git("stash", "list", cwd=ctx["repo_dir"]).stdout
+    assert stash_list.strip() == ""
+
+
+def test_success_path_dirt_restore_conflict_reports_structured_error(tmp_path: Path) -> None:
+    """Distinct from the rollback-path failure test: here the patch applies
+    and validates successfully, but restoring the pre-existing dirt on top
+    of it fails/conflicts. success/status must still reflect the applied
+    patch while dirt_restore_failed communicates the separate problem."""
+    ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True)
+
+    with (
+        patch(
+            "orchestrator.lifecycle.classify_lifecycle",
+            return_value=PatchLifecycleState.VALID,
+        ),
+        patch("orchestrator.agents.validator.run", return_value=_passing_validator()),
+        patch("orchestrator.git.stash_apply_dirt", return_value=False),
+    ):
+        apply_execute(ctx["run_id"], allow_dirty=True, workspace=ctx["workspace_path"])
+
+    apply_json = json.loads((ctx["run_dir"] / "apply.json").read_text(encoding="utf-8"))
+    assert apply_json["success"] is True
+    assert apply_json["status"] == "applied"
+    assert apply_json["dirt_restore_failed"] is True
+    assert apply_json["dirt_recovery_command"].startswith("git stash apply --index ")
+
+    run_metadata = ctx["workspace"].read_run_json(ctx["run_id"])
+    assert run_metadata.status == "applied"
