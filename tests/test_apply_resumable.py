@@ -931,6 +931,39 @@ def test_dirt_restore_failure_reports_structured_error(tmp_path: Path) -> None:
     assert apply_json["rolled_back"] is False
 
 
+def test_code_rollback_failure_reports_dirt_recovery(tmp_path: Path) -> None:
+    """When the code rollback itself fails (not just the dirt restore),
+    the tree is in an unknown state and stash_apply_dirt must not be
+    attempted -- but the user still needs dirt_restore_failed and the
+    recovery command so their captured changes aren't silently orphaned."""
+    from orchestrator.exceptions import RollbackError
+
+    ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True)
+
+    validator_mock = MagicMock(return_value=_failing_validator())
+    stash_apply_mock = MagicMock(return_value=True)
+    with (
+        patch(
+            "orchestrator.lifecycle.classify_lifecycle",
+            return_value=PatchLifecycleState.VALID,
+        ),
+        patch("orchestrator.agents.validator.run", validator_mock),
+        patch(
+            "orchestrator.agents.executor.rollback_to_commit",
+            side_effect=RollbackError(ctx["repo_dir"], ctx["commit1"], "rollback failed"),
+        ),
+        patch("orchestrator.git.stash_apply_dirt", stash_apply_mock),
+        pytest.raises(typer.Exit),
+    ):
+        apply_execute(ctx["run_id"], allow_dirty=True, workspace=ctx["workspace_path"])
+
+    stash_apply_mock.assert_not_called()
+    apply_json = json.loads((ctx["run_dir"] / "apply.json").read_text(encoding="utf-8"))
+    assert apply_json["dirt_restore_failed"] is True
+    assert apply_json["dirt_recovery_command"].startswith("git stash apply --index ")
+    assert apply_json["rolled_back"] is False
+
+
 def test_stash_dropped_after_successful_restore(tmp_path: Path) -> None:
     ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True)
     with pytest.raises(typer.Exit):
@@ -993,15 +1026,42 @@ def test_stash_structure_valid(tmp_path: Path) -> None:
     _git("reset", "--hard", "HEAD", cwd=repo_dir)
     _git("clean", "-fd", cwd=repo_dir)
 
-    apply_res = subprocess.run(
-        ["git", "stash", "apply", "--index", sha],
-        cwd=repo_dir,
-        capture_output=True,
-        text=True,
-    )
-    assert apply_res.returncode == 0
+    _git("stash", "apply", "--index", sha, cwd=repo_dir)
     assert (repo_dir / "file.txt").read_text(encoding="utf-8") == "modified"
     assert (repo_dir / "untracked.txt").read_text(encoding="utf-8") == "untracked"
+
+
+def test_stash_preserves_staged_vs_unstaged_split(tmp_path: Path) -> None:
+    """index_parent must be the tracked stash's own index-commit (its 2nd
+    parent), not the tracked stash commit itself -- otherwise the combined
+    commit's parent2 has the same tree as its own top commit, which is not
+    the canonical `git stash push -u` structure and risks losing the
+    staged/unstaged distinction on restore."""
+    from orchestrator.git import stash_create_dirt
+
+    repo_dir = tmp_path / "repo"
+    _init_repo(repo_dir)
+    (repo_dir / "staged.txt").write_text("v1", encoding="utf-8")
+    (repo_dir / "unstaged.txt").write_text("v1", encoding="utf-8")
+    _git("add", "-A", cwd=repo_dir)
+    _git("commit", "-m", "add both files", cwd=repo_dir)
+
+    (repo_dir / "staged.txt").write_text("staged-change", encoding="utf-8")
+    _git("add", "staged.txt", cwd=repo_dir)
+    (repo_dir / "unstaged.txt").write_text("unstaged-change", encoding="utf-8")
+
+    sha = stash_create_dirt(repo_dir)
+    assert sha is not None
+
+    _git("reset", "--hard", "HEAD", cwd=repo_dir)
+    _git("clean", "-fd", cwd=repo_dir)
+
+    _git("stash", "apply", "--index", sha, cwd=repo_dir)
+    status = _git("status", "--porcelain", cwd=repo_dir).stdout
+    assert "M  staged.txt" in status
+    assert " M unstaged.txt" in status
+    assert (repo_dir / "staged.txt").read_text(encoding="utf-8") == "staged-change"
+    assert (repo_dir / "unstaged.txt").read_text(encoding="utf-8") == "unstaged-change"
 
 
 def test_orphaned_stash_warning_shown_when_no_active_run_matches(
@@ -1100,6 +1160,32 @@ def test_capture_aborts_if_stash_store_ref_fails(tmp_path: Path) -> None:
     # Working tree must be untouched -- capture must abort before
     # force_reset_apply runs.
     assert (ctx["repo_dir"] / "file.txt").read_text(encoding="utf-8") == "v1-dirty"
+
+
+def test_capture_aborts_if_force_reset_fails(tmp_path: Path) -> None:
+    """If resetting to a clean tree after capturing dirt fails, the apply
+    must abort with a recovery pointer rather than silently continuing on
+    a tree that may still carry the pre-existing dirt."""
+    from orchestrator.schemas.git import GitCommandResult
+
+    ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True)
+
+    with (
+        patch(
+            "orchestrator.lifecycle.classify_lifecycle",
+            return_value=PatchLifecycleState.VALID,
+        ),
+        patch(
+            "orchestrator.git.force_reset_apply",
+            return_value=GitCommandResult(return_code=1, stdout="", stderr="reset failed"),
+        ),
+        pytest.raises(typer.Exit) as exc,
+    ):
+        apply_execute(ctx["run_id"], allow_dirty=True, workspace=ctx["workspace_path"])
+
+    assert exc.value.exit_code == 1
+    run_metadata = ctx["workspace"].read_run_json(ctx["run_id"])
+    assert run_metadata.dirt_stash_sha is not None
 
 
 def test_branch_checkout_failure_restores_dirt(tmp_path: Path) -> None:

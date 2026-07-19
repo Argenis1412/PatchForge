@@ -523,7 +523,15 @@ def execute(
                         raise typer.Exit(code=1) from None
                     run_metadata.dirt_stash_sha = dirt_stash_sha
                     workspace_mgr.write_run_json(run_id, run_metadata)
-                    force_reset_apply(target_path, git_state.head)
+                    reset_res = force_reset_apply(target_path, git_state.head)
+                    if reset_res.return_code != 0:
+                        console.print(
+                            "[bold red]Cannot capture working tree state: failed to reset "
+                            f"to a clean tree after capturing dirt: {reset_res.stderr}\n"
+                            f"Your changes are safe in: git stash apply --index "
+                            f"{dirt_stash_sha}[/bold red]"
+                        )
+                        raise typer.Exit(code=1) from None
 
             try:
                 config = TargetConfig.load(target_path=target_path, workspace_path=workspace_path)
@@ -634,22 +642,35 @@ def execute(
                     )
                 # Restore captured dirt now that the code rollback succeeded
                 # -- restoring before the code rollback would apply the
-                # stash onto the wrong tree state.
+                # stash onto the wrong tree state. If the code rollback
+                # itself failed, the tree is in an unknown state and must
+                # not be touched -- but the user still needs to know their
+                # dirt is safely captured and how to recover it once the
+                # tree is manually fixed.
                 dirt_restored = False
                 dirt_restore_failed = False
                 dirt_recovery_command = None
-                if dirt_stash_sha and rollback_succeeded:
-                    if stash_apply_dirt(target_path, dirt_stash_sha):
-                        stash_drop(target_path, index=0)
-                        dirt_restored = True
+                if dirt_stash_sha:
+                    if rollback_succeeded:
+                        if stash_apply_dirt(target_path, dirt_stash_sha):
+                            stash_drop(target_path, index=0)
+                            dirt_restored = True
+                        else:
+                            rollback_succeeded = False
+                            dirt_restore_failed = True
+                            dirt_recovery_command = f"git stash apply --index {dirt_stash_sha}"
+                            console.print(
+                                "[bold red]FATAL: Code rollback succeeded but restoring your "
+                                "pre-existing working-tree changes failed. Recover them with:\n"
+                                f"  {dirt_recovery_command}[/bold red]"
+                            )
                     else:
-                        rollback_succeeded = False
                         dirt_restore_failed = True
                         dirt_recovery_command = f"git stash apply --index {dirt_stash_sha}"
                         console.print(
-                            "[bold red]FATAL: Code rollback succeeded but restoring your "
-                            "pre-existing working-tree changes failed. Recover them with:\n"
-                            f"  {dirt_recovery_command}[/bold red]"
+                            "[bold red]Your pre-existing working-tree changes are still "
+                            "safely captured. Once you've manually restored a clean state, "
+                            f"recover them with:\n  {dirt_recovery_command}[/bold red]"
                         )
 
                 # Write apply.json failure using ApplyResult model
@@ -750,22 +771,34 @@ def execute(
                 run_id, "post_apply_failure.json", json.dumps(failure_detail, indent=2)
             )
 
-            # Restore captured dirt now that the code rollback succeeded.
+            # Restore captured dirt now that the code rollback succeeded. If
+            # the code rollback itself failed, the tree is in an unknown
+            # state and must not be touched -- but the user still needs the
+            # recovery pointer for their safely-captured dirt.
             dirt_restored = False
             dirt_restore_failed = False
             dirt_recovery_command = None
-            if dirt_stash_sha and rollback_succeeded:
-                if stash_apply_dirt(target_path, dirt_stash_sha):
-                    stash_drop(target_path, index=0)
-                    dirt_restored = True
+            if dirt_stash_sha:
+                if rollback_succeeded:
+                    if stash_apply_dirt(target_path, dirt_stash_sha):
+                        stash_drop(target_path, index=0)
+                        dirt_restored = True
+                    else:
+                        rollback_succeeded = False
+                        dirt_restore_failed = True
+                        dirt_recovery_command = f"git stash apply --index {dirt_stash_sha}"
+                        console.print(
+                            "[bold red]FATAL: Code rollback succeeded but restoring your "
+                            "pre-existing working-tree changes failed. Recover them with:\n"
+                            f"  {dirt_recovery_command}[/bold red]"
+                        )
                 else:
-                    rollback_succeeded = False
                     dirt_restore_failed = True
                     dirt_recovery_command = f"git stash apply --index {dirt_stash_sha}"
                     console.print(
-                        "[bold red]FATAL: Code rollback succeeded but restoring your "
-                        "pre-existing working-tree changes failed. Recover them with:\n"
-                        f"  {dirt_recovery_command}[/bold red]"
+                        "[bold red]Your pre-existing working-tree changes are still "
+                        "safely captured. Once you've manually restored a clean state, "
+                        f"recover them with:\n  {dirt_recovery_command}[/bold red]"
                     )
 
             base_error_msg = (
