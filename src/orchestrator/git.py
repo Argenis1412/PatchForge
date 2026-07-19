@@ -622,3 +622,236 @@ def _working_tree_check(
             env=env,
         )
         return res.returncode == 0
+
+
+def _run_git_safe(args: list[str], *, timeout: int = 30, **kwargs) -> subprocess.CompletedProcess:
+    """``subprocess.run`` wrapper for the dirt-capture helpers below.
+
+    Converts ``FileNotFoundError`` (git not installed) and
+    ``TimeoutExpired`` into a synthetic non-zero-returncode
+    ``CompletedProcess`` instead of letting them propagate as raw
+    exceptions, so every ``if res.returncode != 0`` check in this section
+    is a complete failure story, not just a check on git's own exits.
+    """
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=timeout, **kwargs)
+    except FileNotFoundError as e:
+        return subprocess.CompletedProcess(args, 127, "", f"git executable not found: {e}")
+    except subprocess.TimeoutExpired as e:
+        return subprocess.CompletedProcess(args, 124, "", f"git command timed out: {e}")
+
+
+def _has_dirty_submodules(repo_path: Path) -> bool:
+    """Return True if any submodule has uncommitted/uninitialized state.
+
+    Uses ``git submodule status``, whose porcelain output prefixes each
+    line with a status character (``+`` = checked-out commit differs from
+    the index, ``-`` = not initialized, ``U`` = merge conflicts). ``git
+    diff --submodule=short --quiet`` was considered but rejected: ``--quiet``
+    suppresses all stdout, which would make any check based on its output
+    a permanent no-op.
+
+    Raises ``ValueError`` if the check itself fails (git missing, timeout,
+    or a non-zero exit for a reason other than "no submodules") -- a
+    failed lookup must not be silently treated as "no dirty submodules",
+    since that would let stash_create_dirt proceed and later have
+    force_reset_apply's ``git clean -fd`` destroy uncaptured submodule
+    changes.
+    """
+    res = _run_git_safe(["git", "-C", str(repo_path), "submodule", "status"])
+    if res.returncode != 0:
+        raise ValueError(f"failed to check submodule status: {res.stderr}")
+    return any(line[:1] in ("+", "-", "U") for line in res.stdout.splitlines() if line)
+
+
+def stash_create_dirt(repo_path: Path) -> str | None:
+    """Capture tracked and untracked working-tree dirt as a stash commit.
+
+    Does not create a ``refs/stash`` entry and does not mutate the working
+    tree or the real index. Returns the resulting commit SHA, or ``None``
+    if the tree has no dirt to capture.
+
+    Raises ``ValueError`` if HEAD does not exist, if any submodule has
+    uncommitted state, or if untracked files cannot be enumerated -- all
+    fail-closed conditions where capturing partial/incorrect dirt would be
+    worse than aborting before any mutation.
+    """
+    head_res = _run_git_safe(["git", "-C", str(repo_path), "rev-parse", "HEAD"])
+    if head_res.returncode != 0:
+        raise ValueError("repository has no HEAD commit; cannot capture dirt")
+    head_sha = head_res.stdout.strip()
+
+    if _has_dirty_submodules(repo_path):
+        raise ValueError(
+            "dirty submodules detected; commit or stash submodule changes "
+            "before running --allow-dirty"
+        )
+
+    tracked_res = _run_git_safe(["git", "-C", str(repo_path), "stash", "create"])
+    if tracked_res.returncode != 0:
+        raise ValueError(f"failed to capture tracked dirt: {tracked_res.stderr}")
+    tracked_sha = tracked_res.stdout.strip() or None
+
+    untracked = _list_untracked(repo_path)
+    if untracked is None:
+        raise ValueError("failed to enumerate untracked files")
+
+    if tracked_sha is None and not untracked:
+        return None
+
+    if not untracked:
+        # stash create's own commit already has the canonical 2-parent
+        # (HEAD, index) shape that `stash apply` expects.
+        return tracked_sha
+
+    with tempfile.TemporaryDirectory(prefix="pf_dirt_") as scratch:
+        index_path = str(Path(scratch) / "index")
+        env = {**os.environ, "GIT_INDEX_FILE": index_path}
+
+        stdin_paths = "\n".join(sorted(untracked))
+        update_res = _run_git_safe(
+            ["git", "-C", str(repo_path), "update-index", "--add", "--stdin"],
+            input=stdin_paths,
+            timeout=60,
+            env=env,
+        )
+        if update_res.returncode != 0:
+            raise ValueError(f"failed to stage untracked files: {update_res.stderr}")
+
+        write_tree_res = _run_git_safe(["git", "-C", str(repo_path), "write-tree"], env=env)
+        if write_tree_res.returncode != 0:
+            raise ValueError(f"failed to write untracked tree: {write_tree_res.stderr}")
+        untracked_tree = write_tree_res.stdout.strip()
+
+        commit_res = _run_git_safe(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "commit-tree",
+                untracked_tree,
+                "-m",
+                "untracked files on stash",
+            ]
+        )
+        if commit_res.returncode != 0:
+            raise ValueError(f"failed to commit untracked tree: {commit_res.stderr}")
+        untracked_commit = commit_res.stdout.strip()
+
+    if tracked_sha is not None:
+        # `stash apply --index` diffs parent2 against parent2^ to restore
+        # the staged/unstaged split. parent2 must be the raw index-state
+        # commit (tracked_sha's own 2nd parent), not tracked_sha itself --
+        # reusing tracked_sha directly here would give parent2 the same
+        # tree as the top commit, matching the canonical `git stash push
+        # -u` structure exactly rather than relying on it happening to
+        # work by coincidence.
+        index_parent_res = _run_git_safe(
+            ["git", "-C", str(repo_path), "rev-parse", f"{tracked_sha}^2"]
+        )
+        if index_parent_res.returncode != 0:
+            raise ValueError(f"failed to resolve tracked index commit: {index_parent_res.stderr}")
+        index_parent = index_parent_res.stdout.strip()
+        combined_tree_source = tracked_sha
+    else:
+        # `stash apply` diffs parent2 against parent2^ to compute the
+        # tracked-changes portion, so parent2 must itself have a parent to
+        # dereference -- reusing HEAD directly breaks this when HEAD is a
+        # root commit. Create a synthetic no-op "index" commit (HEAD's own
+        # tree, HEAD as its parent) so parent2^ always resolves, correctly
+        # representing "no tracked changes".
+        head_tree_res = _run_git_safe(
+            ["git", "-C", str(repo_path), "rev-parse", f"{head_sha}^{{tree}}"]
+        )
+        if head_tree_res.returncode != 0:
+            raise ValueError(f"failed to resolve HEAD tree: {head_tree_res.stderr}")
+        head_tree = head_tree_res.stdout.strip()
+        empty_index_res = _run_git_safe(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "commit-tree",
+                head_tree,
+                "-p",
+                head_sha,
+                "-m",
+                "no tracked changes",
+            ]
+        )
+        if empty_index_res.returncode != 0:
+            raise ValueError(f"failed to create empty index commit: {empty_index_res.stderr}")
+        index_parent = empty_index_res.stdout.strip()
+        combined_tree_source = head_sha
+
+    tree_res = _run_git_safe(
+        ["git", "-C", str(repo_path), "rev-parse", f"{combined_tree_source}^{{tree}}"]
+    )
+    if tree_res.returncode != 0:
+        raise ValueError(f"failed to resolve dirt tree: {tree_res.stderr}")
+    combined_tree = tree_res.stdout.strip()
+
+    final_res = _run_git_safe(
+        [
+            "git",
+            "-C",
+            str(repo_path),
+            "commit-tree",
+            combined_tree,
+            "-p",
+            head_sha,
+            "-p",
+            index_parent,
+            "-p",
+            untracked_commit,
+            "-m",
+            "patchforge dirt capture",
+        ]
+    )
+    if final_res.returncode != 0:
+        raise ValueError(f"failed to combine dirt capture: {final_res.stderr}")
+    return final_res.stdout.strip()
+
+
+def stash_apply_dirt(repo_path: Path, stash_sha: str) -> bool:
+    """Restore a captured dirt commit onto the working tree and index."""
+    res = _run_git_safe(["git", "-C", str(repo_path), "stash", "apply", "--index", stash_sha])
+    return res.returncode == 0
+
+
+def stash_store_ref(repo_path: Path, stash_sha: str, message: str) -> bool:
+    """Record a stash commit as a stash-list entry so it survives GC."""
+    res = _run_git_safe(["git", "-C", str(repo_path), "stash", "store", "-m", message, stash_sha])
+    return res.returncode == 0
+
+
+def stash_drop(repo_path: Path, index: int = 0) -> bool:
+    """Drop a stash-list entry by index."""
+    res = _run_git_safe(["git", "-C", str(repo_path), "stash", "drop", f"stash@{{{index}}}"])
+    return res.returncode == 0
+
+
+def check_orphaned_dirt_stash(repo_path: Path, run_id_prefix: str = "patchforge:") -> str | None:
+    """Return the commit SHA of an unresumed dirt capture, or None.
+
+    Only used for a startup advisory message -- callers are expected to
+    cross-reference the returned SHA against any known ``dirt_stash_sha``
+    values (e.g. from run.json) before warning the user, since a stash a
+    user named manually with this prefix would otherwise produce a false
+    positive. The SHA (not the ``stash@{N}`` ref) is returned because the
+    ref's index can shift as other stash operations happen, while the SHA
+    is stable for comparison and for the recovery command shown to users.
+    """
+    res = _run_git_safe(
+        ["git", "-C", str(repo_path), "stash", "list", f"--grep-reflog={run_id_prefix}"]
+    )
+    if res.returncode != 0 or not res.stdout.strip():
+        return None
+    first_line = res.stdout.splitlines()[0]
+    ref = first_line.split(":", 1)[0].strip()
+    if not ref:
+        return None
+    sha_res = _run_git_safe(["git", "-C", str(repo_path), "rev-parse", ref])
+    if sha_res.returncode != 0:
+        return None
+    return sha_res.stdout.strip() or None

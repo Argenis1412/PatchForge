@@ -90,6 +90,7 @@ _PUBLIC_FIELDS = frozenset(
         "current_stage",
         "triggered_by",
         "approved_by",
+        "dirt_stash_sha",
     }
 )
 
