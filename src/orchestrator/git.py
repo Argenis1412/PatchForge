@@ -840,13 +840,17 @@ def store_dirt_ref(repo_path: Path, run_id: str, stash_sha: str) -> bool:
     name, never by position, so no such gap exists, and it never touches
     ``refs/stash`` at all.
 
-    Passing an old value of all zeros makes this a create-only, atomic
+    Passing an empty-string old value makes this a create-only, atomic
     operation: it fails (returns ``False``) if the ref already exists,
     rather than silently overwriting a stale ref left by an incomplete
-    prior cleanup.
+    prior cleanup. An empty string -- not a hard-coded all-zero OID -- is
+    used deliberately: git documents it as the null-OID sentinel for this
+    exact "must not already exist" case, and unlike a fixed-length zero
+    string it is correct regardless of the repository's hash algorithm
+    (SHA-1 is 40 hex characters, SHA-256 is 64).
     """
     ref = dirt_ref_name(run_id)
-    res = _run_git_safe(["git", "-C", str(repo_path), "update-ref", ref, stash_sha, "0" * 40])
+    res = _run_git_safe(["git", "-C", str(repo_path), "update-ref", ref, stash_sha, ""])
     return res.returncode == 0
 
 
