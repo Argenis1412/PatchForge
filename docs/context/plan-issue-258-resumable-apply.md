@@ -140,7 +140,84 @@ review, beyond what the original Part 2 scope above anticipated:**
   `False` return (lock contention) now aborts immediately instead of
   proceeding without the lock.
 
-## Part 3 — Dirt snapshot for `--allow-dirty` (future issue)
+## Part 3 — Dirt snapshot for `--allow-dirty` (issue #262, ✅ DONE)
+
+Implemented on branch `feat/issue-262-dirt-snapshot-allow-dirty`. Camino A:
+capture + restore for the initial `--allow-dirty` run only; does not touch
+`classify_lifecycle` or the resume path (that remains Part 4). Full
+`/clarify` → `/challenge-ac` → design → `/adversarial` cycle run before
+implementation; see addendum below for what changed as a result.
+
+### Addendum: adversarial review findings and resolutions
+
+Five issues were found reviewing the initial design, before any code was
+written:
+
+1. **Submodule detection was a no-op.** The original design proposed
+   `git diff --submodule=short --quiet` to detect dirty submodules —
+   `--quiet` suppresses all stdout, making any check based on its output
+   permanently false. Fixed: use `git submodule status`, whose porcelain
+   output is not suppressed; a `+`/`-`/`U` prefix on any line means dirty.
+2. **Crash-window data loss was undocumented.** If the process crashes
+   between capturing dirt and finishing the apply, the dirt sits in a
+   `refs/stash` entry the user doesn't know about. Mitigated (not solved —
+   this is inherent to Camino A) with a startup advisory: `apply` now
+   checks for orphaned `patchforge:*` stash entries and warns with the
+   recovery command, cross-referencing against known `run.json` files to
+   avoid false positives from a stash a user named manually.
+3. **The manual 3-parent stash commit relies on undocumented git
+   internals**, so a mandatory structure test
+   (`test_stash_structure_valid`) asserts the parent count and that
+   `git stash apply --index` accepts the result — this will fail loudly in
+   CI if git's internal handling of `stash apply` ever changes, rather
+   than silently corrupting user data.
+4. **O(n) subprocess calls for untracked files** (`git update-index --add`
+   per file) would not scale and risked hitting the 30s timeout on repos
+   with many untracked files. Fixed: `git update-index --add --stdin` in a
+   single call.
+5. **The Part 3 / Part 4 contract was undefined**, and the original design
+   would have silently lost dirt in a *normal* resume flow (not just a
+   crash edge case): if `--allow-dirty` captured dirt, then apply crashed
+   during post-apply validation, an automatic resume (Part 2) would
+   validate and roll back the *patch* correctly but never knew to restore
+   the dirt stash. Fixed: the ALREADY_APPLIED/resume branch now aborts
+   explicitly with a recovery message whenever `run_metadata.dirt_stash_sha`
+   is set, instead of proceeding silently. This is the contract Part 4 must
+   honor or replace.
+
+### Implementation-time correction: dirt must also be restored on success
+
+The original issue's acceptance criteria only described restoring dirt
+"on rollback." Implementing it strictly that way would have been a
+regression: pre-Part-3, `--allow-dirty` applied the patch directly onto
+the dirty tree (patch changes and pre-existing dirt coexisted,
+uncommitted). Part 3's capture step cleans the tree before applying the
+patch, so if dirt were *only* restored on rollback, a **successful** apply
+would silently strand the user's original dirt in a stash forever. Fixed:
+on success, the captured dirt is also restored on top of the applied
+patch (`stash apply --index`), matching pre-Part-3 semantics. If that
+restore conflicts with the patch's own changes, the patch stays applied
+(it already passed validation) and the user is pointed at the stash to
+resolve the conflict manually — this is not rolled back, since rolling
+back a validated patch because of an unrelated stash conflict would be
+worse.
+
+### Bug found during implementation: root-commit parent resolution
+
+The "combine tracked + untracked" step originally reused `HEAD` directly
+as the stash's "index" parent when there was no tracked dirt (untracked
+files only). `git stash apply` internally diffs `parent2` against
+`parent2^` to compute the tracked-changes portion, so `parent2` must
+itself have a resolvable parent — reusing `HEAD` directly breaks this
+whenever `HEAD` is a root commit (no parent of its own), producing
+`fatal: ambiguous argument '<sha>^2^'`. Fixed by creating a synthetic
+no-op "index" commit (`HEAD`'s own tree, `HEAD` as its parent) so
+`parent2^` always resolves to `HEAD` regardless of `HEAD`'s own ancestry.
+Caught by `test_allow_dirty_untracked_only_captures_and_restores`.
+
+<details>
+<summary>Original Part 3 design (pre-implementation, kept for history)</summary>
+
 
 **Goal:** when the *original* (first, non-resumed) `apply --allow-dirty`
 run starts from a dirty tree, that pre-existing user dirt (including
@@ -220,6 +297,8 @@ Additional fixes required in this part, confirmed by review:
   everything downstream that persists `rolled_back`/`rollback_head` to the
   WAL and `run.json` — must reflect the incomplete outcome.
 
+</details>
+
 ## Part 4 — Hardening / cleanup (future issue, may fold into Part 2/3)
 
 Anything from the review not already covered above:
@@ -229,8 +308,23 @@ Anything from the review not already covered above:
 - Regression test: real CONFLICT (genuinely different content) still
   produces the original CONFLICT message, unaffected by the new
   classification path.
-- Revisit whether the resume path needs its own `--allow-dirty`-equivalent
-  flag or CLI messaging once Parts 2-3 land together.
+- **Part 3/4 contract (defined during Part 3 implementation):** Part 3
+  persists `RunMetadata.dirt_stash_sha` and aborts automatic resume
+  whenever it is set, rather than proceeding silently. Part 4's job is to
+  either (a) teach `classify_lifecycle`/the resume path to restore the
+  dirt stash as part of a full resume, replacing the abort with real
+  resume support, or (b) formally accept the abort as permanent behavior
+  and turn its error message into fully self-service manual recovery
+  instructions. Whichever is chosen, do not silently drop the guard
+  without replacing it — the guard exists because a silent resume with
+  unrestored dirt is a real data-loss path in the normal (non-crash) flow,
+  confirmed during Part 3's adversarial review.
+- The crash-window gap acknowledged in Part 3 (dirt captured, process dies
+  before the apply finishes, leaving a `refs/stash` entry the user has to
+  notice via the startup advisory) is inherent to Camino A and is in scope
+  for Part 4 if a stronger guarantee is wanted (e.g. `git worktree add`
+  instead of resetting the main tree, discussed and deferred during Part 3
+  adversarial review as a larger architectural change).
 
 ## Confirmed bugs found in review (do not lose these)
 

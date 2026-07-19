@@ -6,6 +6,7 @@ __all__ = [
     "execute",
 ]
 
+import contextlib
 import json
 import os
 import shutil
@@ -106,10 +107,16 @@ def execute(
     from orchestrator.exceptions import RollbackError
     from orchestrator.git import (
         apply_patch,
+        check_orphaned_dirt_stash,
         create_controlled_branch,
         current_branch,
         current_head,
+        force_reset_apply,
         repository_state,
+        stash_apply_dirt,
+        stash_create_dirt,
+        stash_drop,
+        stash_store_ref,
     )
     from orchestrator.lifecycle import classify_lifecycle
     from orchestrator.observability.events import log_event, log_failure
@@ -188,6 +195,28 @@ def execute(
     if not patch_path.exists():
         console.print(f"[bold red]Error: patch.diff does not exist in {run_dir}[/bold red]")
         raise typer.Exit(code=1) from None
+
+    # Advisory only: warn if a prior --allow-dirty run captured dirt that
+    # was never restored (e.g. the process crashed before rollback could
+    # run). Cross-reference against known run.json files to avoid a false
+    # positive from a stash a user happened to name with this prefix
+    # themselves.
+    orphan_sha = check_orphaned_dirt_stash(target_path)
+    if orphan_sha is not None:
+        known_shas = set()
+        if workspace_mgr.runs.exists():
+            for run_json_path in workspace_mgr.runs.glob("*/run.json"):
+                with contextlib.suppress(Exception):
+                    data = json.loads(run_json_path.read_text(encoding="utf-8"))
+                    sha = data.get("dirt_stash_sha")
+                    if sha:
+                        known_shas.add(sha)
+        if not known_shas or orphan_sha in known_shas:
+            console.print(
+                "[bold yellow]Warning: found an unresumed --allow-dirty dirt "
+                f"capture ({orphan_sha}). Your working-tree state may be "
+                f"recoverable via: git stash apply --index {orphan_sha}[/bold yellow]"
+            )
 
     # Acquire repo lock BEFORE any isolation/lifecycle/branch/HEAD checks --
     # including the very first HEAD read immediately below. A
@@ -349,6 +378,11 @@ def execute(
         pre_apply_head = current_head(target_path)
         pre_apply_branch = current_branch(target_path)
 
+        # Set on the happy path only when --allow-dirty captures dirt.
+        # Always None on the resume path -- the guard above already aborts
+        # resume whenever the WAL recorded a dirt capture.
+        dirt_stash_sha: Optional[str] = None
+
         if lifecycle_state is PatchLifecycleState.ALREADY_APPLIED:
             # --- RESUME PATH -----------------------------------------------
             # A previous apply ran git apply successfully but crashed before
@@ -360,6 +394,20 @@ def execute(
                 "[bold yellow]Patch lifecycle state is ALREADY_APPLIED. "
                 "Attempting automatic resume...[/bold yellow]"
             )
+
+            # Part 3 / Part 4 contract: automatic resume does not (yet)
+            # know how to restore dirt captured by a prior --allow-dirty
+            # run. Resuming without restoring it would silently lose the
+            # user's pre-existing changes, so abort instead of proceeding.
+            if run_metadata.dirt_stash_sha:
+                console.print(
+                    "[bold red]Error: This run captured working-tree dirt with "
+                    "--allow-dirty. Automatic resume with dirt is not supported "
+                    "yet.\nTo recover your changes: git stash apply --index "
+                    f"{run_metadata.dirt_stash_sha}\n"
+                    "Then re-run apply on a clean tree.[/bold red]"
+                )
+                raise typer.Exit(code=1) from None
 
             wal_result = _hydrate_apply_result_for_resume(run_dir, run_id, patch_path)
             if wal_result is None:
@@ -453,12 +501,23 @@ def execute(
                 console.print(f"[bold red]Git Error: {exc}[/bold red]")
                 raise typer.Exit(code=1) from None
 
-            if not git_state.is_clean and not allow_dirty:
-                console.print(
-                    "[bold red]Error: Target repository has uncommitted changes. "
-                    "Please commit, stash them, or run with --allow-dirty.[/bold red]"
-                )
-                raise typer.Exit(code=1) from None
+            if not git_state.is_clean:
+                if not allow_dirty:
+                    console.print(
+                        "[bold red]Error: Target repository has uncommitted changes. "
+                        "Please commit, stash them, or run with --allow-dirty.[/bold red]"
+                    )
+                    raise typer.Exit(code=1) from None
+                try:
+                    dirt_stash_sha = stash_create_dirt(target_path)
+                except ValueError as exc:
+                    console.print(f"[bold red]Cannot capture working tree state: {exc}[/bold red]")
+                    raise typer.Exit(code=1) from None
+                if dirt_stash_sha is not None:
+                    stash_store_ref(target_path, dirt_stash_sha, f"patchforge:{run_id}")
+                    run_metadata.dirt_stash_sha = dirt_stash_sha
+                    workspace_mgr.write_run_json(run_id, run_metadata)
+                    force_reset_apply(target_path, git_state.head)
 
             try:
                 config = TargetConfig.load(target_path=target_path, workspace_path=workspace_path)
@@ -475,6 +534,7 @@ def execute(
                 pre_apply_head=pre_apply_head,
                 pre_apply_branch=pre_apply_branch,
                 status="applying",
+                dirt_stash_sha=dirt_stash_sha,
             )
             # Persist the pre-apply config snapshot BEFORE the WAL
             # checkpoint (not after): if the process crashes between the
@@ -553,6 +613,26 @@ def execute(
                         logs_dir=logs_dir,
                         run_dir=run_dir,
                     )
+                # Restore captured dirt now that the code rollback succeeded
+                # -- restoring before the code rollback would apply the
+                # stash onto the wrong tree state.
+                dirt_restored = False
+                dirt_restore_failed = False
+                dirt_recovery_command = None
+                if dirt_stash_sha and rollback_succeeded:
+                    if stash_apply_dirt(target_path, dirt_stash_sha):
+                        stash_drop(target_path, index=0)
+                        dirt_restored = True
+                    else:
+                        rollback_succeeded = False
+                        dirt_restore_failed = True
+                        dirt_recovery_command = f"git stash apply --index {dirt_stash_sha}"
+                        console.print(
+                            "[bold red]FATAL: Code rollback succeeded but restoring your "
+                            "pre-existing working-tree changes failed. Recover them with:\n"
+                            f"  {dirt_recovery_command}[/bold red]"
+                        )
+
                 # Write apply.json failure using ApplyResult model
                 apply_result = ApplyResult(
                     run_id=run_id,
@@ -565,6 +645,10 @@ def execute(
                     pre_apply_head=pre_apply_head,
                     pre_apply_branch=pre_apply_branch,
                     rollback_head=pre_apply_head if rollback_succeeded else None,
+                    dirt_stash_sha=dirt_stash_sha,
+                    dirt_restored=dirt_restored,
+                    dirt_restore_failed=dirt_restore_failed,
+                    dirt_recovery_command=dirt_recovery_command,
                 )
                 _wal_write(apply_result, run_dir / "apply.json")
                 run_metadata.status = "failed"
@@ -647,6 +731,24 @@ def execute(
                 run_id, "post_apply_failure.json", json.dumps(failure_detail, indent=2)
             )
 
+            # Restore captured dirt now that the code rollback succeeded.
+            dirt_restored = False
+            dirt_restore_failed = False
+            dirt_recovery_command = None
+            if dirt_stash_sha and rollback_succeeded:
+                if stash_apply_dirt(target_path, dirt_stash_sha):
+                    stash_drop(target_path, index=0)
+                    dirt_restored = True
+                else:
+                    rollback_succeeded = False
+                    dirt_restore_failed = True
+                    dirt_recovery_command = f"git stash apply --index {dirt_stash_sha}"
+                    console.print(
+                        "[bold red]FATAL: Code rollback succeeded but restoring your "
+                        "pre-existing working-tree changes failed. Recover them with:\n"
+                        f"  {dirt_recovery_command}[/bold red]"
+                    )
+
             base_error_msg = (
                 "Post-apply validation failed to execute"
                 if post_val_output is None
@@ -668,6 +770,10 @@ def execute(
                 pre_apply_head=pre_apply_head,
                 pre_apply_branch=pre_apply_branch,
                 rollback_head=pre_apply_head if rollback_succeeded else None,
+                dirt_stash_sha=dirt_stash_sha,
+                dirt_restored=dirt_restored,
+                dirt_restore_failed=dirt_restore_failed,
+                dirt_recovery_command=dirt_recovery_command,
             )
             _wal_write(apply_result, run_dir / "apply.json")
             run_metadata.status = "failed"
@@ -680,6 +786,26 @@ def execute(
                     run_metadata.failure_artifacts.append(artifact)
             workspace_mgr.write_run_json(run_id, run_metadata)
             raise typer.Exit(code=1) from None
+
+        # 10.5. On success, restore any captured dirt on top of the applied
+        # patch -- --allow-dirty must not silently discard the user's
+        # pre-existing changes just because the patch itself succeeded.
+        # This can legitimately conflict with the patch's own changes; if
+        # so, the patch stays applied (it already passed validation) and
+        # the user is pointed at the stash to resolve manually.
+        if dirt_stash_sha:
+            if stash_apply_dirt(target_path, dirt_stash_sha):
+                stash_drop(target_path, index=0)
+                apply_result.dirt_restored = True
+            else:
+                apply_result.dirt_restore_failed = True
+                apply_result.dirt_recovery_command = f"git stash apply --index {dirt_stash_sha}"
+                console.print(
+                    "[bold yellow]Warning: the patch applied and validated successfully, "
+                    "but restoring your pre-existing working-tree changes on top of it "
+                    "failed (likely a conflict with the patch itself). Recover them with:\n"
+                    f"  {apply_result.dirt_recovery_command}[/bold yellow]"
+                )
 
         # 11. Checkpoint 5: status="applied", success=True
         apply_result.applied_at = datetime.now(timezone.utc)

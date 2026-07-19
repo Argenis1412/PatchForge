@@ -732,3 +732,273 @@ def test_lock_released_on_conflict(tmp_path: Path) -> None:
 
     assert exc.value.exit_code == 1
     release_mock.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Part 3: dirt capture and restore for --allow-dirty (issue #262)
+# ---------------------------------------------------------------------------
+
+
+def _make_patch_diff(repo_dir: Path) -> str:
+    """Return a unified diff (as text) that adds a new file `patched.txt`
+    to the repo's clean HEAD state. Leaves the working tree unchanged."""
+    new_file = repo_dir / "patched.txt"
+    new_file.write_text("patched content\n", encoding="utf-8")
+    _git("add", "patched.txt", cwd=repo_dir)
+    diff_text = _git("diff", "--cached", cwd=repo_dir).stdout
+    _git("reset", cwd=repo_dir)
+    new_file.unlink()
+    return diff_text
+
+
+def _setup_allow_dirty_run(
+    tmp_path: Path,
+    *,
+    tracked_dirt: bool = False,
+    untracked_dirt: bool = False,
+) -> dict:
+    """Build a 'previewed' run with a real, cleanly-applying patch, on a
+    repo whose working tree may carry pre-existing tracked/untracked dirt.
+    Unlike _setup_resumable_run, this targets the VALID (happy-path) branch
+    with a patch that actually applies via `git apply`.
+    """
+    repo_dir = tmp_path / "repo"
+    commit1, original_branch = _init_repo(repo_dir)
+
+    patch_content = _make_patch_diff(repo_dir)
+
+    if tracked_dirt:
+        (repo_dir / "file.txt").write_text("v1-dirty", encoding="utf-8")
+    if untracked_dirt:
+        (repo_dir / "untracked.txt").write_text("untracked content\n", encoding="utf-8")
+
+    run_id = "test-allow-dirty-run"
+    workspace_path = tmp_path / "workspace"
+    workspace = WorkspaceManager(workspace_path)
+    workspace.setup()
+    run_dir = workspace.create_run_directory(run_id)
+
+    checksum = hashlib.sha256(patch_content.encode("utf-8")).hexdigest()
+    (run_dir / "patch.diff").write_text(patch_content, encoding="utf-8")
+
+    meta = RunMetadata(
+        run_id=run_id,
+        target_path=str(repo_dir),
+        workspace_path=str(workspace_path),
+        base_commit=commit1,
+        branch=original_branch,
+        status="previewed",
+        v1_supported=True,
+        patch_checksum=checksum,
+    )
+    workspace.write_run_json(run_id, meta)
+
+    return {
+        "repo_dir": repo_dir,
+        "workspace_path": workspace_path,
+        "workspace": workspace,
+        "run_id": run_id,
+        "run_dir": run_dir,
+        "original_branch": original_branch,
+        "commit1": commit1,
+    }
+
+
+def _run_allow_dirty(ctx: dict, validator_result=None):
+    validator_mock = MagicMock(return_value=validator_result or _passing_validator())
+    with (
+        patch(
+            "orchestrator.lifecycle.classify_lifecycle",
+            return_value=PatchLifecycleState.VALID,
+        ),
+        patch("orchestrator.agents.validator.run", validator_mock),
+    ):
+        apply_execute(ctx["run_id"], allow_dirty=True, workspace=ctx["workspace_path"])
+
+
+def test_allow_dirty_tracked_only_captures_and_restores(tmp_path: Path) -> None:
+    ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True)
+    _run_allow_dirty(ctx)
+
+    assert (ctx["repo_dir"] / "file.txt").read_text(encoding="utf-8") == "v1-dirty"
+    assert (ctx["repo_dir"] / "patched.txt").exists()
+
+    stash_list = _git("stash", "list", cwd=ctx["repo_dir"]).stdout
+    assert stash_list.strip() == ""
+
+    run_metadata = ctx["workspace"].read_run_json(ctx["run_id"])
+    assert run_metadata.status == "applied"
+
+
+def test_allow_dirty_untracked_only_captures_and_restores(tmp_path: Path) -> None:
+    ctx = _setup_allow_dirty_run(tmp_path, untracked_dirt=True)
+    _run_allow_dirty(ctx)
+
+    assert (ctx["repo_dir"] / "untracked.txt").read_text(encoding="utf-8") == "untracked content\n"
+    assert (ctx["repo_dir"] / "patched.txt").exists()
+
+
+def test_allow_dirty_both_captures_and_restores(tmp_path: Path) -> None:
+    ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True, untracked_dirt=True)
+    _run_allow_dirty(ctx)
+
+    assert (ctx["repo_dir"] / "file.txt").read_text(encoding="utf-8") == "v1-dirty"
+    assert (ctx["repo_dir"] / "untracked.txt").read_text(encoding="utf-8") == "untracked content\n"
+    assert (ctx["repo_dir"] / "patched.txt").exists()
+
+
+def test_allow_dirty_clean_tree_skips_capture(tmp_path: Path) -> None:
+    """--allow-dirty on an already-clean tree must behave like a normal
+    apply: no stash created, no dirt_stash_sha recorded."""
+    ctx = _setup_allow_dirty_run(tmp_path)
+    _run_allow_dirty(ctx)
+
+    stash_list = _git("stash", "list", cwd=ctx["repo_dir"]).stdout
+    assert stash_list.strip() == ""
+
+    run_metadata = ctx["workspace"].read_run_json(ctx["run_id"])
+    assert run_metadata.dirt_stash_sha is None
+
+
+def test_allow_dirty_false_rejects_dirty(tmp_path: Path) -> None:
+    """Regression: without --allow-dirty, a dirty tree still aborts before
+    any capture/mutation happens."""
+    ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True)
+    validator_mock = MagicMock(return_value=_passing_validator())
+
+    with (
+        patch(
+            "orchestrator.lifecycle.classify_lifecycle",
+            return_value=PatchLifecycleState.VALID,
+        ),
+        patch("orchestrator.agents.validator.run", validator_mock),
+        pytest.raises(typer.Exit) as exc,
+    ):
+        apply_execute(ctx["run_id"], allow_dirty=False, workspace=ctx["workspace_path"])
+
+    assert exc.value.exit_code == 1
+    validator_mock.assert_not_called()
+    assert (ctx["repo_dir"] / "file.txt").read_text(encoding="utf-8") == "v1-dirty"
+
+
+def test_capture_aborts_on_no_head(tmp_path: Path) -> None:
+    """A repo with no commits has no HEAD; dirt capture must abort before
+    any mutation rather than crash partway through."""
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir(parents=True)
+    _git("init", cwd=repo_dir)
+    _git("config", "user.email", "test@example.com", cwd=repo_dir)
+    _git("config", "user.name", "Test User", cwd=repo_dir)
+    (repo_dir / "untracked.txt").write_text("x", encoding="utf-8")
+
+    from orchestrator.git import stash_create_dirt
+
+    with pytest.raises(ValueError, match="no HEAD"):
+        stash_create_dirt(repo_dir)
+
+
+def test_capture_aborts_on_dirty_submodule(tmp_path: Path) -> None:
+    from orchestrator.git import stash_create_dirt
+
+    repo_dir = tmp_path / "repo"
+    _init_repo(repo_dir)
+
+    with (
+        patch("orchestrator.git._has_dirty_submodules", return_value=True),
+        pytest.raises(ValueError, match="submodule"),
+    ):
+        stash_create_dirt(repo_dir)
+
+
+def test_dirt_restore_failure_reports_structured_error(tmp_path: Path) -> None:
+    ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True)
+
+    validator_mock = MagicMock(return_value=_failing_validator())
+    with (
+        patch(
+            "orchestrator.lifecycle.classify_lifecycle",
+            return_value=PatchLifecycleState.VALID,
+        ),
+        patch("orchestrator.agents.validator.run", validator_mock),
+        patch("orchestrator.git.stash_apply_dirt", return_value=False),
+        pytest.raises(typer.Exit),
+    ):
+        apply_execute(ctx["run_id"], allow_dirty=True, workspace=ctx["workspace_path"])
+
+    apply_json = json.loads((ctx["run_dir"] / "apply.json").read_text(encoding="utf-8"))
+    assert apply_json["dirt_restore_failed"] is True
+    assert apply_json["dirt_recovery_command"].startswith("git stash apply --index ")
+    assert apply_json["rolled_back"] is False
+
+
+def test_stash_dropped_after_successful_restore(tmp_path: Path) -> None:
+    ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True)
+    with pytest.raises(typer.Exit):
+        _run_allow_dirty(ctx, validator_result=_failing_validator())
+
+    stash_list = _git("stash", "list", cwd=ctx["repo_dir"]).stdout
+    assert stash_list.strip() == ""
+
+    apply_json = json.loads((ctx["run_dir"] / "apply.json").read_text(encoding="utf-8"))
+    assert apply_json["dirt_restored"] is True
+    assert apply_json["rolled_back"] is True
+    # Rollback restored pre-patch state; dirt restore put the original
+    # tracked change back on top.
+    assert (ctx["repo_dir"] / "file.txt").read_text(encoding="utf-8") == "v1-dirty"
+    assert not (ctx["repo_dir"] / "patched.txt").exists()
+
+
+def test_resume_aborts_if_dirt_stash_in_wal(tmp_path: Path) -> None:
+    """The Part 3 / Part 4 contract: automatic resume must not silently
+    proceed when the WAL recorded a dirt capture it doesn't know how to
+    restore -- it must abort with a recovery pointer instead."""
+    ctx = _setup_resumable_run(tmp_path)
+    run_metadata = ctx["workspace"].read_run_json(ctx["run_id"])
+    run_metadata.dirt_stash_sha = "deadbeef"
+    ctx["workspace"].write_run_json(ctx["run_id"], run_metadata)
+
+    validator_mock = MagicMock(return_value=_passing_validator())
+    with (
+        patch(
+            "orchestrator.lifecycle.classify_lifecycle",
+            return_value=PatchLifecycleState.ALREADY_APPLIED,
+        ),
+        patch("orchestrator.agents.validator.run", validator_mock),
+        pytest.raises(typer.Exit) as exc,
+    ):
+        apply_execute(ctx["run_id"], workspace=ctx["workspace_path"])
+
+    assert exc.value.exit_code == 1
+    validator_mock.assert_not_called()
+
+
+def test_stash_structure_valid(tmp_path: Path) -> None:
+    """The manually-built 3-parent dirt commit must have the exact parent
+    count `git stash apply` expects, and `stash apply --index` must accept
+    it. This guards against relying on undocumented git internals without
+    a check that would fail loudly in CI if git's behavior ever changes."""
+    from orchestrator.git import stash_create_dirt
+
+    repo_dir = tmp_path / "repo"
+    _init_repo(repo_dir)
+    (repo_dir / "file.txt").write_text("modified", encoding="utf-8")
+    (repo_dir / "untracked.txt").write_text("untracked", encoding="utf-8")
+
+    sha = stash_create_dirt(repo_dir)
+    assert sha is not None
+
+    parents = _git("rev-list", "--parents", "-n", "1", sha, cwd=repo_dir).stdout.split()
+    assert len(parents) - 1 == 3
+
+    _git("reset", "--hard", "HEAD", cwd=repo_dir)
+    _git("clean", "-fd", cwd=repo_dir)
+
+    apply_res = subprocess.run(
+        ["git", "stash", "apply", "--index", sha],
+        cwd=repo_dir,
+        capture_output=True,
+        text=True,
+    )
+    assert apply_res.returncode == 0
+    assert (repo_dir / "file.txt").read_text(encoding="utf-8") == "modified"
+    assert (repo_dir / "untracked.txt").read_text(encoding="utf-8") == "untracked"

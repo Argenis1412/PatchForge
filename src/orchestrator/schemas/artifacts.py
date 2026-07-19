@@ -116,6 +116,9 @@ class RunMetadata(BaseModel):
     triggered_by: Optional[str] = None
     approved_by: Optional[str] = None
 
+    # Part 3: dirt capture for --allow-dirty
+    dirt_stash_sha: Optional[str] = None
+
 
 def compute_auto_apply_eligible(
     risk_budget: str,
@@ -142,3 +145,9 @@ class ApplyResult(BaseModel):
     status: str = "pending"
     pre_apply_diff_backup: Optional[str] = None
     pr_number: Optional[int] = None
+
+    # Part 3: dirt capture for --allow-dirty
+    dirt_stash_sha: Optional[str] = None
+    dirt_restored: bool = False
+    dirt_restore_failed: bool = False
+    dirt_recovery_command: Optional[str] = None
