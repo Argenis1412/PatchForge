@@ -819,39 +819,101 @@ def stash_apply_dirt(repo_path: Path, stash_sha: str) -> bool:
     return res.returncode == 0
 
 
-def stash_store_ref(repo_path: Path, stash_sha: str, message: str) -> bool:
-    """Record a stash commit as a stash-list entry so it survives GC."""
-    res = _run_git_safe(["git", "-C", str(repo_path), "stash", "store", "-m", message, stash_sha])
+_DIRT_REF_PREFIX = "refs/patchforge/dirt/"
+
+
+def dirt_ref_name(run_id: str) -> str:
+    """Compute the private ref used to anchor a run's captured dirt commit."""
+    return f"{_DIRT_REF_PREFIX}{run_id}"
+
+
+def store_dirt_ref(repo_path: Path, run_id: str, stash_sha: str) -> bool:
+    """Anchor a captured dirt commit under a private per-run ref.
+
+    Uses ``git update-ref`` directly on ``refs/patchforge/dirt/{run_id}``
+    instead of ``git stash store`` (Part 3's original mechanism): stash-list
+    addressing (``stash@{N}``) is positional and shared with the user's own
+    ``git stash`` workflow, which is a TOCTOU hazard once there's an
+    unbounded time gap between the entry being pushed and later being
+    dropped (the resume case) -- concurrent stash activity in that gap can
+    shift what ``stash@{0}`` refers to. A per-run ref is addressed by exact
+    name, never by position, so no such gap exists, and it never touches
+    ``refs/stash`` at all.
+
+    Passing an empty-string old value makes this a create-only, atomic
+    operation: it fails (returns ``False``) if the ref already exists,
+    rather than silently overwriting a stale ref left by an incomplete
+    prior cleanup. An empty string -- not a hard-coded all-zero OID -- is
+    used deliberately: git documents it as the null-OID sentinel for this
+    exact "must not already exist" case, and unlike a fixed-length zero
+    string it is correct regardless of the repository's hash algorithm
+    (SHA-1 is 40 hex characters, SHA-256 is 64).
+    """
+    ref = dirt_ref_name(run_id)
+    res = _run_git_safe(["git", "-C", str(repo_path), "update-ref", ref, stash_sha, ""])
     return res.returncode == 0
 
 
-def stash_drop(repo_path: Path, index: int = 0) -> bool:
-    """Drop a stash-list entry by index."""
-    res = _run_git_safe(["git", "-C", str(repo_path), "stash", "drop", f"stash@{{{index}}}"])
+def delete_dirt_ref(repo_path: Path, run_id: str, expected_sha: str) -> bool:
+    """Delete a run's dirt-capture ref, conditional on its current value.
+
+    Passing the expected old value makes the delete atomic and conditional:
+    if the ref was already deleted or points somewhere unexpected, this
+    fails rather than silently deleting an unrelated/newer value. A failure
+    here is not fatal to the caller -- the working tree already has the
+    dirt restored by this point; it only means the ref is left behind for
+    the orphan advisory (``check_orphaned_dirt_refs``) to surface later.
+    """
+    ref = dirt_ref_name(run_id)
+    res = _run_git_safe(["git", "-C", str(repo_path), "update-ref", "-d", ref, expected_sha])
     return res.returncode == 0
 
 
-def check_orphaned_dirt_stash(repo_path: Path, run_id_prefix: str = "patchforge:") -> str | None:
-    """Return the commit SHA of an unresumed dirt capture, or None.
+def check_orphaned_dirt_refs(repo_path: Path) -> list[tuple[str, str]]:
+    """Return ``(run_id, sha)`` for every dirt-capture ref currently present.
 
-    Only used for a startup advisory message -- callers are expected to
-    cross-reference the returned SHA against any known ``dirt_stash_sha``
-    values (e.g. from run.json) before warning the user, since a stash a
-    user named manually with this prefix would otherwise produce a false
-    positive. The SHA (not the ``stash@{N}`` ref) is returned because the
-    ref's index can shift as other stash operations happen, while the SHA
-    is stable for comparison and for the recovery command shown to users.
+    ``refs/patchforge/dirt/`` is PatchForge's own private namespace -- unlike
+    Part 3's ``refs/stash``-based lookup, nothing else is expected to create
+    refs there, so every entry found is unambiguously ours and the run_id is
+    read directly from the ref name (no reflog-message grepping or
+    run.json-wide scan needed to identify which run it belongs to).
     """
     res = _run_git_safe(
-        ["git", "-C", str(repo_path), "stash", "list", f"--grep-reflog={run_id_prefix}"]
+        [
+            "git",
+            "-C",
+            str(repo_path),
+            "for-each-ref",
+            "--format=%(refname) %(objectname)",
+            _DIRT_REF_PREFIX,
+        ]
     )
     if res.returncode != 0 or not res.stdout.strip():
-        return None
-    first_line = res.stdout.splitlines()[0]
-    ref = first_line.split(":", 1)[0].strip()
-    if not ref:
-        return None
-    sha_res = _run_git_safe(["git", "-C", str(repo_path), "rev-parse", ref])
-    if sha_res.returncode != 0:
-        return None
-    return sha_res.stdout.strip() or None
+        return []
+    orphans: list[tuple[str, str]] = []
+    for line in res.stdout.strip().splitlines():
+        parts = line.rsplit(" ", 1)
+        if len(parts) != 2:
+            continue
+        refname, sha = parts
+        run_id = refname[len(_DIRT_REF_PREFIX) :]
+        if run_id and sha:
+            orphans.append((run_id, sha))
+    return orphans
+
+
+def has_merge_conflicts(repo_path: Path) -> bool:
+    """Return True if the working tree currently has unmerged paths.
+
+    Used to distinguish a clean no-op failure from a partial merge that left
+    conflict markers behind when ``stash_apply_dirt`` returns ``False`` --
+    ``git stash apply --index`` has real 3-way-merge semantics, not a simple
+    all-or-nothing apply, so its failure alone doesn't say which happened.
+    Returns False (fail-open to "no conflicts reported") if the status check
+    itself fails, since this is advisory messaging only, not a safety gate.
+    """
+    res = _run_git_safe(["git", "-C", str(repo_path), "status", "--porcelain=v1"])
+    if res.returncode != 0:
+        return False
+    conflict_codes = {"DD", "AU", "UD", "UA", "DU", "AA", "UU"}
+    return any(line[:2] in conflict_codes for line in res.stdout.splitlines())

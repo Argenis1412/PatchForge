@@ -129,6 +129,8 @@ patchforge ci <path> --workspace <dir> [options]
 
 Exit code 0 on success, 1 on any failure. The result file is always written regardless of exit code.
 
+**Note on `--allow-dirty`:** pre-existing working-tree changes are captured under a private git ref (`refs/patchforge/dirt/<run_id>`) until they're restored. Avoid `git push --mirror` or other wildcard-refspec pushes on the target repo while any such refs are outstanding (e.g. after a crashed run) — those push all local refs, including this one, to the remote.
+
 ## Container Paths
 
 When running inside Docker, `run.json` contains container-internal paths (`/repo`, `/workspace`). Use `ci_result.json` for machine-readable output — it contains only portable fields (run ID, branch name, status, affected files with repo-relative paths).

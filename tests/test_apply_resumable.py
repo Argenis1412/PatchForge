@@ -964,13 +964,20 @@ def test_code_rollback_failure_reports_dirt_recovery(tmp_path: Path) -> None:
     assert apply_json["rolled_back"] is False
 
 
-def test_stash_dropped_after_successful_restore(tmp_path: Path) -> None:
+def test_dirt_ref_dropped_after_successful_restore(tmp_path: Path) -> None:
     ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True)
+    from orchestrator.git import dirt_ref_name
+
     with pytest.raises(typer.Exit):
         _run_allow_dirty(ctx, validator_result=_failing_validator())
 
-    stash_list = _git("stash", "list", cwd=ctx["repo_dir"]).stdout
-    assert stash_list.strip() == ""
+    ref_check = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", dirt_ref_name(ctx["run_id"])],
+        cwd=ctx["repo_dir"],
+        capture_output=True,
+        text=True,
+    )
+    assert ref_check.returncode != 0
 
     apply_json = json.loads((ctx["run_dir"] / "apply.json").read_text(encoding="utf-8"))
     assert apply_json["dirt_restored"] is True
@@ -1064,19 +1071,21 @@ def test_stash_preserves_staged_vs_unstaged_split(tmp_path: Path) -> None:
     assert (repo_dir / "unstaged.txt").read_text(encoding="utf-8") == "unstaged-change"
 
 
-def test_orphaned_stash_warning_shown_when_no_active_run_matches(
+def test_orphaned_dirt_ref_warning_shown(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A prior --allow-dirty run captured dirt and crashed before restoring
-    it, leaving a `patchforge:*` stash entry with no corresponding run.json
-    (e.g. the run directory was already cleaned up). The advisory must
-    still fire, since there's nothing to cross-reference against."""
+    it, leaving a `refs/patchforge/dirt/<run_id>` ref with no corresponding
+    run.json (e.g. the run directory was already cleaned up). The advisory
+    must still fire, since refs/patchforge/dirt/* is PatchForge's own
+    private namespace -- anything found there is unambiguously ours, unlike
+    the old refs/stash-based design this replaced."""
     ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True)
-    from orchestrator.git import stash_create_dirt, stash_store_ref
+    from orchestrator.git import stash_create_dirt, store_dirt_ref
 
     sha = stash_create_dirt(ctx["repo_dir"])
     assert sha is not None
-    assert stash_store_ref(ctx["repo_dir"], sha, "patchforge:some-other-run")
+    assert store_dirt_ref(ctx["repo_dir"], "some-other-run", sha)
     _git("reset", "--hard", "HEAD", cwd=ctx["repo_dir"])
     _git("clean", "-fd", cwd=ctx["repo_dir"])
 
@@ -1091,39 +1100,41 @@ def test_orphaned_stash_warning_shown_when_no_active_run_matches(
 
     out = capsys.readouterr().out
     assert "unresumed --allow-dirty dirt" in out
+    assert "some-other-run" in out
     assert sha in out
 
 
-def test_orphaned_stash_warning_suppressed_on_name_collision(
+def test_orphaned_dirt_ref_shows_age_cleanup_hint(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A user-named stash that happens to start with `patchforge:` but does
-    not match any known dirt_stash_sha in an active run.json must not
-    trigger the advisory -- otherwise a manually named stash produces a
-    false positive warning."""
-    ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True)
-    from orchestrator.git import stash_create_dirt, stash_store_ref
+    """An orphaned dirt capture whose run.json is old enough (per
+    _ORPHAN_CLEANUP_CANDIDATE_DAYS) gets an extra manual-cleanup hint with
+    the exact `git update-ref -d` recovery command."""
+    import os
 
-    # Write a run.json (for a *different*, unrelated run) that itself has a
-    # dirt_stash_sha recorded, so known_shas is non-empty but won't contain
-    # the user-named stash's SHA below.
-    other_run_dir = ctx["workspace"].create_run_directory("other-run")
-    other_meta = RunMetadata(
-        run_id="other-run",
+    ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True)
+    from orchestrator.git import stash_create_dirt, store_dirt_ref
+
+    sha = stash_create_dirt(ctx["repo_dir"])
+    assert sha is not None
+    orphan_run_id = "stale-orphan-run"
+    assert store_dirt_ref(ctx["repo_dir"], orphan_run_id, sha)
+    orphan_run_dir = ctx["workspace"].create_run_directory(orphan_run_id)
+    orphan_meta = RunMetadata(
+        run_id=orphan_run_id,
         target_path=str(ctx["repo_dir"]),
         workspace_path=str(ctx["workspace_path"]),
         base_commit=ctx["commit1"],
         branch=ctx["original_branch"],
-        status="applied",
+        status="failed",
         v1_supported=True,
-        dirt_stash_sha="0" * 40,
+        dirt_stash_sha=sha,
     )
-    ctx["workspace"].write_run_json("other-run", other_meta)
-    assert other_run_dir.exists()
+    ctx["workspace"].write_run_json(orphan_run_id, orphan_meta)
+    orphan_run_json = orphan_run_dir / "run.json"
+    old_time = orphan_run_json.stat().st_mtime - (8 * 86400)
+    os.utime(orphan_run_json, (old_time, old_time))
 
-    sha = stash_create_dirt(ctx["repo_dir"])
-    assert sha is not None
-    assert stash_store_ref(ctx["repo_dir"], sha, "patchforge:manually-named-by-user")
     _git("reset", "--hard", "HEAD", cwd=ctx["repo_dir"])
     _git("clean", "-fd", cwd=ctx["repo_dir"])
 
@@ -1136,12 +1147,13 @@ def test_orphaned_stash_warning_suppressed_on_name_collision(
     ):
         apply_execute(ctx["run_id"], allow_dirty=False, workspace=ctx["workspace_path"])
 
-    out = capsys.readouterr().out
-    assert "unresumed --allow-dirty dirt" not in out
+    out = " ".join(capsys.readouterr().out.split())
+    assert "candidate for manual cleanup" in out
+    assert f"git update-ref -d refs/patchforge/dirt/{orphan_run_id} {sha}" in out
 
 
-def test_capture_aborts_if_stash_store_ref_fails(tmp_path: Path) -> None:
-    """If recording the dirt capture as a stash-list entry fails, the apply
+def test_capture_aborts_if_store_dirt_ref_fails(tmp_path: Path) -> None:
+    """If recording the dirt capture under its private ref fails, the apply
     must abort before any mutation rather than proceed with an unreferenced
     (gc-eligible) dirt commit."""
     ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True)
@@ -1151,7 +1163,7 @@ def test_capture_aborts_if_stash_store_ref_fails(tmp_path: Path) -> None:
             "orchestrator.lifecycle.classify_lifecycle",
             return_value=PatchLifecycleState.VALID,
         ),
-        patch("orchestrator.git.stash_store_ref", return_value=False),
+        patch("orchestrator.git.store_dirt_ref", return_value=False),
         pytest.raises(typer.Exit) as exc,
     ):
         apply_execute(ctx["run_id"], allow_dirty=True, workspace=ctx["workspace_path"])
@@ -1160,6 +1172,88 @@ def test_capture_aborts_if_stash_store_ref_fails(tmp_path: Path) -> None:
     # Working tree must be untouched -- capture must abort before
     # force_reset_apply runs.
     assert (ctx["repo_dir"] / "file.txt").read_text(encoding="utf-8") == "v1-dirty"
+
+
+def test_capture_aborts_if_dirt_ref_already_exists(tmp_path: Path) -> None:
+    """If refs/patchforge/dirt/<run_id> already exists (e.g. left behind by
+    an incomplete prior cleanup), store_dirt_ref's create-only semantics
+    refuse to overwrite it, and the apply must abort before any mutation
+    rather than silently clobbering the stale ref."""
+    ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True)
+    from orchestrator.git import dirt_ref_name
+
+    _git(
+        "update-ref",
+        dirt_ref_name(ctx["run_id"]),
+        ctx["commit1"],
+        cwd=ctx["repo_dir"],
+    )
+
+    with (
+        patch(
+            "orchestrator.lifecycle.classify_lifecycle",
+            return_value=PatchLifecycleState.VALID,
+        ),
+        pytest.raises(typer.Exit) as exc,
+    ):
+        apply_execute(ctx["run_id"], allow_dirty=True, workspace=ctx["workspace_path"])
+
+    assert exc.value.exit_code == 1
+    assert (ctx["repo_dir"] / "file.txt").read_text(encoding="utf-8") == "v1-dirty"
+
+
+def test_dirt_ref_namespace_isolated_from_user_stash(tmp_path: Path) -> None:
+    """PatchForge's dirt-capture ref lives entirely outside refs/stash, so a
+    full capture-restore-cleanup cycle must never observe or disturb a
+    stash entry the user pushed independently -- proving namespace
+    isolation rather than relying on race-timing to avoid a collision."""
+    ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True)
+
+    # Pathspec-limited so this doesn't also sweep up file.txt's dirt (which
+    # tracked_dirt=True already left uncommitted) or advance HEAD.
+    (ctx["repo_dir"] / "unrelated.txt").write_text("user's own wip", encoding="utf-8")
+    _git(
+        "stash",
+        "push",
+        "--include-untracked",
+        "-m",
+        "user's own unrelated work",
+        "--",
+        "unrelated.txt",
+        cwd=ctx["repo_dir"],
+    )
+    user_stash_before = _git("stash", "list", cwd=ctx["repo_dir"]).stdout
+    assert user_stash_before.strip() != ""
+    assert (ctx["repo_dir"] / "file.txt").read_text(encoding="utf-8") == "v1-dirty"
+
+    _run_allow_dirty(ctx)
+
+    user_stash_after = _git("stash", "list", cwd=ctx["repo_dir"]).stdout
+    assert user_stash_after == user_stash_before
+
+
+def test_dirt_restore_succeeds_even_if_ref_delete_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A failed ref cleanup after a successful dirt restore must not be
+    treated as fatal -- the working tree is already correct at that point,
+    so this is a non-fatal warning, not a rolled-back/failed run."""
+    ctx = _setup_allow_dirty_run(tmp_path, tracked_dirt=True)
+
+    with (
+        patch(
+            "orchestrator.lifecycle.classify_lifecycle",
+            return_value=PatchLifecycleState.VALID,
+        ),
+        patch("orchestrator.agents.validator.run", return_value=_passing_validator()),
+        patch("orchestrator.git.delete_dirt_ref", return_value=False),
+    ):
+        apply_execute(ctx["run_id"], allow_dirty=True, workspace=ctx["workspace_path"])
+
+    out = " ".join(capsys.readouterr().out.split())
+    assert "cleaning up the internal dirt-capture ref failed" in out
+    run_metadata = ctx["workspace"].read_run_json(ctx["run_id"])
+    assert run_metadata.status == "applied"
 
 
 def test_capture_aborts_if_force_reset_fails(tmp_path: Path) -> None:
