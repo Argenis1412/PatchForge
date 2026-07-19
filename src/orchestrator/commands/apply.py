@@ -10,6 +10,7 @@ import contextlib
 import json
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -29,6 +30,10 @@ if TYPE_CHECKING:
     from orchestrator.schemas.artifacts import ApplyResult
 
 console = Console()
+
+# Age (in days, based on run.json's mtime) past which an orphaned dirt
+# capture is flagged as a manual-cleanup candidate in the startup advisory.
+_ORPHAN_CLEANUP_CANDIDATE_DAYS = 7
 
 
 def _hydrate_apply_result_for_resume(
@@ -107,16 +112,18 @@ def execute(
     from orchestrator.exceptions import RollbackError
     from orchestrator.git import (
         apply_patch,
-        check_orphaned_dirt_stash,
+        check_orphaned_dirt_refs,
         create_controlled_branch,
         current_branch,
         current_head,
+        delete_dirt_ref,
+        dirt_ref_name,
         force_reset_apply,
+        has_merge_conflicts,
         repository_state,
         stash_apply_dirt,
         stash_create_dirt,
-        stash_drop,
-        stash_store_ref,
+        store_dirt_ref,
     )
     from orchestrator.lifecycle import classify_lifecycle
     from orchestrator.observability.events import log_event, log_failure
@@ -192,31 +199,60 @@ def execute(
     run_dir = workspace_mgr.run_dir(run_id)
     patch_path = run_dir / "patch.diff"
 
+    def _cleanup_dirt_ref_warn(dirt_stash_sha: str) -> None:
+        """Print a non-fatal warning if the dirt-capture ref cleanup fails.
+
+        The working tree is already correct at this point (dirt was
+        restored successfully) -- a failed ref delete only leaves the ref
+        behind for the startup orphan advisory to eventually flag, not a
+        data-safety issue.
+        """
+        if not delete_dirt_ref(target_path, run_id, dirt_stash_sha):
+            console.print(
+                "[bold yellow]Warning: your changes were restored, but cleaning "
+                "up the internal dirt-capture ref failed. This is harmless -- a "
+                "future run's startup advisory may flag it -- but you can remove "
+                f"it manually with:\n  git update-ref -d "
+                f"{dirt_ref_name(run_id)} {dirt_stash_sha}[/bold yellow]"
+            )
+
+    def _dirt_conflict_suffix() -> str:
+        """Note a partial merge if stash_apply_dirt's failure left conflict markers."""
+        return (
+            " (a partial merge left conflict markers in the tree)"
+            if has_merge_conflicts(target_path)
+            else ""
+        )
+
     if not patch_path.exists():
         console.print(f"[bold red]Error: patch.diff does not exist in {run_dir}[/bold red]")
         raise typer.Exit(code=1) from None
 
-    # Advisory only: warn if a prior --allow-dirty run captured dirt that
-    # was never restored (e.g. the process crashed before rollback could
-    # run). Cross-reference against known run.json files to avoid a false
-    # positive from a stash a user happened to name with this prefix
-    # themselves.
-    orphan_sha = check_orphaned_dirt_stash(target_path)
-    if orphan_sha is not None:
-        known_shas = set()
-        if workspace_mgr.runs.exists():
-            for run_json_path in workspace_mgr.runs.glob("*/run.json"):
-                with contextlib.suppress(Exception):
-                    data = json.loads(run_json_path.read_text(encoding="utf-8"))
-                    sha = data.get("dirt_stash_sha")
-                    if sha:
-                        known_shas.add(sha)
-        if not known_shas or orphan_sha in known_shas:
-            console.print(
-                "[bold yellow]Warning: found an unresumed --allow-dirty dirt "
-                f"capture ({orphan_sha}). Your working-tree state may be "
-                f"recoverable via: git stash apply --index {orphan_sha}[/bold yellow]"
-            )
+    # Advisory only: warn about any prior --allow-dirty run's dirt capture
+    # that was never restored (e.g. the process crashed before rollback
+    # could run). refs/patchforge/dirt/* is PatchForge's own private
+    # namespace, so every entry found there is unambiguously ours -- no
+    # name-collision suppression is needed here, unlike the old
+    # refs/stash-based design this replaced (which shared its addressing
+    # with the user's own `git stash` workflow).
+    for orphan_run_id, orphan_sha in check_orphaned_dirt_refs(target_path):
+        age_note = ""
+        orphan_run_json = workspace_mgr.runs / orphan_run_id / "run.json"
+        if orphan_run_json.exists():
+            with contextlib.suppress(OSError):
+                age_days = int((time.time() - orphan_run_json.stat().st_mtime) // 86400)
+                if age_days >= _ORPHAN_CLEANUP_CANDIDATE_DAYS:
+                    age_note = (
+                        f" This capture is {age_days} day(s) old and is a "
+                        "candidate for manual cleanup if no longer needed: "
+                        f"git update-ref -d {dirt_ref_name(orphan_run_id)} {orphan_sha}"
+                    )
+        console.print(
+            "[bold yellow]Warning: found an unresumed --allow-dirty dirt "
+            f"capture for run {orphan_run_id} ({orphan_sha}). Your "
+            "working-tree state may be recoverable via: "
+            f"git stash apply --index {orphan_sha}.{age_note}[/bold yellow]"
+        )
 
     # Acquire repo lock BEFORE any isolation/lifecycle/branch/HEAD checks --
     # including the very first HEAD read immediately below. A
@@ -514,11 +550,12 @@ def execute(
                     console.print(f"[bold red]Cannot capture working tree state: {exc}[/bold red]")
                     raise typer.Exit(code=1) from None
                 if dirt_stash_sha is not None:
-                    if not stash_store_ref(target_path, dirt_stash_sha, f"patchforge:{run_id}"):
+                    if not store_dirt_ref(target_path, run_id, dirt_stash_sha):
                         console.print(
                             "[bold red]Cannot capture working tree state: failed to record "
-                            "the dirt capture as a stash entry. Aborting before any mutation "
-                            "to avoid leaving your changes unreferenced.[/bold red]"
+                            "the dirt capture under a private ref (it may already exist from "
+                            "an incomplete prior run). Aborting before any mutation to avoid "
+                            "leaving your changes unreferenced.[/bold red]"
                         )
                         raise typer.Exit(code=1) from None
                     run_metadata.dirt_stash_sha = dirt_stash_sha
@@ -583,12 +620,14 @@ def execute(
                 # tree left by force_reset_apply above.
                 if dirt_stash_sha:
                     if stash_apply_dirt(target_path, dirt_stash_sha):
-                        stash_drop(target_path, index=0)
+                        _cleanup_dirt_ref_warn(dirt_stash_sha)
                     else:
+                        conflict_note = _dirt_conflict_suffix()
                         console.print(
                             "[bold red]FATAL: Branch checkout failed AND restoring your "
-                            "pre-existing working-tree changes also failed. Recover them "
-                            f"with:\n  git stash apply --index {dirt_stash_sha}[/bold red]"
+                            f"pre-existing working-tree changes also failed{conflict_note}. "
+                            "Recover them with:\n  git stash apply --index "
+                            f"{dirt_stash_sha}[/bold red]"
                         )
                 run_metadata.status = "failed"
                 run_metadata.apply_status = "failed"
@@ -653,16 +692,17 @@ def execute(
                 if dirt_stash_sha:
                     if rollback_succeeded:
                         if stash_apply_dirt(target_path, dirt_stash_sha):
-                            stash_drop(target_path, index=0)
+                            _cleanup_dirt_ref_warn(dirt_stash_sha)
                             dirt_restored = True
                         else:
                             rollback_succeeded = False
                             dirt_restore_failed = True
                             dirt_recovery_command = f"git stash apply --index {dirt_stash_sha}"
+                            conflict_note = _dirt_conflict_suffix()
                             console.print(
                                 "[bold red]FATAL: Code rollback succeeded but restoring your "
-                                "pre-existing working-tree changes failed. Recover them with:\n"
-                                f"  {dirt_recovery_command}[/bold red]"
+                                f"pre-existing working-tree changes failed{conflict_note}. "
+                                f"Recover them with:\n  {dirt_recovery_command}[/bold red]"
                             )
                     else:
                         dirt_restore_failed = True
@@ -781,16 +821,17 @@ def execute(
             if dirt_stash_sha:
                 if rollback_succeeded:
                     if stash_apply_dirt(target_path, dirt_stash_sha):
-                        stash_drop(target_path, index=0)
+                        _cleanup_dirt_ref_warn(dirt_stash_sha)
                         dirt_restored = True
                     else:
                         rollback_succeeded = False
                         dirt_restore_failed = True
                         dirt_recovery_command = f"git stash apply --index {dirt_stash_sha}"
+                        conflict_note = _dirt_conflict_suffix()
                         console.print(
                             "[bold red]FATAL: Code rollback succeeded but restoring your "
-                            "pre-existing working-tree changes failed. Recover them with:\n"
-                            f"  {dirt_recovery_command}[/bold red]"
+                            f"pre-existing working-tree changes failed{conflict_note}. "
+                            f"Recover them with:\n  {dirt_recovery_command}[/bold red]"
                         )
                 else:
                     dirt_restore_failed = True
@@ -847,7 +888,7 @@ def execute(
         # the user is pointed at the stash to resolve manually.
         if dirt_stash_sha:
             if stash_apply_dirt(target_path, dirt_stash_sha):
-                stash_drop(target_path, index=0)
+                _cleanup_dirt_ref_warn(dirt_stash_sha)
                 apply_result.dirt_restored = True
             else:
                 apply_result.dirt_restore_failed = True
@@ -855,8 +896,9 @@ def execute(
                 console.print(
                     "[bold yellow]Warning: the patch applied and validated successfully, "
                     "but restoring your pre-existing working-tree changes on top of it "
-                    "failed (likely a conflict with the patch itself). Recover them with:\n"
-                    f"  {apply_result.dirt_recovery_command}[/bold yellow]"
+                    f"failed{_dirt_conflict_suffix()} (likely a conflict with the patch "
+                    f"itself). Recover them with:\n  "
+                    f"{apply_result.dirt_recovery_command}[/bold yellow]"
                 )
 
         # 11. Checkpoint 5: status="applied", success=True

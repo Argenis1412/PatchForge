@@ -299,6 +299,91 @@ Additional fixes required in this part, confirmed by review:
 
 </details>
 
+## Part 3.5 — Dirt-storage hardening (issue #264, ✅ DONE)
+
+Discovered as a prerequisite during Part 4's planning-stage adversarial
+review, not part of the original 4-part split: reusing Part 3's
+`refs/stash`-based storage for the resume case (Part 4) would route a
+high-risk, unbounded-time-gap call path through a positional
+(`stash@{0}`) addressing scheme that the codebase's own
+`check_orphaned_dirt_stash` docstring already flagged as fragile ("the
+ref's index can shift as other stash operations happen"). A first
+attempted fix (resolve the SHA's current `stash@{N}` position immediately
+before dropping) still left a real TOCTOU gap between "resolve" and
+"drop" as two separate subprocess calls. Root cause: using `refs/stash` (a
+shared, globally-mutable, user-visible structure) as PatchForge's private
+transactional storage at all, not just the specific addressing bug.
+
+**Implemented:** dirt commits are now anchored under a private per-run ref,
+`refs/patchforge/dirt/{run_id}`, via `git update-ref`/`git update-ref -d`
+(`store_dirt_ref`/`delete_dirt_ref`/`check_orphaned_dirt_refs`/
+`dirt_ref_name` in `git.py`) instead of `git stash store`/`stash@{N}`
+(`stash_create_dirt`/`stash_apply_dirt` themselves are unchanged — the
+commit-building and restore mechanism were never the problem, only the
+anchor/cleanup addressing). Addressed by exact ref name instead of stack
+position, so no TOCTOU window exists at any point. `store_dirt_ref` is
+create-only (fails rather than silently overwriting a stale ref left by an
+incomplete prior cleanup); `delete_dirt_ref` failure after a successful
+restore is treated as non-fatal (the working tree is already correct by
+that point — surfaced as a warning, left for the orphan advisory to catch
+later) rather than mirroring Part 3's FATAL-on-apply-failure pattern,
+which doesn't apply here.
+
+**Orphan-advisory simplified, not just ported:** `refs/patchforge/dirt/*`
+is exclusively PatchForge's own namespace, so the old
+name-collision-suppression logic (needed because `refs/stash` is shared
+with the user's own `git stash` workflow) no longer has a scenario to
+guard against and was removed rather than ported. Every orphan found is
+now reported directly by `run_id` (read straight from the ref name, no
+reflog-message grepping or whole-run.json-directory scan needed), with an
+age-based (7 days, via `run.json` mtime — not `run_id`'s embedded
+timestamp, whose format isn't consistent across the codebase's several
+run-ID generators) manual-cleanup hint.
+
+**Also fixed while this code was already being touched:**
+`stash_apply_dirt`'s `returncode != 0` didn't distinguish a clean no-op
+failure from a partial 3-way-merge that left conflict markers in the tree
+(`git stash apply --index` has real merge semantics, not simple
+all-or-nothing apply) — a pre-existing Part 3 ambiguity in the
+already-merged happy-path success-restore case. New `has_merge_conflicts()`
+in `git.py` (checks `git status --porcelain=v1` for unmerged-path codes)
+now distinguishes the two in the FATAL/warning messaging at all four
+restore-failure call sites.
+
+**Known accepted limitation, not solved:** anchoring dirt captures via
+*any* git ref — including `refs/stash`, which this replaces — is swept up
+by `git push --mirror` and equivalent wildcard-refspec pushes. The private
+per-run namespace changes this risk's *shape* for the worse, not better:
+today's design has at most one ref (`refs/stash`'s tip) exposed at any
+moment; `refs/patchforge/dirt/{run_id}` lets orphaned captures from
+multiple past crashed runs accumulate and all be swept into a single
+`--mirror` push simultaneously. Mitigated, not eliminated, by the
+age-based cleanup hint above. Two other storage directions were considered
+and rejected during this issue's `/clarify`: plain-file storage in the
+existing per-run workspace directory (eliminates the leak vector
+entirely, but requires reimplementing the tracked+untracked restore logic
+without git's native 3-way-merge semantics — a much larger, riskier
+rewrite) and keeping `refs/stash` with only the TOCTOU gap narrowed (still
+doesn't fully close it, per the analysis above).
+
+**Part 3/4 contract, updated (was Part 3/4, now effectively Part
+3.5/4):** `RunMetadata.dirt_stash_sha` keeps its field name and still
+holds a commit SHA — Part 4 (not yet implemented) can consume it exactly
+as originally planned; only the *anchoring* mechanism changed, not the
+field's meaning or the value it holds.
+
+Tests: `tests/test_apply_resumable.py`, 4 new
+(`test_capture_aborts_if_dirt_ref_already_exists`,
+`test_dirt_ref_namespace_isolated_from_user_stash` — proves namespace
+isolation from `refs/stash` directly rather than via race-timing,
+`test_orphaned_dirt_ref_shows_age_cleanup_hint`,
+`test_dirt_restore_succeeds_even_if_ref_delete_fails`), 3 renamed to match
+the new mechanism (`stash_store_ref`→`store_dirt_ref`,
+`stash_drop`→`delete_dirt_ref` throughout), 1 removed
+(`test_orphaned_stash_warning_suppressed_on_name_collision` — its
+name-collision scenario is no longer reachable once the namespace is
+exclusively PatchForge's own).
+
 ## Part 4 — Hardening / cleanup (future issue, may fold into Part 2/3)
 
 Anything from the review not already covered above:
@@ -391,9 +476,24 @@ Parts 2/3 are (re)implemented:
 - Part 1 merged to `main` via PR
   [#259](https://github.com/Argenis1412/PatchForge/pull/259) (issue
   [#258](https://github.com/Argenis1412/PatchForge/issues/258)).
-- Part 2 implemented on branch `fix/issue-260-resume-execution-part2`,
-  tracked as issue [#260](https://github.com/Argenis1412/PatchForge/issues/260).
-  Confirmed bugs 1, 2, 7, and 8 above are fixed as part of this work.
-- Parts 3-4 still need their own issues before implementation starts, each
-  following the standard workflow (clarify → criteria → challenge → plan
-  → adversarial review → approval → implement → diff review → tests → QA).
+- Part 2 merged to `main` via PR
+  [#261](https://github.com/Argenis1412/PatchForge/pull/261) (issue
+  [#260](https://github.com/Argenis1412/PatchForge/issues/260)). Confirmed
+  bugs 1, 2, 7, and 8 above are fixed as part of this work.
+- Part 3 merged to `main` via PR
+  [#263](https://github.com/Argenis1412/PatchForge/pull/263) (issue
+  [#262](https://github.com/Argenis1412/PatchForge/issues/262)). Confirmed
+  bugs 3, 4, 5, and 6 above are fixed as part of this work.
+- Part 3.5 (prerequisite for Part 4, not part of the original 4-part split
+  — see above) implemented on branch
+  `fix/issue-264-dirt-storage-hardening`, tracked as issue
+  [#264](https://github.com/Argenis1412/PatchForge/issues/264); QA green
+  (`ruff check .`, `ruff format --check .`, `pytest` — 933 passed, 5
+  skipped), not yet committed/pushed/PR'd.
+- Part 4 not yet started (blocked on Part 3.5 merging first); a detailed
+  plan for it — including a five-round adversarial-review trail that
+  rejected three prior designs (a two-write WAL scheme, a dirt-aware
+  `classify_lifecycle` extension) in favor of a smaller message-only
+  mitigation — lives in
+  `C:\Users\Visitante\.claude\plans\continuando-el-trabajo-de-sparkling-dragonfly.md`
+  pending its own issue.
