@@ -1044,3 +1044,43 @@ def test_scan_unsupported_reason_wording_no_longer_claims_path_only(valid_repo: 
     assert findings.v1_supported is False
     assert "Ruff not found (tried python -m ruff and PATH)" in findings.unsupported_reasons
     assert "Pytest not found (tried python -m pytest and PATH)" in findings.unsupported_reasons
+
+
+# ---------------------------------------------------------------------------
+# risk_budget guard (issue #269) — mirrors ci.execute()'s existing tests in
+# tests/test_ci_command.py (test_execute_rejects_invalid_risk_budget /
+# test_execute_rejects_high_risk_budget)
+# ---------------------------------------------------------------------------
+
+
+def test_execute_rejects_invalid_risk_budget(tmp_path: Path) -> None:
+    """execute() called directly (bypassing main.py's CLI check) rejects an
+    unrecognized risk_budget instead of silently treating it as "medium"."""
+    from orchestrator.commands.scan import execute
+    from orchestrator.schemas.config import TargetConfig
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    config = TargetConfig(target_path=repo, workspace_path=ws)
+
+    with pytest.raises(ValueError, match="Invalid risk_budget"):
+        execute(config=config, risk_budget="extreme")
+
+
+def test_execute_rejects_high_risk_budget(tmp_path: Path) -> None:
+    """execute() called directly still rejects "high" (#254), same as
+    ci.execute() -- must not silently reach the max_files/max_diff_lines
+    mapping."""
+    from orchestrator.commands.scan import execute
+    from orchestrator.schemas.config import TargetConfig
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    config = TargetConfig(target_path=repo, workspace_path=ws)
+
+    with pytest.raises(ValueError, match="Invalid risk_budget"):
+        execute(config=config, risk_budget="high")
