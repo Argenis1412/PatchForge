@@ -1131,7 +1131,9 @@ def test_resume_with_dirt_stash_gone(tmp_path: Path) -> None:
     assert apply_json["dirt_recovery_command"] == f"git stash apply --index {fake_sha}"
 
 
-def test_resume_after_dirt_already_restored_shows_honest_message(tmp_path: Path) -> None:
+def test_resume_after_dirt_already_restored_shows_honest_message(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Sub-case 2: the WAL crashed after dirt was already restored to the
     tree, so re-classification returns CONFLICT (the reverse-check no
     longer matches) -- but a fresh reverse-check confirms the patch content
@@ -1156,8 +1158,15 @@ def test_resume_after_dirt_already_restored_shows_honest_message(tmp_path: Path)
     assert exc.value.exit_code == 1
     assert run_metadata.dirt_stash_sha is not None
 
+    out = " ".join(capsys.readouterr().out.split())
+    assert "Check your working tree first" in out
+    assert "as a last resort" in out
+    assert "diverged from base commit" not in out
 
-def test_genuine_conflict_with_dirt_stash_present_shows_original_message(tmp_path: Path) -> None:
+
+def test_genuine_conflict_with_dirt_stash_present_shows_original_message(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A run that captured dirt can still hit a genuine CONFLICT unrelated
     to dirt (e.g. HEAD advanced) -- the reverse-check re-verification must
     not swallow that into a false "dirt already restored" message."""
@@ -1177,6 +1186,10 @@ def test_genuine_conflict_with_dirt_stash_present_shows_original_message(tmp_pat
         apply_execute(ctx["run_id"], workspace=ctx["workspace_path"])
 
     assert exc.value.exit_code == 1
+
+    out = " ".join(capsys.readouterr().out.split())
+    assert "diverged from base commit" in out
+    assert "Check your working tree first" not in out
 
 
 def test_stash_structure_valid(tmp_path: Path) -> None:
@@ -1697,7 +1710,9 @@ def test_happy_path_reuses_orphaned_dirt_ref_for_same_run_id(tmp_path: Path) -> 
     assert ref_check.returncode != 0
 
 
-def test_happy_path_aborts_on_dirt_ref_run_metadata_sha_mismatch(tmp_path: Path) -> None:
+def test_happy_path_aborts_on_dirt_ref_run_metadata_sha_mismatch(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """If the dirt-capture ref for this run_id points to a different SHA
     than run.json recorded, that is an unexplained divergence between the
     two sources of truth -- abort before any mutation rather than guess
@@ -1741,9 +1756,14 @@ def test_happy_path_aborts_on_dirt_ref_run_metadata_sha_mismatch(tmp_path: Path)
     assert ref_check.returncode == 0
     assert ref_check.stdout.strip() == ref_sha
 
+    out = " ".join(capsys.readouterr().out.split())
+    assert "does not match the SHA recorded" in out
+    assert ref_sha in out
+    assert "f" * 40 in out
+
 
 def test_happy_path_aborts_with_clear_message_when_orphaned_ref_and_new_dirty_tree(
-    tmp_path: Path,
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A retry that finds its own orphaned dirt ref AND a genuinely new
     dirty tree (the user worked on the repo again between the crash and
@@ -1793,6 +1813,11 @@ def test_happy_path_aborts_with_clear_message_when_orphaned_ref_and_new_dirty_tr
     )
     assert ref_check.returncode == 0
     assert ref_check.stdout.strip() == sha
+
+    out = " ".join(capsys.readouterr().out.split())
+    assert "cannot safely merge the old capture with the new" in out
+    assert "Recover the old capture first" in out
+    assert "Discard the old capture" in out
 
 
 def test_dirt_untracked_filename_collision_with_patch_fails_cleanly(tmp_path: Path) -> None:
