@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -780,6 +781,90 @@ def _make_patch_diff(repo_dir: Path) -> str:
     return diff_text
 
 
+def _make_content_patch_diff(repo_dir: Path) -> str:
+    """Return a unified diff (as text) that changes `file.txt`'s content
+    from its committed value to `v2`. Leaves the working tree unchanged
+    (restored to the committed content)."""
+    target = repo_dir / "file.txt"
+    target.write_text("v2", encoding="utf-8")
+    _git("add", "-A", cwd=repo_dir)
+    diff_text = _git("diff", "--cached", cwd=repo_dir).stdout
+    _git("reset", cwd=repo_dir)
+    _git("checkout", "--", "file.txt", cwd=repo_dir)
+    return diff_text
+
+
+# ---------------------------------------------------------------------------
+# Part 4 hardening (issue #258 close-out): core.filemode=false regression
+# ---------------------------------------------------------------------------
+
+
+def test_working_tree_check_detects_real_content_divergence(tmp_path: Path) -> None:
+    """core.filemode=false (used by working_tree_equals_expected_state's
+    diff-files check, git.py:609-624) must not mask a genuine content
+    difference between the working tree and the expected baseline+patch
+    state -- only mode-only differences may be ignored."""
+    from orchestrator.git import head_tree_sha, working_tree_equals_expected_state
+
+    repo_dir = tmp_path / "repo"
+    _init_repo(repo_dir)
+    baseline_tree = head_tree_sha(repo_dir)
+    assert baseline_tree is not None
+
+    diff_text = _make_content_patch_diff(repo_dir)
+    patch_path = tmp_path / "patch.diff"
+    # newline="" preserves the diff's exact LF line endings -- write_text's
+    # default universal-newline translation on Windows would rewrite them
+    # to CRLF, corrupting the "\ No newline at end of file" marker and
+    # making the patch fail to apply at all.
+    patch_path.write_text(diff_text, encoding="utf-8", newline="")
+
+    # Canary: prove the patch is well-formed and applies cleanly in this
+    # environment, isolating "content divergence correctly detected" from
+    # "git apply --cached failed for an unrelated reason" as the cause of
+    # the False result asserted below.
+    _git("apply", "--check", str(patch_path), cwd=repo_dir)
+
+    (repo_dir / "file.txt").write_text("v3-diverged", encoding="utf-8")
+
+    assert working_tree_equals_expected_state(patch_path, repo_dir, baseline_tree) is False
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file-mode bits are not meaningful on Windows")
+def test_working_tree_check_ignores_mode_only_difference(tmp_path: Path) -> None:
+    """A mode-only difference (identical content, different executable bit)
+    must not be reported as residue -- this is the literal AC: core.filemode=false
+    prevents mode-only false positives."""
+    from orchestrator.git import head_tree_sha, working_tree_equals_expected_state
+
+    repo_dir = tmp_path / "repo"
+    _init_repo(repo_dir)
+    baseline_tree = head_tree_sha(repo_dir)
+    assert baseline_tree is not None
+
+    diff_text = _make_content_patch_diff(repo_dir)
+    patch_path = tmp_path / "patch.diff"
+    # newline="" preserves the diff's exact LF line endings -- write_text's
+    # default universal-newline translation on Windows would rewrite them
+    # to CRLF, corrupting the "\ No newline at end of file" marker and
+    # making the patch fail to apply at all.
+    patch_path.write_text(diff_text, encoding="utf-8", newline="")
+
+    target = repo_dir / "file.txt"
+    target.write_text("v2", encoding="utf-8")
+    os.chmod(target, 0o755)
+
+    # Canary: prove a real, git-observable mode difference exists in this
+    # environment before trusting a True result below -- rules out chmod
+    # silently no-op'ing on this filesystem, and rules out this
+    # environment's git already forcing core.filemode=false globally
+    # (either of which would make the assertion below vacuous).
+    summary = _git("diff", "--summary", "HEAD", "--", "file.txt", cwd=repo_dir).stdout
+    assert "mode change" in summary
+
+    assert working_tree_equals_expected_state(patch_path, repo_dir, baseline_tree) is True
+
+
 def _setup_allow_dirty_run(
     tmp_path: Path,
     *,
@@ -1186,6 +1271,33 @@ def test_genuine_conflict_with_dirt_stash_present_shows_original_message(
         apply_execute(ctx["run_id"], workspace=ctx["workspace_path"])
 
     assert exc.value.exit_code == 1
+
+    out = " ".join(capsys.readouterr().out.split())
+    assert "diverged from base commit" in out
+    assert "Check your working tree first" not in out
+
+
+def test_genuine_conflict_without_dirt_shows_original_message(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A run that never captured dirt (no --allow-dirty) hitting a genuine
+    CONFLICT must show the plain original message -- the dirt-aware
+    reverse-check branch (guarded by `if run_metadata.dirt_stash_sha:`)
+    must not even run when there is no dirt to re-verify against."""
+    ctx = _setup_resumable_run(tmp_path, capture_dirt=False)
+
+    with (
+        patch(
+            "orchestrator.lifecycle.classify_lifecycle",
+            return_value=PatchLifecycleState.CONFLICT,
+        ),
+        patch("orchestrator.git.try_apply_dry_run_reverse") as reverse_mock,
+        pytest.raises(typer.Exit) as exc,
+    ):
+        apply_execute(ctx["run_id"], workspace=ctx["workspace_path"])
+
+    assert exc.value.exit_code == 1
+    reverse_mock.assert_not_called()
 
     out = " ".join(capsys.readouterr().out.split())
     assert "diverged from base commit" in out

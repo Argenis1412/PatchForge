@@ -19,6 +19,20 @@
 
 ## Log
 
+### [2026-07-19] Issue #258 (all parts closed) — crash-window gap in dirt capture is inherent to the current design, not fixed
+
+- **File:** `src/orchestrator/commands/apply.py` (`--allow-dirty` dirt capture: `stash_create_dirt` + reset onto the target branch), `src/orchestrator/git.py` (`stash_create_dirt`, `store_dirt_ref`)
+- **Debt:** If the process crashes after dirt is captured (Part 3, issue #262) but before the apply finishes, the captured dirt sits in a private ref (`refs/patchforge/dirt/{run_id}`, Part 3.5) that the user doesn't know about until the startup advisory catches it on a later invocation. This is inherent to the current approach ("Camino A": reset the main working tree in place, capture dirt as a git object) rather than a bug — a stronger guarantee would require resetting/mutating a separate `git worktree add` checkout instead of the user's main tree, so the main tree is never in a transiently-dirt-free state to begin with. Discussed and deliberately deferred during Part 3's adversarial review as a larger architectural change, reaffirmed out of scope during Part 4 (issue #266). Not blocking for closing #258 — the orphan-advisory (Part 3.5/4) mitigates it by surfacing orphaned refs on the next invocation.
+- **Discovered by:** Part 3 adversarial review (originally tracked in `docs/context/plan-issue-258-resumable-apply.md`, removed after all 4 parts of #258 merged — this entry preserves the deferred idea so it isn't lost).
+- **Why deferred:** Larger architectural change (worktree-based apply execution) than any single part of #258's scope; revisit only if the crash-window gap proves to matter in practice (no data-loss incident reported so far, only a UX gap bridged by the orphan advisory).
+
+### [2026-07-19] Issue #258 close-out — `classify_lifecycle`'s consumption of `working_tree_equals_expected_state` is only ever tested against a mock
+
+- **File:** `tests/test_lifecycle.py` (mocks `orchestrator.lifecycle.working_tree_equals_expected_state` in all `_probe_already_applied` tests), `tests/test_apply_resumable.py` (new `test_working_tree_check_detects_real_content_divergence` / `test_working_tree_check_ignores_mode_only_difference`, real/unmocked)
+- **Debt:** The two regression tests closing out #258's remaining AC exercise `working_tree_equals_expected_state` (`src/orchestrator/git.py`) directly, with real git subprocesses, proving the `core.filemode=false` diff-files check correctly ignores mode-only differences while still catching real content divergence. They do not go through the actual caller, `_probe_already_applied` → `classify_lifecycle` (`src/orchestrator/lifecycle.py:79-113`), which is exercised only against a mocked `working_tree_equals_expected_state` in `test_lifecycle.py`. A regression in the wiring between the two (e.g. an argument passed in the wrong order or a return value inverted) would not be caught by either test file today.
+- **Discovered by:** `/challenge-ac` and `/adversarial` passes during planning for the #258 close-out.
+- **Why deferred:** Pre-existing gap, not introduced by this change — `test_lifecycle.py` already mocked this function before these tests were added. Closing it would mean adding a real (non-mocked) end-to-end test through `classify_lifecycle`, which is a larger, separate scope decision (how much of `test_lifecycle.py`'s mocking strategy to unwind) than the two narrowly-scoped regression tests #258's AC actually asked for.
+
 ### [2026-07-19] Issue #266 (Part 4 of #258) — `run_metadata.dirt_stash_sha` can diverge from `wal_result.dirt_stash_sha` on a specific crash window
 
 - **File:** `src/orchestrator/commands/apply.py` (happy-path dirt capture, around the `force_reset_apply` call and the `run.json` write that follows it)

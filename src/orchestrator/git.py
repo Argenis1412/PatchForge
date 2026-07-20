@@ -571,9 +571,24 @@ def _working_tree_check(
         # report every legitimately-matching file as residue (verified
         # empirically). Refreshing the temp index against the real working
         # tree files fixes the cached stat so the later hash comparison
-        # actually runs.
+        # actually runs. `-c core.filemode=false` must match Step 4's
+        # override here too: under the repo's real default
+        # (core.filemode=true on Linux/macOS), a working-tree file whose
+        # only difference from the index is its executable bit can't be
+        # cleanly refreshed, leaving its cached stat stale -- which then
+        # trips the exact size-based false-positive this refresh exists to
+        # prevent, this time via a genuinely mode-only change instead of a
+        # zeroed stat (verified empirically via CI, Linux runner).
         subprocess.run(
-            ["git", "-C", str(repo_path), "update-index", "--refresh"],
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "-c",
+                "core.filemode=false",
+                "update-index",
+                "--refresh",
+            ],
             capture_output=True,
             text=True,
             timeout=30,
