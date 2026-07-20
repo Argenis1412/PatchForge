@@ -5,6 +5,7 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
+from typing import Optional
 
 from orchestrator.schemas.git import (
     ApplyCheckStatus,
@@ -852,6 +853,32 @@ def store_dirt_ref(repo_path: Path, run_id: str, stash_sha: str) -> bool:
     ref = dirt_ref_name(run_id)
     res = _run_git_safe(["git", "-C", str(repo_path), "update-ref", ref, stash_sha, ""])
     return res.returncode == 0
+
+
+def resolve_dirt_ref(repo_path: Path, run_id: str) -> Optional[str]:
+    """Return the SHA a run's dirt-capture ref points to, or None if absent.
+
+    Read-only (``git show-ref --verify``). A missing ref is reported by
+    git as a fatal "not a valid ref" error (exit 128), the same exit code
+    used for other fatal conditions (e.g. not a git repository) -- so exit
+    code alone cannot distinguish "ref absent" from "cannot determine
+    state". Only the specific "not a valid ref" message is treated as
+    None; any other failure (fatal git error, git not found, timeout)
+    raises RuntimeError instead. Silently treating an undiagnosable error
+    as "no ref" would let a caller decide there is nothing to reuse or
+    protect when the true state is simply unknown, which is the wrong
+    default for a check that guards against losing captured dirt.
+    """
+    ref = dirt_ref_name(run_id)
+    res = _run_git_safe(["git", "-C", str(repo_path), "show-ref", "--verify", "--hash", ref])
+    if res.returncode != 0:
+        if "not a valid ref" in res.stderr:
+            return None
+        raise RuntimeError(
+            f"Failed to check dirt-capture ref '{ref}' in '{repo_path}': {res.stderr.strip()}"
+        )
+    sha = res.stdout.strip()
+    return sha if sha else None
 
 
 def delete_dirt_ref(repo_path: Path, run_id: str, expected_sha: str) -> bool:

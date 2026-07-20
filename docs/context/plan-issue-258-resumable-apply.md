@@ -411,6 +411,77 @@ Anything from the review not already covered above:
   instead of resetting the main tree, discussed and deferred during Part 3
   adversarial review as a larger architectural change).
 
+## Part 4 — Dirt-aware automatic resume (issue #266, ✅ DONE)
+
+Closes the Part 3/4 contract left open above: automatic resume
+(`ALREADY_APPLIED`) no longer aborts when a prior `--allow-dirty` run
+captured dirt. Design (Option E, adopted after a combined eleven rounds of
+adversarial review across the original planning session and this issue's
+`/adversarial` pass) deliberately does **not** touch `lifecycle.py` —
+`classify_lifecycle` stays dirt-agnostic. All new logic lives in
+`apply.py`/`git.py`:
+
+- **Sub-case 1 (common case)** — crash before `stash_apply_dirt` was
+  attempted. Tree = baseline+patch, classifier returns `ALREADY_APPLIED`.
+  Fixed by removing the Part 3 hard-abort guard and propagating
+  `wal_result.dirt_stash_sha` into the resume path's local variable, so
+  the two shared restore blocks (success and validation-failure-rollback)
+  pick it up exactly as the happy path does.
+- **Sub-case 2 (narrow window)** — crash after `stash_apply_dirt`
+  succeeded but before the final WAL write. Classifier returns
+  `CONFLICT`. Not auto-resolved — an independent `try_apply_dry_run_reverse`
+  re-check (safe to duplicate: the action is identical either way, only
+  the message text changes) selects an honest "check your working tree
+  first" message over the generic CONFLICT message, with the recovery
+  command presented as a last resort, not a default action.
+- **Sub-case 0 (found during adversarial review, not in the original
+  scope)** — crash between the first WAL checkpoint and `apply_patch`
+  (including the branch checkout). Tree is clean, classifier returns
+  `VALID`, and the retry re-enters the happy path with no idea a dirt
+  capture already exists for this run. Fixed with `git.resolve_dirt_ref`
+  (new function, read-only `git show-ref --verify`, fail-closed to
+  `RuntimeError` on any git error other than "not a valid ref" so a
+  genuinely undiagnosable state is never silently treated as "no ref"):
+  the happy path checks for an orphaned ref for this `run_id` before
+  deciding whether to capture new dirt. Clean tree → reuse the SHA
+  (no new capture). Dirty tree → abort before any mutation with two
+  explicit manual recovery paths (old capture and new changes cannot be
+  safely merged automatically). SHA recorded in `run_metadata` diverges
+  from the ref's SHA → abort naming both SHAs (fail-closed).
+- **Orphan-advisory fix** — the startup advisory that warns about
+  unresumed dirt captures was (a) firing for the very run about to be
+  resumed in the same invocation, and (b) presenting an unconditional
+  `git stash apply --index` recovery command even for refs whose WAL
+  status was still `"applying"` (genuinely resumable, not abandoned) —
+  following that advice manually before the automatic resume ran would
+  have broken the resume's own isolation precondition. Fixed: the current
+  run's own `run_id` is excluded from the loop; for every other orphaned
+  ref, the warning always still fires (never hidden — an early "gate
+  visibility by status" design was rejected during adversarial review
+  because no code path ever transitions an abandoned `"applying"` run to
+  a terminal status, so hiding it would hide exactly the genuinely
+  abandoned case the advisory exists for), but if the WAL is readable and
+  still `"applying"`, the wording leads with "might be resumable, try
+  apply {run_id}" and degrades the manual command to a fallback.
+
+Empirically verified (not just asserted) during the design phase: `git
+stash apply --index` refuses per-file, not per-line, when captured dirt
+touches the same file the patch modifies — this bounds sub-case 2's
+reverse-check reliability to the common case (dirt in a disjoint file)
+with one known residual limitation (manual HEAD-drift between crash and
+resume, unrelated to dirt content, documented but not resolved — would
+require distinguishing "CONFLICT because of dirt" from "CONFLICT because
+HEAD moved" via a mechanism this design intentionally doesn't add).
+
+Diff: ~93 net lines across `apply.py` + `git.py` (well under the
+300-400/file, 1000-total thresholds), ~490 lines of tests. 18 new/rewritten
+tests total, including a direct regression fixing the empirically-verified
+untracked-filename-collision behavior (`git stash apply --index` fails
+clean, no corruption, no conflict markers) and 3 tests added during
+`/diff-review` to close coverage gaps found in the review pass (the
+`resolve_dirt_ref` `RuntimeError` path, its call site's error handling,
+and the SHA-mismatch abort).
+
 ## Confirmed bugs found in review (do not lose these)
 
 These were found reviewing the (now-reduced) implementation and are **not
@@ -485,15 +556,13 @@ Parts 2/3 are (re)implemented:
   [#262](https://github.com/Argenis1412/PatchForge/issues/262)). Confirmed
   bugs 3, 4, 5, and 6 above are fixed as part of this work.
 - Part 3.5 (prerequisite for Part 4, not part of the original 4-part split
-  — see above) implemented on branch
-  `fix/issue-264-dirt-storage-hardening`, tracked as issue
-  [#264](https://github.com/Argenis1412/PatchForge/issues/264); QA green
-  (`ruff check .`, `ruff format --check .`, `pytest` — 933 passed, 5
-  skipped), not yet committed/pushed/PR'd.
-- Part 4 not yet started (blocked on Part 3.5 merging first); a detailed
-  plan for it — including a five-round adversarial-review trail that
-  rejected three prior designs (a two-write WAL scheme, a dirt-aware
-  `classify_lifecycle` extension) in favor of a smaller message-only
-  mitigation — lives in
-  `C:\Users\Visitante\.claude\plans\continuando-el-trabajo-de-sparkling-dragonfly.md`
-  pending its own issue.
+  — see above) merged to `main` via PR
+  [#265](https://github.com/Argenis1412/PatchForge/pull/265) (issue
+  [#264](https://github.com/Argenis1412/PatchForge/issues/264)).
+- Part 4 (issue [#266](https://github.com/Argenis1412/PatchForge/issues/266))
+  implemented on branch `fix/issue-266-dirt-aware-resume`; QA green
+  (`ruff check .`, `ruff format --check .`, target suites 71 passed). Full
+  design rationale, `/challenge-ac` acceptance criteria, and `/adversarial`
+  + `/diff-review` findings trail live as comments on issue #266. This is
+  the last part of the original 4-part split from issue #258 — once
+  merged, issue #258 can close.

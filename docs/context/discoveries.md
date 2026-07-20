@@ -19,6 +19,13 @@
 
 ## Log
 
+### [2026-07-19] Issue #266 (Part 4 of #258) — `run_metadata.dirt_stash_sha` can diverge from `wal_result.dirt_stash_sha` on a specific crash window
+
+- **File:** `src/orchestrator/commands/apply.py` (happy-path dirt capture, around the `force_reset_apply` call and the `run.json` write that follows it)
+- **Debt:** If the process crashes between `force_reset_apply` succeeding (dirt already captured and referenced, tree already reset to clean) and the subsequent `workspace_mgr.write_run_json(run_id, run_metadata)` call that persists `dirt_stash_sha` to `run.json`, the two on-disk sources of truth diverge: the ref (`refs/patchforge/dirt/{run_id}`) and the first WAL checkpoint (`apply.json`, written later in the same happy-path pass) both end up with the correct SHA, but `run.json`'s `run_metadata.dirt_stash_sha` stays `None`. Part 4's sub-case 0 detection (`git.resolve_dirt_ref`) tolerates this correctly — its SHA-mismatch abort only fires when `run_metadata.dirt_stash_sha` is *not* `None` and disagrees, so a `None` value is treated as "not yet recorded" rather than a false mismatch, and the ref still gets reused. The only observable effect is degraded messaging in an already-narrow follow-on scenario: if sub-case 0 reuse then *also* crashes in sub-case 2's window (dirt restored, WAL not yet finalized), the CONFLICT-branch re-check in apply.py keys off `run_metadata.dirt_stash_sha`, which by then is populated by sub-case 0's own write — so in practice this only matters for a triple-crash sequence that never reaches that far. No data-loss path identified.
+- **Discovered by:** `/adversarial` review during Part 4 planning (documented in the pre-implementation plan as "hallazgo 6", confirmed pre-existing since Part 3, not introduced or worsened by Part 4).
+- **Why deferred:** Narrow crash window, no data loss, and closing it would require moving the `run.json` write earlier or making it atomic with the ref creation — a change to Part 3's happy-path dirt-capture sequencing that is out of scope for Part 4 (Option E deliberately touches only the resume/reuse paths, not the original capture sequence).
+
 ### ✅ [2026-07-17] Issue #252 (PR #253) — Module-probe cwd is a world-writable shared temp dir (RESOLVED in #257)
 
 - **File:** `src/orchestrator/tool_probe.py:21-26` (`_PROBE_CWD`, used by `_probe_module`)
