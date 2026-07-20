@@ -170,6 +170,41 @@ class TestClassifyLifecycle:
 
         assert result is PatchLifecycleState.ALREADY_APPLIED
 
+    def test_already_applied_with_dirt_stash_present(self, tmp_path):
+        """Part 4 lock-in: classify_lifecycle is dirt-agnostic -- a run
+        that captured dirt via --allow-dirty (run_metadata.dirt_stash_sha
+        set) still classifies as ALREADY_APPLIED under the same three
+        conditions as any other resumable run. Dirt-aware behavior lives
+        entirely in apply.py; the classifier itself is unmodified."""
+        from orchestrator.lifecycle import classify_lifecycle
+
+        base = "a" * 40
+        tree_sha = "c" * 40
+        ws = _make_workspace(self.RUN_ID, tmp_path, base_commit=base)
+        meta = ws.read_run_json.return_value
+        meta.dirt_stash_sha = "d" * 40
+        _write_patch(tmp_path / "runs" / self.RUN_ID)
+
+        with (
+            patch(
+                "orchestrator.lifecycle.try_apply_dry_run",
+                return_value=ApplyCheckStatus.CONFLICT,
+            ),
+            patch(
+                "orchestrator.lifecycle.try_apply_dry_run_reverse",
+                return_value=ApplyCheckStatus.PASSED,
+            ),
+            patch("orchestrator.lifecycle.get_current_head", return_value=base),
+            patch("orchestrator.lifecycle.head_tree_sha", return_value=tree_sha),
+            patch(
+                "orchestrator.lifecycle.working_tree_equals_expected_state",
+                return_value=True,
+            ),
+        ):
+            result = classify_lifecycle(self.RUN_ID, ws)
+
+        assert result is PatchLifecycleState.ALREADY_APPLIED
+
     def test_conflict_when_reverse_check_fails(self, tmp_path):
         """Reverse CONFLICT → stays CONFLICT even if HEAD matches."""
         from orchestrator.lifecycle import classify_lifecycle

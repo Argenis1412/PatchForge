@@ -121,19 +121,23 @@ def execute(
         force_reset_apply,
         has_merge_conflicts,
         repository_state,
+        resolve_dirt_ref,
         stash_apply_dirt,
         stash_create_dirt,
         store_dirt_ref,
+        try_apply_dry_run_reverse,
     )
     from orchestrator.lifecycle import classify_lifecycle
     from orchestrator.observability.events import log_event, log_failure
     from orchestrator.schemas.artifacts import (
+        APPLY_JSON,
         TARGET_CONFIG_SNAPSHOT_JSON,
         ApplyResult,
         PatchLifecycleState,
         compute_auto_apply_eligible,
     )
     from orchestrator.schemas.config import default_workspace_path
+    from orchestrator.schemas.git import ApplyCheckStatus
 
     # 1. Resolve workspace path and ensure run exists
     if workspace is not None:
@@ -235,7 +239,32 @@ def execute(
     # name-collision suppression is needed here, unlike the old
     # refs/stash-based design this replaced (which shared its addressing
     # with the user's own `git stash` workflow).
+    #
+    # This read happens before the repo lock is acquired below -- it is
+    # purely informational (no state is mutated from it), so a TOCTOU race
+    # with a concurrent worker at worst shows slightly stale wording, never
+    # an incorrect action.
     for orphan_run_id, orphan_sha in check_orphaned_dirt_refs(target_path):
+        if orphan_run_id == run_id:
+            # This run's own capture is handled by the resume/reuse path
+            # in this same invocation -- not an orphan from this run's
+            # perspective.
+            continue
+
+        resumable_hint = ""
+        orphan_apply_json = workspace_mgr.runs / orphan_run_id / APPLY_JSON
+        if orphan_apply_json.exists():
+            with contextlib.suppress(Exception):
+                orphan_wal = ApplyResult.model_validate_json(
+                    orphan_apply_json.read_text(encoding="utf-8")
+                )
+                if orphan_wal.status == "applying":
+                    resumable_hint = (
+                        f"This run might be resumable -- try: apply {orphan_run_id}. "
+                        "If that doesn't work, as a fallback, your working-tree state "
+                        "may be recoverable via: "
+                    )
+
         age_note = ""
         orphan_run_json = workspace_mgr.runs / orphan_run_id / "run.json"
         if orphan_run_json.exists():
@@ -247,12 +276,21 @@ def execute(
                         "candidate for manual cleanup if no longer needed: "
                         f"git update-ref -d {dirt_ref_name(orphan_run_id)} {orphan_sha}"
                     )
-        console.print(
-            "[bold yellow]Warning: found an unresumed --allow-dirty dirt "
-            f"capture for run {orphan_run_id} ({orphan_sha}). Your "
-            "working-tree state may be recoverable via: "
-            f"git stash apply --index {orphan_sha}.{age_note}[/bold yellow]"
-        )
+
+        if resumable_hint:
+            console.print(
+                "[bold yellow]Warning: found an unresumed --allow-dirty dirt "
+                f"capture for run {orphan_run_id} ({orphan_sha}). "
+                f"{resumable_hint}"
+                f"git stash apply --index {orphan_sha}.{age_note}[/bold yellow]"
+            )
+        else:
+            console.print(
+                "[bold yellow]Warning: found an unresumed --allow-dirty dirt "
+                f"capture for run {orphan_run_id} ({orphan_sha}). Your "
+                "working-tree state may be recoverable via: "
+                f"git stash apply --index {orphan_sha}.{age_note}[/bold yellow]"
+            )
 
     # Acquire repo lock BEFORE any isolation/lifecycle/branch/HEAD checks --
     # including the very first HEAD read immediately below. A
@@ -332,6 +370,32 @@ def execute(
         workspace_mgr.write_run_json(run_id, run_metadata)
 
         if lifecycle_state is PatchLifecycleState.CONFLICT:
+            # If this run captured dirt, the CONFLICT may actually be
+            # sub-case 2: a prior run restored the dirt successfully but
+            # crashed before writing the final WAL checkpoint, so
+            # classify_lifecycle's own reverse-check (based on the WAL's
+            # recorded state) no longer matches the live tree. Re-run the
+            # reverse-check independently here -- duplicating it is safe
+            # because the action taken (raise typer.Exit(code=1)) is
+            # identical either way; only the message text differs.
+            if run_metadata.dirt_stash_sha:
+                reverse = try_apply_dry_run_reverse(patch_path, target_path)
+                if reverse is ApplyCheckStatus.PASSED:
+                    console.print(
+                        "[bold red]Error: Patch lifecycle state is CONFLICT, but the "
+                        "patch content appears to already be present in the working "
+                        "tree.\n\nThis likely means a previous run restored your "
+                        "pre-existing working-tree changes (captured with "
+                        "--allow-dirty) but crashed before finishing.\n\n"
+                        "Check your working tree first -- if your pre-existing changes "
+                        "are already there alongside the patch, no recovery action is "
+                        "needed; just review or commit the current state.\n\n"
+                        "If your changes are missing, as a last resort:\n"
+                        f"  git stash apply --index {run_metadata.dirt_stash_sha}"
+                        "[/bold red]"
+                    )
+                    raise typer.Exit(code=1) from None
+
             console.print(
                 f"[bold red]Error: Patch lifecycle state is CONFLICT. "
                 f"HEAD {current_head(target_path)} has diverged from base commit "
@@ -414,9 +478,10 @@ def execute(
         pre_apply_head = current_head(target_path)
         pre_apply_branch = current_branch(target_path)
 
-        # Set on the happy path only when --allow-dirty captures dirt.
-        # Always None on the resume path -- the guard above already aborts
-        # resume whenever the WAL recorded a dirt capture.
+        # Populated from one of three sources: the happy path's own
+        # --allow-dirty capture (below), wal_result.dirt_stash_sha after a
+        # successful resume hydration, or an orphaned ref reused by
+        # sub-case 0 detection in the happy path.
         dirt_stash_sha: Optional[str] = None
 
         if lifecycle_state is PatchLifecycleState.ALREADY_APPLIED:
@@ -431,22 +496,17 @@ def execute(
                 "Attempting automatic resume...[/bold yellow]"
             )
 
-            # Part 3 / Part 4 contract: automatic resume does not (yet)
-            # know how to restore dirt captured by a prior --allow-dirty
-            # run. Resuming without restoring it would silently lose the
-            # user's pre-existing changes, so abort instead of proceeding.
-            if run_metadata.dirt_stash_sha:
-                console.print(
-                    "[bold red]Error: This run captured working-tree dirt with "
-                    "--allow-dirty. Automatic resume with dirt is not supported "
-                    "yet.\nTo recover your changes: git stash apply --index "
-                    f"{run_metadata.dirt_stash_sha}\n"
-                    "Then re-run apply on a clean tree.[/bold red]"
-                )
-                raise typer.Exit(code=1) from None
-
             wal_result = _hydrate_apply_result_for_resume(run_dir, run_id, patch_path)
             if wal_result is None:
+                dirt_note = ""
+                if run_metadata.dirt_stash_sha:
+                    dirt_note = (
+                        "\n\nThis run also captured working-tree changes with "
+                        "--allow-dirty. Check your working tree first -- if your "
+                        "pre-existing changes are already present, no action is "
+                        "needed for them. Otherwise, as a last resort: "
+                        f"git stash apply --index {run_metadata.dirt_stash_sha}"
+                    )
                 console.print(
                     "[bold red]Error: ALREADY_APPLIED detected but apply.json is "
                     "missing, corrupt, not in an 'applying' state, or its backup "
@@ -456,9 +516,14 @@ def execute(
                     "  - Commit the changes yourself, or\n"
                     "  - Discard them ('git reset --hard "
                     f"{run_metadata.base_commit}' and 'git clean -fd') and "
-                    "re-run apply.[/bold red]"
+                    f"re-run apply.{dirt_note}[/bold red]"
                 )
                 raise typer.Exit(code=1) from None
+
+            # Propagate the dirt SHA the WAL recorded so the shared restore
+            # blocks below (success and validation-failure-rollback) pick
+            # it up the same way the happy path does.
+            dirt_stash_sha = wal_result.dirt_stash_sha
 
             # Triple isolation verification: HEAD, live branch, and
             # residue-free tree (already verified by classify_lifecycle)
@@ -521,6 +586,7 @@ def execute(
                 data={
                     "lifecycle_state": "ALREADY_APPLIED",
                     "wal_branch": wal_result.branch,
+                    "dirt_stash_sha": dirt_stash_sha,
                 },
                 logs_dir=logs_dir,
                 run_dir=run_dir,
@@ -536,6 +602,60 @@ def execute(
             except ValueError as exc:
                 console.print(f"[bold red]Git Error: {exc}[/bold red]")
                 raise typer.Exit(code=1) from None
+
+            # Sub-case 0: a prior attempt may have captured dirt and reset
+            # the tree to clean (checkpoint 1 of the WAL, before
+            # apply_patch) and then crashed before applying the patch --
+            # classify_lifecycle sees a clean tree at base_commit and
+            # returns VALID, not ALREADY_APPLIED, so this retry lands here
+            # in the happy path rather than the resume path above. Detect
+            # that orphaned capture before deciding whether to capture new
+            # dirt, so it is reused instead of silently abandoned. Must run
+            # before the is_clean gate below: the orphaned-ref-plus-clean-
+            # tree case is exactly the one that gate would otherwise skip
+            # right past.
+            try:
+                existing_dirt_sha = resolve_dirt_ref(target_path, run_id)
+            except RuntimeError as exc:
+                console.print(f"[bold red]Git Error: {exc}[/bold red]")
+                raise typer.Exit(code=1) from None
+            if existing_dirt_sha is not None:
+                if (
+                    run_metadata.dirt_stash_sha is not None
+                    and run_metadata.dirt_stash_sha != existing_dirt_sha
+                ):
+                    console.print(
+                        "[bold red]Error: Found a dirt-capture ref for this run, but "
+                        f"its SHA ({existing_dirt_sha}) does not match the SHA recorded "
+                        f"in this run's metadata ({run_metadata.dirt_stash_sha}). This "
+                        "is an unexpected state -- aborting to avoid data loss.\n"
+                        "To investigate:\n"
+                        f"  git show {existing_dirt_sha}\n"
+                        f"  git show {run_metadata.dirt_stash_sha}[/bold red]"
+                    )
+                    raise typer.Exit(code=1) from None
+
+                if not git_state.is_clean:
+                    console.print(
+                        "[bold red]Error: This run has a dirt capture from a prior "
+                        f"interrupted attempt ({existing_dirt_sha}), but the working "
+                        "tree also has new uncommitted changes.\n\n"
+                        "PatchForge cannot safely merge the old capture with the new "
+                        "changes. Aborting before any mutation. Choose one:\n"
+                        "  1. Recover the old capture first:\n"
+                        f"     git stash apply --index {existing_dirt_sha}\n"
+                        "     Then commit or stash everything and re-run apply.\n"
+                        "  2. Discard the old capture:\n"
+                        f"     git update-ref -d {dirt_ref_name(run_id)} {existing_dirt_sha}\n"
+                        "     Then re-run apply (your current changes will be captured "
+                        "fresh).[/bold red]"
+                    )
+                    raise typer.Exit(code=1) from None
+
+                dirt_stash_sha = existing_dirt_sha
+                if run_metadata.dirt_stash_sha != existing_dirt_sha:
+                    run_metadata.dirt_stash_sha = existing_dirt_sha
+                    workspace_mgr.write_run_json(run_id, run_metadata)
 
             if not git_state.is_clean:
                 if not allow_dirty:
