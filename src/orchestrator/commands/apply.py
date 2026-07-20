@@ -330,26 +330,11 @@ def execute(
             )
             raise typer.Exit(code=1) from None
 
-        if current_head_sha != run_metadata.base_commit:
-            expected = run_metadata.base_commit
-            console.print(
-                f"[bold red]Error: Repository HEAD has changed since preview. "
-                f"Expected {expected}, found {current_head_sha}. "
-                "Please re-run scan/preview or rebase/inspect.[/bold red]"
-            )
-            failure_path = run_dir / "failure.json"
-            failure_path.write_text(
-                json.dumps(
-                    {
-                        "error": "HEAD has changed",
-                        "expected": run_metadata.base_commit,
-                        "current": current_head_sha,
-                    },
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
-            raise typer.Exit(code=1) from None
+        # NOTE: no early "HEAD has changed" check here -- classify_lifecycle()
+        # below is the single dispatcher for HEAD-divergence outcomes
+        # (REBASEABLE if the patch still applies, CONFLICT otherwise). An
+        # early exit here would make the REBASEABLE branch unreachable in
+        # the normal flow (see docs/context/discoveries.md, issue #270).
 
         # Bootstrap target environment. NOTE: TargetConfig.load() is NOT
         # called here -- it reads orchestrator.json and walks the filesystem,
