@@ -49,7 +49,18 @@ def execute(
             Defaults to 'low'.
         json_output: When ``True``, emit machine-readable JSON to stdout
             and redirect progress/spinner output to stderr.
+
+    Raises:
+        ValueError: If `risk_budget` is not one of `None`, `"low"`, or
+            `"medium"`. This is a precondition check on the caller's input,
+            not a scan-result failure -- it runs before `run_id` is
+            generated, so unlike every other failure path in this function
+            it is not persisted to `run.json` or logged via `log_event`.
+            Mirrors `ci.execute()`'s identical guard.
     """
+    if risk_budget is not None and risk_budget not in ("low", "medium"):
+        raise ValueError(f"Invalid risk_budget: {risk_budget!r}. Must be 'low' or 'medium'.")
+
     ui = Console(stderr=True) if json_output else console
 
     if not json_output:
