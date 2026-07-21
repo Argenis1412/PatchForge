@@ -1,4 +1,5 @@
 """Apply the validated patch to the target repository."""
+# noqa: module entry point
 
 from __future__ import annotations
 
