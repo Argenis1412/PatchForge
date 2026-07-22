@@ -32,6 +32,11 @@ class FileChange(BaseModel):
     tokens_used: int = 0
     cost_usd: float = 0.0
     provider_name: str | None = None  # provider (gemini/openrouter/claude) that generated this
+    # Set when a provider chain call actually succeeded (i.e. `provider_name`
+    # above is set). `primary_failure_category` is None if the primary
+    # provider succeeded outright (no fallback occurred).
+    primary_provider_attempted: str | None = None
+    primary_failure_category: str | None = None
 
 
 class ExecutorOutput(BaseModel):

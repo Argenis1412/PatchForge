@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 
 from orchestrator.agents.architect import run as run_architect
+from orchestrator.agents.executor import collect_fallback_changes, log_fallback_events
 from orchestrator.agents.executor import run as run_executor
 from orchestrator.agents.scout import run as run_scout
 from orchestrator.agents.validator import run as run_validator
@@ -157,7 +158,13 @@ class Pipeline:
                 self._stage_executor(architect_output)
             elif self.from_stage == "executor":
                 executor_result = self._load_stage_output(ExecutorOutput, "executor")
-                self._apply_executor_results(executor_result, model_used=executor_result.model)
+                # No log_fallback_events call here (deliberately): this stage's
+                # provider_fallback event, if any, was already emitted once
+                # during the original fresh run that produced this persisted
+                # output. Re-emitting on every resume would duplicate
+                # telemetry under a new trace_id and mislabel a skipped stage
+                # as active executor work.
+                self._apply_executor_results(executor_result)
 
             # ── Stage: Validator ────────────────────────────────────────────
             self._stage_validator()
@@ -267,7 +274,7 @@ class Pipeline:
             self.run.architect_meta = AgentMeta(status="failed", error=str(exc), latency_ms=_ms(t0))
             raise PipelineAbortError(f"architect failed: {exc}", stage="architect") from exc
 
-    def _apply_executor_results(self, result: ExecutorOutput, model_used: str = "unknown") -> None:
+    def _apply_executor_results(self, result: ExecutorOutput) -> None:
         self.run.tasks_total = len(result.applied) + len(result.pending_review) + len(result.errors)
         for change in result.applied:
             self.run.task_results.append(
@@ -275,7 +282,7 @@ class Pipeline:
                     task_id=change.task_id,
                     status="applied",
                     risk_level="low",
-                    model_used=model_used,
+                    model_used=change.provider_name or "n/a",
                 )
             )
             self.run.tasks_applied += 1
@@ -285,7 +292,7 @@ class Pipeline:
                     task_id=change.task_id,
                     status="diff_pending_review",
                     risk_level="high",
-                    model_used=model_used,
+                    model_used=change.provider_name or "n/a",
                 )
             )
             self.run.pending_human_review.append(change.diff)
@@ -296,7 +303,7 @@ class Pipeline:
                     task_id=change.task_id,
                     status="failed",
                     risk_level="low",
-                    model_used=model_used,
+                    model_used=change.provider_name or "n/a",
                     error=change.error,
                 )
             )
@@ -318,7 +325,14 @@ class Pipeline:
             )
             self.run.executor_meta = AgentMeta(status="success", latency_ms=_ms(t0), **meta)
             self._persist_stage_output("executor", result)
-            self._apply_executor_results(result, model_used=meta.get("model_used", "unknown"))
+            log_fallback_events(
+                collect_fallback_changes(result),
+                run_id=self.run.run_id,
+                trace_id=self.trace_id,
+                logs_dir=self.config.workspace_path / "logs",
+                run_dir=self.workspace.run_dir(self.run.run_id),
+            )
+            self._apply_executor_results(result)
             self._log_event(
                 "stage_end",
                 stage="executor",

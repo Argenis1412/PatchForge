@@ -4,6 +4,8 @@ from __future__ import annotations
 
 __all__ = [
     "PROJECT_ROOT",
+    "collect_fallback_changes",
+    "log_fallback_events",
     "rollback_to_commit",
     "run",
 ]
@@ -23,6 +25,8 @@ from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.executor_output import ExecutorOutput, FileChange, TaskStatus
 
 from . import applier as _applier
+from .fallback import collect_fallback_changes as collect_fallback_changes
+from .fallback import log_fallback_events as log_fallback_events
 from .logging import _get_logger
 from .providers import KNOWN_PROVIDER_NAMES, MODEL_CLAUDE, _get_model, init_provider_models
 from .rollback import rollback_to_commit as rollback_to_commit

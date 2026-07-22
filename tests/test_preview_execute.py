@@ -443,6 +443,191 @@ def test_validation_fails(env, monkeypatch: pytest.MonkeyPatch) -> None:
     assert val["overall_passed"] is False
 
 
+# ── D-011d Part 2: executor-side provider fallback warning ─────────────────
+
+
+def _read_pipeline_events(logs_dir: Path) -> list[dict]:
+    jsonl = logs_dir / "pipeline.jsonl"
+    if not jsonl.exists():
+        return []
+    return [json.loads(line) for line in jsonl.read_text(encoding="utf-8").splitlines() if line]
+
+
+def test_fallback_prints_warning_and_emits_event(
+    env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    run_id = env["run_id"]
+
+    diff_text = "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-hello\n+world"
+    output = ExecutorOutput(
+        applied=[
+            FileChange(
+                task_id="T1",
+                file="file.txt",
+                status=TaskStatus.APPLIED,
+                diff=diff_text,
+                provider_name="openrouter",
+                primary_provider_attempted="gemini",
+                primary_failure_category="credit_exhausted",
+            )
+        ],
+    )
+
+    monkeypatch.setattr("orchestrator.clients.bootstrap.bootstrap_environment", lambda **kw: None)
+    monkeypatch.setattr(
+        "orchestrator.agents.executor.run",
+        MagicMock(return_value=(output, {"cost_usd": 0.01})),
+    )
+    monkeypatch.setattr(
+        "orchestrator.risk.check_patch_gate",
+        MagicMock(return_value=RiskGateResult(passed=False, gate="size", reasons=["blocked"])),
+    )
+
+    with pytest.raises(typer.Exit):
+        _execute(run_id, workspace=env["workspace_path"])
+
+    captured = capsys.readouterr()
+    assert "Fallback" in captured.out
+    assert "gemini" in captured.out
+    assert "openrouter" in captured.out
+    assert "credit_exhausted" in captured.out
+
+    logs_dir = env["workspace_path"] / "logs"
+    events = _read_pipeline_events(logs_dir)
+    fallback_events = [e for e in events if e.get("event") == "provider_fallback"]
+    assert len(fallback_events) == 1
+    ev = fallback_events[0]
+    assert ev["stage"] == "executor"
+    assert ev["data"]["primary_provider"] == "gemini"
+    assert ev["data"]["used_provider"] == "openrouter"
+    assert ev["data"]["category"] == "credit_exhausted"
+
+
+def test_no_fallback_does_not_print_warning_or_emit_event(
+    env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    run_id = env["run_id"]
+
+    diff_text = "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-hello\n+world"
+    output = ExecutorOutput(
+        applied=[
+            FileChange(
+                task_id="T1",
+                file="file.txt",
+                status=TaskStatus.APPLIED,
+                diff=diff_text,
+                provider_name="gemini",
+                primary_provider_attempted="gemini",
+                primary_failure_category=None,
+            )
+        ],
+    )
+
+    monkeypatch.setattr("orchestrator.clients.bootstrap.bootstrap_environment", lambda **kw: None)
+    monkeypatch.setattr(
+        "orchestrator.agents.executor.run",
+        MagicMock(return_value=(output, {"cost_usd": 0.01})),
+    )
+    monkeypatch.setattr(
+        "orchestrator.risk.check_patch_gate",
+        MagicMock(return_value=RiskGateResult(passed=False, gate="size", reasons=["blocked"])),
+    )
+
+    with pytest.raises(typer.Exit):
+        _execute(run_id, workspace=env["workspace_path"])
+
+    captured = capsys.readouterr()
+    assert "Fallback" not in captured.out
+
+    logs_dir = env["workspace_path"] / "logs"
+    events = _read_pipeline_events(logs_dir)
+    fallback_events = [e for e in events if e.get("event") == "provider_fallback"]
+    assert fallback_events == []
+
+
+def test_syntax_error_after_fallback_excluded_from_warning(
+    env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A fallback provider's response that failed syntax validation is a
+    terminal failure — it must appear in the error panel but never in the
+    yellow fallback warning."""
+    run_id = env["run_id"]
+
+    output = ExecutorOutput(
+        errors=[
+            FileChange(
+                task_id="T1",
+                file="file.txt",
+                status=TaskStatus.ERROR,
+                error="not valid Python: line 3",
+                provider_name="openrouter",
+                primary_provider_attempted="gemini",
+                primary_failure_category="rate_limited",
+            )
+        ],
+    )
+
+    monkeypatch.setattr("orchestrator.clients.bootstrap.bootstrap_environment", lambda **kw: None)
+    monkeypatch.setattr(
+        "orchestrator.agents.executor.run",
+        MagicMock(return_value=(output, {"cost_usd": 0.01})),
+    )
+
+    with pytest.raises(typer.Exit):
+        _execute(run_id, workspace=env["workspace_path"])
+
+    captured = capsys.readouterr()
+    assert "Fallback" not in captured.out
+    assert "Executor Errors" in captured.out
+
+    logs_dir = env["workspace_path"] / "logs"
+    events = _read_pipeline_events(logs_dir)
+    fallback_events = [e for e in events if e.get("event") == "provider_fallback"]
+    assert fallback_events == []
+
+
+def test_fallback_warning_escapes_rich_markup(
+    env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A category or provider value containing literal brackets must not
+    raise MarkupError or corrupt the printed line."""
+    run_id = env["run_id"]
+
+    diff_text = "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-hello\n+world"
+    output = ExecutorOutput(
+        applied=[
+            FileChange(
+                task_id="T1",
+                file="file.txt",
+                status=TaskStatus.APPLIED,
+                diff=diff_text,
+                provider_name="openrouter",
+                primary_provider_attempted="gemini",
+                primary_failure_category="cred[it]_exhausted",
+            )
+        ],
+    )
+
+    monkeypatch.setattr("orchestrator.clients.bootstrap.bootstrap_environment", lambda **kw: None)
+    monkeypatch.setattr(
+        "orchestrator.agents.executor.run",
+        MagicMock(return_value=(output, {"cost_usd": 0.01})),
+    )
+    monkeypatch.setattr(
+        "orchestrator.risk.check_patch_gate",
+        MagicMock(return_value=RiskGateResult(passed=False, gate="size", reasons=["blocked"])),
+    )
+
+    exc_info = None
+    try:
+        _execute(run_id, workspace=env["workspace_path"])
+    except typer.Exit:
+        pass
+    except Exception as exc:  # noqa: BLE001 — assert no other exception type leaked
+        exc_info = exc
+    assert exc_info is None
+
+
 # ── Scenario 8: Happy path ──────────────────────────────────────────────────
 
 

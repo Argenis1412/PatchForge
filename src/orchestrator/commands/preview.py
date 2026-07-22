@@ -16,6 +16,7 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from orchestrator.agents import executor as executor_agent
+from orchestrator.agents.executor import collect_fallback_changes, log_fallback_events
 from orchestrator.agents.validator.runners import DEFAULT_TIMEOUT
 from orchestrator.clients.bootstrap import bootstrap_environment
 from orchestrator.observability.events import log_event, log_failure
@@ -197,7 +198,28 @@ def execute(
             console.print(f"[bold red]Executor failed: {exc}[/bold red]")
             raise typer.Exit(code=1) from None
 
-    # 4.5. Show error panel if any tasks failed
+    # 4.5 Warn + persist if the executor's provider chain silently fell back
+    # for any delivered task (D-011d, Part 2)
+    fallback_changes = collect_fallback_changes(executor_output)
+    if fallback_changes:
+        from rich.markup import escape
+
+        for change in fallback_changes:
+            console.print(
+                f"[yellow]Fallback ({change.file}): "
+                f"{escape(str(change.primary_provider_attempted))} falló "
+                f"({escape(str(change.primary_failure_category))}) → "
+                f"se usó {escape(str(change.provider_name))}[/yellow]"
+            )
+        log_fallback_events(
+            fallback_changes,
+            run_id=run_id,
+            trace_id=run_id,
+            logs_dir=logs_dir,
+            run_dir=run_dir,
+        )
+
+    # 4.6. Show error panel if any tasks failed
     if executor_output.errors:
         error_lines = []
         for err_change in executor_output.errors:
