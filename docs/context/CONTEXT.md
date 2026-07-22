@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-07-19
+> Last updated: 2026-07-22
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 951 passed, 6 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 966 passed, 6 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3). `SqliteCircuitBreakerStore` is now thread-safe (issue #219).
 
@@ -338,6 +338,10 @@ These must not change without a new ADR in `docs/adr/`:
   - **Close-out** (2026-07-19) — the two remaining unchecked AC boxes on #258 itself: `working_tree_equals_expected_state`'s `core.filemode=false` diff-files check doesn't mask real content divergence (and correctly ignores mode-only differences, POSIX-only, skipped on Windows) — `test_working_tree_check_detects_real_content_divergence`/`test_working_tree_check_ignores_mode_only_difference`; and a genuine CONFLICT with no dirt captured still shows the original plain message, proving the dirt-aware re-verification branch is skipped entirely rather than coincidentally producing the same text — `test_genuine_conflict_without_dirt_shows_original_message`. 3 new tests in `tests/test_apply_resumable.py`. Issue #258 closed.
 
 **Recent:**
+- ⏳ Dogfooding 011 (2026-07-22, `docs/experiments/dogfooding-011.md`) — first end-to-end validation of the full #258 chain + D-010 fixes against a real repo/real providers. Golden path (scan → plan → preview → apply) and ALREADY_APPLIED detection + auto-resume confirmed working. `--allow-dirty` dirt capture/restore (#258 Parts 3/4) not exercised — blocked by Anthropic credit exhaustion mid-session, not a code issue; revisit when credits are available, no code change needed to close this. Produced 4 new discoveries (D-011a–d, `docs/context/discoveries.md`):
+  - D-011a (issue-writing rule, doc-only, not started) and D-011b (executor file-size ceiling, redesign, explicitly out of scope for current phase) remain fully open.
+  - D-011c (executor misapplied `typer.Option()` to `plan.py::execute()`) — verified 2026-07-22 that the bug never reached `main` (only the disposable dogfooding clone); no code action needed.
+  - D-011d (silent provider fallback) — **Part 1 done:** issue #274, branch `fix/issue-274-provider-fallback-warning`, committed 2026-07-22 (not yet pushed/PR'd). `plan`'s architect step now prints a `[yellow]` warning + emits a `provider_fallback` `pipeline.jsonl` event when the provider chain falls back from the configured primary. Central mechanism lives in `ProviderChainResult`/`_call_chain()` (`agents/executor/providers.py`) so it's reusable without redesign. **Parts 2 (executor/`preview`) and 3 (`ci.py`) not started** — see `discoveries.md`'s D-011d entry for exact scope/open questions on each before picking them up. Full `/clarify` → `/challenge-ac` → `/adversarial` (×2) trail for Part 1.
 - ✅ Issue #223 — Validator PATH resolution via `sys.executable -m` (2026-07-12, PR #224): `run_ruff()`/`run_pytest()`
   defaults in `runners.py` changed from bare `["ruff", ...]`/`["pytest", ...]` to `[sys.executable, "-m", "ruff", ...]`/
   `[sys.executable, "-m", "pytest", ...]`. Fixes `VALIDATION_FAILED` false negatives on Windows clones without a
