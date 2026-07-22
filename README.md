@@ -38,7 +38,7 @@ Most AI coding tools optimize for speed. PatchForge optimizes for trust — chan
 ## Current Status
 
 - **Phase:** P4 — Trust & Configuration (P0/P1/P2/P3 complete)
-- **QA:** pytest 860 passed, 5 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+- **QA:** pytest +900 passed, 6 skipped | `ruff check src/ tests/` → 0 errors | `ruff format --check src/ tests/` → clean
 - [Roadmap](./docs/planning/roadmap.md) | [Full project context](./docs/context/CONTEXT.md)
 
 ## Quickstart
@@ -78,3 +78,8 @@ Requires at least one API key (`ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, or `OPENRO
 - **Contracts over prompts** — internal stages communicate through typed schemas
 - **Small reliable changes** — bounded refactors beat broad unreliable automation
 - **Human approval** — repository modification happens only at `apply`
+
+## Contributing & Security
+
+- Want to contribute? See [CONTRIBUTING.md](./CONTRIBUTING.md) for the development workflow, branch naming, and QA gates.
+- Found a security issue? See [SECURITY.md](./SECURITY.md) for how to report it.
