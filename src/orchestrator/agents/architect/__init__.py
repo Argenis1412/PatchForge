@@ -3,6 +3,8 @@
 __all__ = [
     "run",
     "run_from_issue",
+    "detect_fallback",
+    "log_architect_fallback",
 ]
 
 import json
@@ -10,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import Optional, Union
 
+from orchestrator.agents.architect.fallback import detect_fallback as detect_fallback
+from orchestrator.agents.architect.fallback import log_architect_fallback as log_architect_fallback
 from orchestrator.agents.architect.file_collector import build_target_files_block
 from orchestrator.agents.architect.prompts import ARCHITECT_PROMPT, ISSUE_ARCHITECT_PROMPT
 from orchestrator.agents.architect.provider import call_claude

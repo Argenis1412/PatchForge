@@ -1085,6 +1085,314 @@ class TestCiExecute:
         assert "empty patch" in (result.error or "").lower()
 
 
+# ── D-011d Part 3: provider fallback visibility in ci.py ────────────────
+
+
+def _read_pipeline_events(logs_dir: Path) -> list[dict]:
+    jsonl = logs_dir / "pipeline.jsonl"
+    if not jsonl.exists():
+        return []
+    return [json.loads(line) for line in jsonl.read_text(encoding="utf-8").splitlines() if line]
+
+
+def _make_fallback_executor_output():
+    from orchestrator.schemas.executor_output import ExecutorOutput, FileChange, TaskStatus
+
+    change = FileChange(
+        task_id="t1",
+        file="hello.py",
+        status=TaskStatus.APPLIED,
+        diff=(
+            "diff --git a/hello.py b/hello.py\n"
+            "--- a/hello.py\n"
+            "+++ b/hello.py\n"
+            "@@ -1 +1 @@\n"
+            "-print('hello')\n"
+            "+print('world')\n"
+        ),
+        provider_name="openrouter",
+        primary_provider_attempted="gemini",
+        primary_failure_category="credit_exhausted",
+    )
+    return ExecutorOutput(applied=[change])
+
+
+class TestCiProviderFallback:
+    """D-011d Part 3: ci.py must emit provider_fallback events (architect and
+    executor) that Parts 1-2 already emit from plan.py/preview.py/pipeline.py
+    but ci.py silently dropped, since it calls the agent layer directly."""
+
+    def test_architect_fallback_emits_event_and_warning(self, ci_repo, caplog):
+        from orchestrator.commands.ci import execute
+
+        repo, ws = ci_repo
+        arch_output = _make_arch_output()
+        issue_md = ws / "issue.md"
+        issue_md.write_text('---\ntitle: "test"\nnumber: 1\n---\n\nFix bug\n', encoding="utf-8")
+
+        with (
+            patch("orchestrator.scanners.python.scan", return_value=_make_scan_findings()),
+            patch(
+                "orchestrator.agents.architect.run_from_issue",
+                return_value=(
+                    arch_output,
+                    {
+                        "cost_usd": 0,
+                        "provider_name": "gemini",
+                        "primary_provider_attempted": "claude",
+                        "primary_failure_category": "credit_exhausted",
+                    },
+                ),
+            ),
+            patch(
+                "orchestrator.risk.check_plan_gate", return_value=_make_risk_result(passed=False)
+            ),
+            caplog.at_level("WARNING"),
+        ):
+            result = execute(target_path=repo, workspace_path=ws, issue_file=issue_md)
+
+        assert result.status == "plan_failed"
+        assert "fallback" in caplog.text.lower()
+        assert "claude" in caplog.text
+        assert "gemini" in caplog.text
+
+        events = _read_pipeline_events(ws / "logs")
+        fallback_events = [e for e in events if e.get("event") == "provider_fallback"]
+        assert len(fallback_events) == 1
+        ev = fallback_events[0]
+        assert ev["source"] == "ci"
+        assert ev["level"] == "warning"
+        assert ev["stage"] == "architect"
+        assert ev["data"]["primary_provider"] == "claude"
+        assert ev["data"]["used_provider"] == "gemini"
+
+    def test_architect_no_fallback_no_event(self, ci_repo, caplog):
+        from orchestrator.commands.ci import execute
+
+        repo, ws = ci_repo
+        arch_output = _make_arch_output()
+        issue_md = ws / "issue.md"
+        issue_md.write_text('---\ntitle: "test"\nnumber: 1\n---\n\nFix bug\n', encoding="utf-8")
+
+        with (
+            patch("orchestrator.scanners.python.scan", return_value=_make_scan_findings()),
+            patch(
+                "orchestrator.agents.architect.run_from_issue",
+                return_value=(
+                    arch_output,
+                    {
+                        "cost_usd": 0,
+                        "provider_name": "claude",
+                        "primary_provider_attempted": "claude",
+                    },
+                ),
+            ),
+            patch(
+                "orchestrator.risk.check_plan_gate", return_value=_make_risk_result(passed=False)
+            ),
+            caplog.at_level("WARNING"),
+        ):
+            execute(target_path=repo, workspace_path=ws, issue_file=issue_md)
+
+        assert "fallback" not in caplog.text.lower()
+        events = _read_pipeline_events(ws / "logs")
+        assert [e for e in events if e.get("event") == "provider_fallback"] == []
+
+    def test_architect_no_fallback_when_primary_provider_attempted_is_none(self, ci_repo, caplog):
+        """An empty/misconfigured provider chain (primary_provider_attempted
+        is None) must not be reported as a fallback — there is no "primary"
+        to have fallen back from."""
+        from orchestrator.commands.ci import execute
+
+        repo, ws = ci_repo
+        arch_output = _make_arch_output()
+        issue_md = ws / "issue.md"
+        issue_md.write_text('---\ntitle: "test"\nnumber: 1\n---\n\nFix bug\n', encoding="utf-8")
+
+        with (
+            patch("orchestrator.scanners.python.scan", return_value=_make_scan_findings()),
+            patch(
+                "orchestrator.agents.architect.run_from_issue",
+                return_value=(
+                    arch_output,
+                    {"cost_usd": 0, "provider_name": "claude", "primary_provider_attempted": None},
+                ),
+            ),
+            patch(
+                "orchestrator.risk.check_plan_gate", return_value=_make_risk_result(passed=False)
+            ),
+            caplog.at_level("WARNING"),
+        ):
+            execute(target_path=repo, workspace_path=ws, issue_file=issue_md)
+
+        assert "fallback" not in caplog.text.lower()
+        events = _read_pipeline_events(ws / "logs")
+        assert [e for e in events if e.get("event") == "provider_fallback"] == []
+
+    def test_architect_fallback_event_tolerates_oserror(self, ci_repo, monkeypatch, caplog):
+        """A disk/logging fault while emitting the fallback event must not
+        crash an otherwise-successful architect stage."""
+        from orchestrator.commands.ci import execute
+
+        repo, ws = ci_repo
+        arch_output = _make_arch_output()
+        issue_md = ws / "issue.md"
+        issue_md.write_text('---\ntitle: "test"\nnumber: 1\n---\n\nFix bug\n', encoding="utf-8")
+
+        def _raise(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr("orchestrator.agents.architect.fallback.log_event", _raise)
+
+        with (
+            patch("orchestrator.scanners.python.scan", return_value=_make_scan_findings()),
+            patch(
+                "orchestrator.agents.architect.run_from_issue",
+                return_value=(
+                    arch_output,
+                    {
+                        "cost_usd": 0,
+                        "provider_name": "gemini",
+                        "primary_provider_attempted": "claude",
+                        "primary_failure_category": "credit_exhausted",
+                    },
+                ),
+            ),
+            patch(
+                "orchestrator.risk.check_plan_gate", return_value=_make_risk_result(passed=False)
+            ),
+            caplog.at_level("WARNING"),
+        ):
+            result = execute(target_path=repo, workspace_path=ws, issue_file=issue_md)
+
+        # The run still completes with its normal status — the fallback
+        # event's own OSError never propagates and aborts the stage.
+        assert result.status == "plan_failed"
+        assert "Failed to emit provider_fallback event" in caplog.text
+
+    def test_executor_fallback_emits_event_and_warning(self, ci_repo, caplog):
+        from orchestrator.commands.ci import execute
+
+        repo, ws = ci_repo
+        arch_output = _make_arch_output()
+        exec_output = _make_fallback_executor_output()
+        issue_md = ws / "issue.md"
+        issue_md.write_text('---\ntitle: "test"\nnumber: 1\n---\n\nFix bug\n', encoding="utf-8")
+
+        with (
+            patch("orchestrator.scanners.python.scan", return_value=_make_scan_findings()),
+            patch(
+                "orchestrator.agents.architect.run_from_issue",
+                return_value=(arch_output, {"cost_usd": 0}),
+            ),
+            patch("orchestrator.risk.check_plan_gate", return_value=_make_risk_result()),
+            patch("orchestrator.schemas.experiment.Experiment"),
+            patch("orchestrator.workspace.WorkspaceManager.write_experiment"),
+            patch(
+                "orchestrator.agents.executor.run",
+                return_value=(exec_output, {"cost_usd": 0}),
+            ),
+            patch(
+                "orchestrator.risk.check_patch_gate", return_value=_make_risk_result(passed=False)
+            ),
+            caplog.at_level("WARNING"),
+        ):
+            result = execute(target_path=repo, workspace_path=ws, issue_file=issue_md)
+
+        assert result.status == "preview_failed"
+        assert "fallback" in caplog.text.lower()
+        assert "gemini" in caplog.text
+        assert "openrouter" in caplog.text
+
+        events = _read_pipeline_events(ws / "logs")
+        fallback_events = [e for e in events if e.get("event") == "provider_fallback"]
+        assert len(fallback_events) == 1
+        ev = fallback_events[0]
+        assert ev["source"] == "executor"
+        assert ev["level"] == "warning"
+        assert ev["stage"] == "executor"
+        assert ev["data"]["primary_provider"] == "gemini"
+        assert ev["data"]["used_provider"] == "openrouter"
+
+    def test_executor_no_fallback_no_event(self, ci_repo, caplog):
+        from orchestrator.commands.ci import execute
+
+        repo, ws = ci_repo
+        arch_output = _make_arch_output()
+        exec_output = _make_executor_output()  # matching provider, no fallback
+        issue_md = ws / "issue.md"
+        issue_md.write_text('---\ntitle: "test"\nnumber: 1\n---\n\nFix bug\n', encoding="utf-8")
+
+        with (
+            patch("orchestrator.scanners.python.scan", return_value=_make_scan_findings()),
+            patch(
+                "orchestrator.agents.architect.run_from_issue",
+                return_value=(arch_output, {"cost_usd": 0}),
+            ),
+            patch("orchestrator.risk.check_plan_gate", return_value=_make_risk_result()),
+            patch("orchestrator.schemas.experiment.Experiment"),
+            patch("orchestrator.workspace.WorkspaceManager.write_experiment"),
+            patch(
+                "orchestrator.agents.executor.run",
+                return_value=(exec_output, {"cost_usd": 0}),
+            ),
+            patch(
+                "orchestrator.risk.check_patch_gate", return_value=_make_risk_result(passed=False)
+            ),
+            caplog.at_level("WARNING"),
+        ):
+            execute(target_path=repo, workspace_path=ws, issue_file=issue_md)
+
+        assert "fallback" not in caplog.text.lower()
+        events = _read_pipeline_events(ws / "logs")
+        assert [e for e in events if e.get("event") == "provider_fallback"] == []
+
+    def test_executor_syntax_error_after_fallback_excluded(self, ci_repo, caplog):
+        """A fallback provider's response that later failed syntax
+        validation must not be reported as a delivered fallback — nothing
+        was actually applied. Confirms ci.py wires collect_fallback_changes
+        correctly (the filter logic itself is unit-tested in test_executor.py)."""
+        from orchestrator.commands.ci import execute
+        from orchestrator.schemas.executor_output import ExecutorOutput, FileChange, TaskStatus
+
+        repo, ws = ci_repo
+        arch_output = _make_arch_output()
+        error_change = FileChange(
+            task_id="t1",
+            file="hello.py",
+            status=TaskStatus.ERROR,
+            provider_name="openrouter",
+            primary_provider_attempted="gemini",
+            primary_failure_category="credit_exhausted",
+            error="not valid Python",
+        )
+        exec_output = ExecutorOutput(errors=[error_change])
+        issue_md = ws / "issue.md"
+        issue_md.write_text('---\ntitle: "test"\nnumber: 1\n---\n\nFix bug\n', encoding="utf-8")
+
+        with (
+            patch("orchestrator.scanners.python.scan", return_value=_make_scan_findings()),
+            patch(
+                "orchestrator.agents.architect.run_from_issue",
+                return_value=(arch_output, {"cost_usd": 0}),
+            ),
+            patch("orchestrator.risk.check_plan_gate", return_value=_make_risk_result()),
+            patch("orchestrator.schemas.experiment.Experiment"),
+            patch("orchestrator.workspace.WorkspaceManager.write_experiment"),
+            patch(
+                "orchestrator.agents.executor.run",
+                return_value=(exec_output, {"cost_usd": 0}),
+            ),
+            caplog.at_level("WARNING"),
+        ):
+            result = execute(target_path=repo, workspace_path=ws, issue_file=issue_md)
+
+        assert result.status == "preview_failed"
+        assert "fallback" not in caplog.text.lower()
+        events = _read_pipeline_events(ws / "logs")
+        assert [e for e in events if e.get("event") == "provider_fallback"] == []
+
+
 # ── Integration: targeted staging (no mock on subprocess.run) ──────────
 
 

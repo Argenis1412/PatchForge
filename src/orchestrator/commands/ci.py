@@ -244,6 +244,25 @@ def execute(
         workspace_mgr.write_run_json(run_id, run_metadata)
         return _fail("plan_failed", f"Architect failed: {exc}")
 
+    # Warn + persist if the provider chain silently fell back (D-011d, Part 3)
+    fallback = architect_agent.detect_fallback(arch_meta)
+    if fallback:
+        logger.warning(
+            "Architect used fallback provider %s (primary %s failed: %s)",
+            fallback.provider_used,
+            fallback.primary_provider_attempted,
+            fallback.failure_category or "unknown",
+        )
+        architect_agent.log_architect_fallback(
+            fallback,
+            run_id=run_id,
+            trace_id=run_id,
+            source="ci",
+            logs_dir=logs_dir,
+            run_dir=run_dir,
+            level="warning",
+        )
+
     for plan_task in arch_output.implementation_plan:
         if plan_task.risk_level == "high":
             plan_task.status = "blocked"
@@ -372,6 +391,26 @@ def execute(
         run_metadata.updated_at = datetime.now(timezone.utc)
         workspace_mgr.write_run_json(run_id, run_metadata)
         return _fail("preview_failed", f"Executor failed: {exc}")
+
+    # Warn + persist if the executor's provider chain silently fell back
+    # for any delivered task (D-011d, Part 3)
+    fallback_changes = executor_agent.collect_fallback_changes(executor_output)
+    if fallback_changes:
+        for change in fallback_changes:
+            logger.warning(
+                "Executor used fallback provider %s for %s (primary %s failed: %s)",
+                change.provider_name,
+                change.file,
+                change.primary_provider_attempted,
+                change.primary_failure_category or "unknown",
+            )
+        executor_agent.log_fallback_events(
+            fallback_changes,
+            run_id=run_id,
+            trace_id=run_id,
+            logs_dir=logs_dir,
+            run_dir=run_dir,
+        )
 
     diffs = []
     for change in executor_output.applied + executor_output.pending_review:
