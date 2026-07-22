@@ -62,6 +62,15 @@ def _meta(**overrides):
     return m
 
 
+def _read_pipeline_events(logs_dir):
+    import json as _json
+
+    jsonl = logs_dir / "pipeline.jsonl"
+    if not jsonl.exists():
+        return []
+    return [_json.loads(line) for line in jsonl.read_text(encoding="utf-8").splitlines() if line]
+
+
 def test_successful_run_completed(config, monkeypatch):
     monkeypatch.setattr(
         "orchestrator.pipeline.run_scout", MagicMock(return_value=(_scout_output(), _meta()))
@@ -450,6 +459,218 @@ def test_guard_future_version(config, monkeypatch):
     mock_architect.assert_not_called()
     assert exc_info.value.found == 2
     assert exc_info.value.expected == CURRENT_SCHEMA_VERSION
+
+
+# ---------------------------------------------------------------------------
+# D-011d Part 2 — executor-side provider fallback warning in pipeline.py
+# ---------------------------------------------------------------------------
+
+
+def _fallback_change(task_id="t1"):
+    return FileChange(
+        task_id=task_id,
+        file="x.py",
+        status="applied",
+        diff="--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-old\n+new",
+        provider_name="openrouter",
+        primary_provider_attempted="gemini",
+        primary_failure_category="credit_exhausted",
+    )
+
+
+def _no_fallback_change(task_id="t1", provider="gemini"):
+    return FileChange(
+        task_id=task_id,
+        file="x.py",
+        status="applied",
+        diff="--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-old\n+new",
+        provider_name=provider,
+        primary_provider_attempted=provider,
+        primary_failure_category=None,
+    )
+
+
+def test_stage_executor_emits_fallback_event(config, monkeypatch):
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_scout", MagicMock(return_value=(_scout_output(), _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_architect",
+        MagicMock(return_value=(_architect_output(), _meta())),
+    )
+    exec_out = ExecutorOutput(model="test", run_id="test", applied=[_fallback_change()], errors=[])
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_executor", MagicMock(return_value=(exec_out, _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_validator",
+        MagicMock(return_value=(_validator_output(passed=True), _meta())),
+    )
+
+    pipeline = Pipeline(config=config)
+    result = pipeline.execute(dry_run=False)
+    assert result.status == "completed"
+
+    events = _read_pipeline_events(config.workspace_path / "logs")
+    fallback_events = [e for e in events if e.get("event") == "provider_fallback"]
+    assert len(fallback_events) == 1
+    ev = fallback_events[0]
+    assert ev["stage"] == "executor"
+    assert ev["trace_id"] == pipeline.trace_id
+    assert ev["data"]["primary_provider"] == "gemini"
+    assert ev["data"]["used_provider"] == "openrouter"
+    assert ev["data"]["category"] == "credit_exhausted"
+
+
+def test_stage_executor_no_fallback_emits_no_event(config, monkeypatch):
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_scout", MagicMock(return_value=(_scout_output(), _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_architect",
+        MagicMock(return_value=(_architect_output(), _meta())),
+    )
+    exec_out = ExecutorOutput(
+        model="test", run_id="test", applied=[_no_fallback_change()], errors=[]
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_executor", MagicMock(return_value=(exec_out, _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_validator",
+        MagicMock(return_value=(_validator_output(passed=True), _meta())),
+    )
+
+    pipeline = Pipeline(config=config)
+    result = pipeline.execute(dry_run=False)
+    assert result.status == "completed"
+
+    events = _read_pipeline_events(config.workspace_path / "logs")
+    fallback_events = [e for e in events if e.get("event") == "provider_fallback"]
+    assert fallback_events == []
+
+
+def test_stage_executor_persist_failure_emits_no_fallback_event(config, monkeypatch):
+    """If persisting the executor's output fails, no provider_fallback event
+    should have been logged for a stage whose output isn't durably saved."""
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_scout", MagicMock(return_value=(_scout_output(), _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_architect",
+        MagicMock(return_value=(_architect_output(), _meta())),
+    )
+    exec_out = ExecutorOutput(model="test", run_id="test", applied=[_fallback_change()], errors=[])
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_executor", MagicMock(return_value=(exec_out, _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.Pipeline._persist_stage_output",
+        MagicMock(side_effect=OSError("disk full")),
+    )
+
+    pipeline = Pipeline(config=config)
+    result = pipeline.execute(dry_run=False)
+    assert result.status == "failed"
+
+    events = _read_pipeline_events(config.workspace_path / "logs")
+    fallback_events = [e for e in events if e.get("event") == "provider_fallback"]
+    assert fallback_events == []
+
+
+def test_resume_from_executor_does_not_reemit_fallback_event(config, monkeypatch):
+    """The event for any real fallback was already emitted once, during the
+    original fresh execution that produced the persisted file — resuming
+    must not duplicate it under a new trace_id."""
+    pipeline = Pipeline(config=config)
+    exec_out = ExecutorOutput(model="test", run_id="test", applied=[_fallback_change()], errors=[])
+    path = pipeline.workspace.outputs / f"executor_{pipeline.run.run_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(exec_out.model_dump_json())
+    pipeline.workspace.update_manifest("executor", f"executor_{pipeline.run.run_id}.json")
+
+    monkeypatch.setattr("orchestrator.pipeline.run_scout", MagicMock())
+    monkeypatch.setattr("orchestrator.pipeline.run_architect", MagicMock())
+    monkeypatch.setattr("orchestrator.pipeline.run_executor", MagicMock())
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_validator",
+        MagicMock(return_value=(_validator_output(passed=True), _meta())),
+    )
+
+    result = Pipeline(config=config, from_stage="executor").execute(dry_run=False)
+    assert result.status == "completed"
+    assert result.tasks_applied == 1
+
+    events = _read_pipeline_events(config.workspace_path / "logs")
+    fallback_events = [e for e in events if e.get("event") == "provider_fallback"]
+    assert fallback_events == []
+
+
+def test_task_result_model_used_reflects_actual_provider(config, monkeypatch):
+    """TaskResult.model_used must be the real per-task provider (or the
+    "n/a" sentinel), never the run-level aggregate config string."""
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_scout", MagicMock(return_value=(_scout_output(), _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_architect",
+        MagicMock(return_value=(_architect_output(), _meta())),
+    )
+    skipped_change = FileChange(
+        task_id="t2",
+        file="y.py",
+        status="skipped",
+        error="dependency t0 has status TaskStatus.ERROR",
+    )
+    exec_out = ExecutorOutput(
+        model="GM:gemini-2.5-flash|OR:openrouter/free|CL:claude-sonnet-4-6",
+        run_id="test",
+        applied=[_fallback_change(task_id="t1")],
+        errors=[skipped_change],
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_executor", MagicMock(return_value=(exec_out, _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_validator",
+        MagicMock(return_value=(_validator_output(passed=True), _meta())),
+    )
+
+    result = Pipeline(config=config).execute(dry_run=False)
+
+    by_task = {tr.task_id: tr.model_used for tr in result.task_results}
+    assert by_task["t1"] == "openrouter"
+    assert by_task["t2"] == "n/a"
+    assert "GM:" not in by_task["t1"]
+    assert "GM:" not in by_task["t2"]
+
+
+def test_stage_executor_tolerates_fallback_logging_failure(config, monkeypatch):
+    """A logging failure inside log_fallback_events must not crash an
+    otherwise-successful executor stage."""
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_scout", MagicMock(return_value=(_scout_output(), _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_architect",
+        MagicMock(return_value=(_architect_output(), _meta())),
+    )
+    exec_out = ExecutorOutput(model="test", run_id="test", applied=[_fallback_change()], errors=[])
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_executor", MagicMock(return_value=(exec_out, _meta()))
+    )
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_validator",
+        MagicMock(return_value=(_validator_output(passed=True), _meta())),
+    )
+    monkeypatch.setattr(
+        "orchestrator.agents.executor.fallback.log_event",
+        MagicMock(side_effect=OSError("disk full")),
+    )
+
+    result = Pipeline(config=config).execute(dry_run=False)
+    assert result.status == "completed"
+    assert result.tasks_applied == 1
 
 
 def test_guard_past_version(config, monkeypatch):

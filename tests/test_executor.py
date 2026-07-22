@@ -325,6 +325,364 @@ def test_categorize_failure_credit_and_rate_limit_substrings():
     assert _categorize_failure(other_exc) == "other"
 
 
+# ---------------------------------------------------------------------------
+# D-011d Part 2 — executor-side fallback fields on FileChange +
+# collect_fallback_changes filtering
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_apply_task_threads_fallback_fields_on_success(tmp_path, monkeypatch):
+    from orchestrator.agents.executor.applier import _apply_task
+
+    source_file = tmp_path / "test.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    task = Task(
+        task_id="t1",
+        title="change x",
+        description="change x to 2",
+        files_to_modify=["test.py"],
+        priority="high",
+        effort="low",
+        risk_level="low",
+        dependencies=[],
+    )
+
+    import anthropic
+
+    credit_exc = anthropic.APIError("402 credit balance too low", request=MagicMock(), body=None)
+
+    monkeypatch.setattr(
+        "orchestrator.agents.executor.providers._recoverable_exceptions",
+        lambda: (Exception,),
+    )
+    cb_gemini_mock = MagicMock()
+    cb_gemini_mock.call.side_effect = lambda fn: (_ for _ in ()).throw(credit_exc)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini_mock)
+
+    cb_openrouter_mock = MagicMock()
+    cb_openrouter_mock.call.side_effect = lambda fn: ("x = 2\n", 10, 5)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_openrouter", cb_openrouter_mock)
+
+    change = _apply_task(task, "run_fb1", tmp_path, staging)
+
+    assert change.status == "applied"
+    assert change.provider_name == "openrouter"
+    assert change.primary_provider_attempted == "gemini"
+    assert change.primary_failure_category == "credit_exhausted"
+
+
+@pytest.mark.unit
+def test_apply_task_no_fallback_success_has_matching_primary(tmp_path, monkeypatch):
+    from orchestrator.agents.executor.applier import _apply_task
+
+    source_file = tmp_path / "test.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    task = Task(
+        task_id="t1",
+        title="change x",
+        description="change x to 2",
+        files_to_modify=["test.py"],
+        priority="high",
+        effort="low",
+        risk_level="low",
+        dependencies=[],
+    )
+
+    cb_gemini_mock = MagicMock()
+    cb_gemini_mock.call.side_effect = lambda fn: ("x = 2\n", 10, 5)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini_mock)
+
+    change = _apply_task(task, "run_fb2", tmp_path, staging)
+
+    assert change.status == "applied"
+    assert change.provider_name == change.primary_provider_attempted == "gemini"
+    assert change.primary_failure_category is None
+
+
+@pytest.mark.unit
+def test_apply_task_threads_fallback_fields_on_noop(tmp_path, monkeypatch):
+    """A fallback whose response is idempotent (no diff) must still thread
+    the fallback fields onto the NOOP FileChange — a reachable combination
+    (primary fails, fallback's response happens to match the original)."""
+    from orchestrator.agents.executor.applier import _apply_task
+
+    source_file = tmp_path / "test.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    task = Task(
+        task_id="t1",
+        title="change x",
+        description="change x to 2",
+        files_to_modify=["test.py"],
+        priority="high",
+        effort="low",
+        risk_level="low",
+        dependencies=[],
+    )
+
+    monkeypatch.setattr(
+        "orchestrator.agents.executor.providers._recoverable_exceptions",
+        lambda: (Exception,),
+    )
+    cb_gemini_mock = MagicMock()
+    cb_gemini_mock.call.side_effect = lambda fn: (_ for _ in ()).throw(
+        Exception("circuit breaker open")
+    )
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini_mock)
+
+    cb_openrouter_mock = MagicMock()
+    cb_openrouter_mock.call.side_effect = lambda fn: ("x = 1\n", 10, 5)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_openrouter", cb_openrouter_mock)
+
+    change = _apply_task(task, "run_fb5", tmp_path, staging)
+
+    assert change.status == "noop"
+    assert change.provider_name == "openrouter"
+    assert change.primary_provider_attempted == "gemini"
+    assert change.primary_failure_category == "other"
+
+
+@pytest.mark.unit
+def test_apply_task_exhaustion_leaves_fallback_fields_none(tmp_path, monkeypatch):
+    from orchestrator.agents.executor.applier import _apply_task
+
+    source_file = tmp_path / "test.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    task = Task(
+        task_id="t1",
+        title="change x",
+        description="change x",
+        files_to_modify=["test.py"],
+        priority="high",
+        effort="low",
+        risk_level="low",
+        dependencies=[],
+    )
+
+    monkeypatch.setattr(
+        "orchestrator.agents.executor.providers._recoverable_exceptions",
+        lambda: (Exception,),
+    )
+    for cb_name in ("_cb_gemini", "_cb_openrouter", "_cb_claude"):
+        cb_mock = MagicMock()
+        cb_mock.call.side_effect = lambda fn: (_ for _ in ()).throw(Exception("boom"))
+        monkeypatch.setattr(f"orchestrator.agents.executor.providers.{cb_name}", cb_mock)
+
+    change = _apply_task(task, "run_fb3", tmp_path, staging)
+
+    assert change.status == "error"
+    assert change.provider_name is None
+    assert change.primary_provider_attempted is None
+    assert change.primary_failure_category is None
+
+
+@pytest.mark.unit
+def test_apply_task_syntax_error_after_fallback_still_carries_diagnostic_fields(
+    tmp_path, monkeypatch
+):
+    """A fallback provider's response can fail syntax validation and be
+    discarded — the fields are still populated for diagnostics, but (see
+    collect_fallback_changes tests below) must not trigger the warning."""
+    from orchestrator.agents.executor.applier import _apply_task
+
+    source_file = tmp_path / "test.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    task = Task(
+        task_id="t1",
+        title="change x",
+        description="change x",
+        files_to_modify=["test.py"],
+        priority="high",
+        effort="low",
+        risk_level="low",
+        dependencies=[],
+    )
+
+    import anthropic
+
+    rate_exc = anthropic.APIError("429 rate limit exceeded", request=MagicMock(), body=None)
+
+    monkeypatch.setattr(
+        "orchestrator.agents.executor.providers._recoverable_exceptions",
+        lambda: (Exception,),
+    )
+    cb_gemini_mock = MagicMock()
+    cb_gemini_mock.call.side_effect = lambda fn: (_ for _ in ()).throw(rate_exc)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini_mock)
+
+    cb_openrouter_mock = MagicMock()
+    cb_openrouter_mock.call.side_effect = lambda fn: ("<tool_call>not python</tool_call>", 10, 5)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_openrouter", cb_openrouter_mock)
+
+    change = _apply_task(task, "run_fb4", tmp_path, staging)
+
+    assert change.status == "error"
+    assert "not valid Python" in change.error
+    assert change.provider_name == "openrouter"
+    assert change.primary_provider_attempted == "gemini"
+    assert change.primary_failure_category == "rate_limited"
+
+
+@pytest.mark.unit
+def test_apply_task_dependency_skip_has_no_fallback_fields():
+    from orchestrator.schemas.executor_output import FileChange, TaskStatus
+
+    change = FileChange(
+        task_id="t1",
+        file="test.py",
+        status=TaskStatus.SKIPPED,
+        error="dependency t0 has status TaskStatus.ERROR",
+    )
+    assert change.provider_name is None
+    assert change.primary_provider_attempted is None
+    assert change.primary_failure_category is None
+
+
+# ---------------------------------------------------------------------------
+# D-011d Part 2 — collect_fallback_changes
+# ---------------------------------------------------------------------------
+
+
+def _fc(**overrides):
+    from orchestrator.schemas.executor_output import FileChange, TaskStatus
+
+    defaults = {
+        "task_id": "t1",
+        "file": "a.py",
+        "status": TaskStatus.APPLIED,
+        "provider_name": "openrouter",
+        "primary_provider_attempted": "gemini",
+        "primary_failure_category": "credit_exhausted",
+    }
+    defaults.update(overrides)
+    return FileChange(**defaults)
+
+
+@pytest.mark.unit
+def test_collect_fallback_changes_includes_genuine_fallback():
+    from orchestrator.agents.executor.fallback import collect_fallback_changes
+    from orchestrator.schemas.executor_output import ExecutorOutput
+
+    change = _fc()
+    result = ExecutorOutput(applied=[change])
+    assert collect_fallback_changes(result) == [change]
+
+
+@pytest.mark.unit
+def test_collect_fallback_changes_excludes_no_fallback_success():
+    from orchestrator.agents.executor.fallback import collect_fallback_changes
+    from orchestrator.schemas.executor_output import ExecutorOutput
+
+    change = _fc(provider_name="gemini", primary_provider_attempted="gemini")
+    result = ExecutorOutput(applied=[change])
+    assert collect_fallback_changes(result) == []
+
+
+@pytest.mark.unit
+def test_collect_fallback_changes_excludes_total_exhaustion():
+    from orchestrator.agents.executor.fallback import collect_fallback_changes
+    from orchestrator.schemas.executor_output import ExecutorOutput, TaskStatus
+
+    change = _fc(
+        status=TaskStatus.ERROR,
+        provider_name=None,
+        primary_provider_attempted=None,
+        primary_failure_category=None,
+        error="All providers failed for low-risk task: ...",
+    )
+    result = ExecutorOutput(errors=[change])
+    assert collect_fallback_changes(result) == []
+
+
+@pytest.mark.unit
+def test_collect_fallback_changes_excludes_syntax_error_after_fallback():
+    """The core round-2/round-3 adversarial fix: a fallback provider's
+    response that failed syntax validation must not be reported as a
+    successful fallback — nothing was actually delivered."""
+    from orchestrator.agents.executor.fallback import collect_fallback_changes
+    from orchestrator.schemas.executor_output import ExecutorOutput, TaskStatus
+
+    change = _fc(status=TaskStatus.ERROR, error="not valid Python")
+    result = ExecutorOutput(errors=[change])
+    assert collect_fallback_changes(result) == []
+
+
+@pytest.mark.unit
+def test_collect_fallback_changes_excludes_dependency_skip():
+    from orchestrator.agents.executor.fallback import collect_fallback_changes
+    from orchestrator.schemas.executor_output import ExecutorOutput, TaskStatus
+
+    change = _fc(
+        status=TaskStatus.SKIPPED,
+        provider_name=None,
+        primary_provider_attempted=None,
+        primary_failure_category=None,
+        error="dependency t0 has status TaskStatus.ERROR",
+    )
+    result = ExecutorOutput(errors=[change])
+    assert collect_fallback_changes(result) == []
+
+
+@pytest.mark.unit
+def test_collect_fallback_changes_includes_pending_review_fallback():
+    from orchestrator.agents.executor.fallback import collect_fallback_changes
+    from orchestrator.schemas.executor_output import ExecutorOutput, TaskStatus
+
+    change = _fc(status=TaskStatus.PENDING_REVIEW)
+    result = ExecutorOutput(pending_review=[change])
+    assert collect_fallback_changes(result) == [change]
+
+
+# ---------------------------------------------------------------------------
+# D-011d Part 2 — schema backward-compatibility
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_executor_output_parses_pre_part2_file_change_json():
+    """A FileChange serialized before the two new fields existed (no
+    primary_provider_attempted/primary_failure_category keys) must still
+    deserialize, defaulting both to None."""
+    from orchestrator.schemas.executor_output import ExecutorOutput
+
+    pre_part2_json = json.dumps(
+        {
+            "applied": [
+                {
+                    "task_id": "t1",
+                    "file": "a.py",
+                    "status": "applied",
+                    "provider_name": "gemini",
+                }
+            ],
+            "pending_review": [],
+            "errors": [],
+            "total_tokens": 15,
+            "total_cost_usd": 0.0,
+            "model": "GM:gemini-2.5-flash|OR:openrouter/free|CL:claude-sonnet-4-6",
+            "run_id": "run_old",
+        }
+    )
+    result = ExecutorOutput.model_validate_json(pre_part2_json)
+    assert result.applied[0].primary_provider_attempted is None
+    assert result.applied[0].primary_failure_category is None
+
+
 @pytest.mark.unit
 def test_apply_task_error_contains_provider_names(tmp_path, monkeypatch):
     from orchestrator.agents.executor.applier import _apply_task

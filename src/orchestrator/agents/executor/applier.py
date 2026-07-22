@@ -102,6 +102,8 @@ def _apply_task(
     input_tokens = output_tokens = 0
     cost_this_call: float | None = 0.0
     provider_name: str | None = None
+    primary_provider_attempted: str | None = None
+    primary_failure_category: str | None = None
 
     # force_provider is orthogonal to risk_level: it only changes which LLM
     # generates the patch.  risk_level still controls high-risk gating
@@ -126,6 +128,8 @@ def _apply_task(
             raw, input_tokens, output_tokens, cost_this_call = chain_result.success
             modified_content = raw
             provider_name = chain_result.provider_name
+            primary_provider_attempted = chain_result.primary_provider_attempted
+            primary_failure_category = chain_result.primary_failure_category
             break
         last_failures = chain_result.failures
         _get_logger().warning(
@@ -157,6 +161,18 @@ def _apply_task(
 
     cost_usd = cost_this_call if cost_this_call is not None else 0.0
 
+    # Shared across every FileChange return below (syntax-error, noop,
+    # pending_review, applied) — differs only in status/diff/content fields.
+    common_fields = {
+        "task_id": task.task_id,
+        "file": relative_path,
+        "tokens_used": input_tokens + output_tokens,
+        "cost_usd": cost_usd,
+        "provider_name": provider_name,
+        "primary_provider_attempted": primary_provider_attempted,
+        "primary_failure_category": primary_failure_category,
+    }
+
     if original_content and not modified_content.endswith(original_content[-1]):
         modified_content += original_content[-1]
 
@@ -165,30 +181,18 @@ def _apply_task(
         syntax_error = validate_python_content(modified_content, validation_original, relative_path)
         if syntax_error:
             _get_logger().error("[%s] Task %s — %s", run_id, task.task_id, syntax_error)
-            return FileChange(
-                task_id=task.task_id,
-                file=relative_path,
-                status="error",
-                error=syntax_error,
-                tokens_used=input_tokens + output_tokens,
-                cost_usd=cost_usd,
-                provider_name=provider_name,
-            )
+            return FileChange(**common_fields, status="error", error=syntax_error)
 
     diff = _make_diff(original_content, modified_content, relative_path, is_new_file=is_new_file)
 
     if not diff:
         _get_logger().info("[%s] Task %s — no changes (idempotent)", run_id, task.task_id)
         return FileChange(
-            task_id=task.task_id,
-            file=relative_path,
+            **common_fields,
             status=TaskStatus.NOOP,
             diff=None,
             original_content=original_content,
             modified_content=original_content,
-            tokens_used=input_tokens + output_tokens,
-            cost_usd=cost_usd,
-            provider_name=provider_name,
         )
 
     if task.risk_level == "high":
@@ -196,15 +200,11 @@ def _apply_task(
             "[%s] Task %s — diff generated (HIGH risk, not written)", run_id, task.task_id
         )
         return FileChange(
-            task_id=task.task_id,
-            file=relative_path,
+            **common_fields,
             status="pending_human_review",
             diff=diff,
             original_content=original_content,
             modified_content=modified_content,
-            tokens_used=input_tokens + output_tokens,
-            cost_usd=cost_usd,
-            provider_name=provider_name,
         )
     else:
         staging_path = staging_dir / relative_path
@@ -214,13 +214,9 @@ def _apply_task(
             "[%s] Task %s — applied to staging: %s", run_id, task.task_id, staging_path
         )
         return FileChange(
-            task_id=task.task_id,
-            file=relative_path,
+            **common_fields,
             status="applied",
             diff=diff,
             original_content=original_content,
             modified_content=modified_content,
-            tokens_used=input_tokens + output_tokens,
-            cost_usd=cost_usd,
-            provider_name=provider_name,
         )
