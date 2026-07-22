@@ -1,6 +1,7 @@
 """Architect provider with fallback chain: Claude → Gemini → OpenRouter."""
 
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -20,6 +21,17 @@ from orchestrator.observability.logger import log_call
 _ARCHITECT_CHAIN = [_call_claude, _call_gemini, _call_openrouter]
 
 
+@dataclass
+class ArchitectCallResult:
+    raw: str
+    tokens: dict
+    cost: float | None
+    model_used: str
+    provider_name: str | None = None
+    primary_provider_attempted: str | None = None
+    primary_failure_category: str | None = None
+
+
 def call_claude(
     prompt: str,
     orchestratorel: str,
@@ -30,8 +42,8 @@ def call_claude(
     stage: str | None = None,
     span_id: str | None = None,
     force_provider: str | None = None,
-) -> tuple[str, dict, float | None, str]:
-    """Call the architect provider chain. Returns (raw, tokens, cost, model_used)."""
+) -> ArchitectCallResult:
+    """Call the architect provider chain."""
     call_started = time.monotonic()
 
     if force_provider:
@@ -87,4 +99,12 @@ def call_claude(
         latency_ms=latency_ms,
     )
 
-    return raw, tokens, cost, model_used
+    return ArchitectCallResult(
+        raw=raw,
+        tokens=tokens,
+        cost=cost,
+        model_used=model_used,
+        provider_name=provider_name,
+        primary_provider_attempted=chain_result.primary_provider_attempted,
+        primary_failure_category=chain_result.primary_failure_category,
+    )

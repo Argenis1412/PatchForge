@@ -47,7 +47,7 @@ def run(
     display_model = force_provider or _get_model("claude")
     print(f"[Architect] Asking {display_model} to structure the implementation plan...")
 
-    raw_response, tokens, cost, model_used = call_claude(
+    result = call_claude(
         ARCHITECT_PROMPT.format(scout_data=scout_data, target_files=target_files_block),
         orchestratorel="architect",
         logs_dir=logs_dir,
@@ -56,6 +56,12 @@ def run(
         stage="architect",
         span_id="architect",
         force_provider=force_provider,
+    )
+    raw_response, tokens, cost, model_used = (
+        result.raw,
+        result.tokens,
+        result.cost,
+        result.model_used,
     )
 
     cost_display = f"${cost:.5f}" if cost is not None else "unknown"
@@ -95,6 +101,9 @@ def run(
         "tokens_output": tokens["output"],
         "cost_usd": cost,
         "model_used": model_used,
+        "provider_name": result.provider_name,
+        "primary_provider_attempted": result.primary_provider_attempted,
+        "primary_failure_category": result.primary_failure_category,
     }
 
     return output, meta
@@ -140,7 +149,7 @@ def run_from_issue(
     display_model = force_provider or _get_model("claude")
     print(f"[Architect] Asking {display_model} to structure the implementation plan...")
 
-    raw_response, tokens, cost, model_used = call_claude(
+    result = call_claude(
         issue_data,
         orchestratorel="architect",
         logs_dir=logs_dir,
@@ -149,6 +158,12 @@ def run_from_issue(
         stage="architect",
         span_id="architect-issue",
         force_provider=force_provider,
+    )
+    raw_response, tokens, cost, model_used = (
+        result.raw,
+        result.tokens,
+        result.cost,
+        result.model_used,
     )
 
     cost_display = f"${cost:.5f}" if cost is not None else "unknown"
@@ -188,6 +203,9 @@ def run_from_issue(
         "tokens_output": tokens["output"],
         "cost_usd": cost,
         "model_used": model_used,
+        "provider_name": result.provider_name,
+        "primary_provider_attempted": result.primary_provider_attempted,
+        "primary_failure_category": result.primary_failure_category,
     }
 
     return output, meta

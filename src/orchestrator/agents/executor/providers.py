@@ -313,6 +313,11 @@ class ProviderChainResult:
     success: tuple[str, int, int, float | None] | None = None
     failures: list[tuple[str, str]] = field(default_factory=list)
     provider_name: str | None = None
+    # Set once per _call_chain() call, from chain[0] — used to detect whether
+    # the provider that ultimately responded (provider_name) differs from the
+    # one the caller actually asked for, i.e. whether a fallback occurred.
+    primary_provider_attempted: str | None = None
+    primary_failure_category: str | None = None
 
 
 def _recoverable_exceptions() -> tuple:
@@ -330,13 +335,41 @@ def _recoverable_exceptions() -> tuple:
     return _recoverable_exceptions._cache
 
 
+def _categorize_failure(exc: BaseException) -> str:
+    """Classify a provider failure into a small, stable set of categories.
+
+    Dispatches by exception type first; falls back to a substring check on
+    the message only where the type alone can't distinguish the cause (e.g.
+    APIError covers both credit exhaustion and generic API errors).
+    """
+    if isinstance(exc, CircuitBreakerOpenError):
+        return "circuit_breaker_open"
+
+    import anthropic as _anthropic
+    import httpx as _httpx
+    from google.genai.errors import APIError as _GeminiAPIError
+
+    if isinstance(exc, (_anthropic.APIError, _GeminiAPIError, _httpx.HTTPError)):
+        message = str(exc).lower()
+        if "402" in message or "credit" in message:
+            return "credit_exhausted"
+        if "429" in message or "rate" in message:
+            return "rate_limited"
+    return "other"
+
+
 def _call_chain(chain: list, prompt: str, run_id: str) -> ProviderChainResult:
     failures: list[tuple[str, str]] = []
+    primary_provider_attempted = chain[0].__name__.removeprefix("_call_") if chain else None
+    primary_failure_category: str | None = None
+
     for provider in chain:
         try:
             raw, input_tokens, output_tokens = provider(prompt, run_id)
             if not _is_valid_provider_response(raw):
                 failures.append((provider.__name__, "invalid/empty response"))
+                if primary_failure_category is None and provider is chain[0]:
+                    primary_failure_category = "invalid_response"
                 _get_logger().warning(
                     "[%s] Invalid/empty response from %s, trying next",
                     run_id,
@@ -349,9 +382,13 @@ def _call_chain(chain: list, prompt: str, run_id: str) -> ProviderChainResult:
                 success=(raw, input_tokens, output_tokens, cost),
                 failures=failures,
                 provider_name=provider_short,
+                primary_provider_attempted=primary_provider_attempted,
+                primary_failure_category=primary_failure_category,
             )
         except _recoverable_exceptions() as exc:
             failures.append((provider.__name__, str(exc)))
+            if primary_failure_category is None and provider is chain[0]:
+                primary_failure_category = _categorize_failure(exc)
             _get_logger().info(
                 "[%s] %s unavailable: %s, trying next",
                 run_id,
@@ -362,4 +399,9 @@ def _call_chain(chain: list, prompt: str, run_id: str) -> ProviderChainResult:
 
     summary = "; ".join(f"{name}→{err}" for name, err in failures)
     _get_logger().warning("[%s] Provider chain exhausted: %s", run_id, summary)
-    return ProviderChainResult(success=None, failures=failures)
+    return ProviderChainResult(
+        success=None,
+        failures=failures,
+        primary_provider_attempted=primary_provider_attempted,
+        primary_failure_category=primary_failure_category,
+    )

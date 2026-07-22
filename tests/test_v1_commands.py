@@ -1126,6 +1126,146 @@ def test_preview_without_force_provider_does_not_emit_override_event(
     assert override_events == []
 
 
+# ---------------------------------------------------------------------------
+# D-011d Part 1 — visible warning when the architect provider chain falls back
+# ---------------------------------------------------------------------------
+
+
+def test_plan_fallback_prints_warning_and_emits_pipeline_event(
+    target_repo: Path, workspace_dir: Path
+):
+    (
+        mock_scout_out,
+        mock_arch_out,
+        mock_arch_meta,
+        mock_exec_out,
+        mock_exec_meta,
+        mock_val_out,
+        _mock_scan,
+    ) = _make_force_provider_mocks()
+    mock_arch_meta = {
+        **mock_arch_meta,
+        "provider_name": "gemini",
+        "primary_provider_attempted": "claude",
+        "primary_failure_category": "credit_exhausted",
+    }
+
+    with (
+        patch("orchestrator.commands.scan.scan", side_effect=_mock_scan),
+        patch("orchestrator.agents.architect.run", return_value=(mock_arch_out, mock_arch_meta)),
+    ):
+        scan_res = runner.invoke(app, ["scan", str(target_repo), "--workspace", str(workspace_dir)])
+        assert scan_res.exit_code == 0
+
+        runs_dir = workspace_dir / "runs"
+        run_id = list(runs_dir.iterdir())[0].name
+
+        ws_mgr = WorkspaceManager(workspace_dir)
+        ws_mgr.write_artifact(run_id, "findings.json", mock_scout_out.model_dump_json(indent=2))
+
+        plan_res = runner.invoke(app, ["plan", run_id, "--workspace", str(workspace_dir)])
+        assert plan_res.exit_code == 0, plan_res.stdout
+
+    assert "Fallback" in plan_res.stdout
+    assert "claude" in plan_res.stdout
+    assert "gemini" in plan_res.stdout
+    assert "credit_exhausted" in plan_res.stdout
+
+    logs_dir = workspace_dir / "logs"
+    events = _read_pipeline_events(logs_dir)
+    fallback_events = [e for e in events if e.get("event") == "provider_fallback"]
+
+    assert len(fallback_events) == 1
+    ev = fallback_events[0]
+    assert ev["stage"] == "architect"
+    assert ev["data"]["primary_provider"] == "claude"
+    assert ev["data"]["used_provider"] == "gemini"
+    assert ev["data"]["category"] == "credit_exhausted"
+    assert ev["run_id"] == run_id
+
+
+def test_plan_no_fallback_does_not_print_warning_or_emit_event(
+    target_repo: Path, workspace_dir: Path
+):
+    (
+        mock_scout_out,
+        mock_arch_out,
+        mock_arch_meta,
+        mock_exec_out,
+        mock_exec_meta,
+        mock_val_out,
+        _mock_scan,
+    ) = _make_force_provider_mocks()
+    mock_arch_meta = {
+        **mock_arch_meta,
+        "provider_name": "claude",
+        "primary_provider_attempted": "claude",
+        "primary_failure_category": None,
+    }
+
+    with (
+        patch("orchestrator.commands.scan.scan", side_effect=_mock_scan),
+        patch("orchestrator.agents.architect.run", return_value=(mock_arch_out, mock_arch_meta)),
+    ):
+        scan_res = runner.invoke(app, ["scan", str(target_repo), "--workspace", str(workspace_dir)])
+        assert scan_res.exit_code == 0
+
+        runs_dir = workspace_dir / "runs"
+        run_id = list(runs_dir.iterdir())[0].name
+
+        ws_mgr = WorkspaceManager(workspace_dir)
+        ws_mgr.write_artifact(run_id, "findings.json", mock_scout_out.model_dump_json(indent=2))
+
+        plan_res = runner.invoke(app, ["plan", run_id, "--workspace", str(workspace_dir)])
+        assert plan_res.exit_code == 0, plan_res.stdout
+
+    assert "Fallback" not in plan_res.stdout
+
+    logs_dir = workspace_dir / "logs"
+    events = _read_pipeline_events(logs_dir)
+    fallback_events = [e for e in events if e.get("event") == "provider_fallback"]
+    assert fallback_events == []
+
+
+def test_plan_fallback_warning_escapes_rich_markup(target_repo: Path, workspace_dir: Path):
+    """AC5: a value containing literal brackets must not raise MarkupError or
+    corrupt the printed line."""
+    (
+        mock_scout_out,
+        mock_arch_out,
+        mock_arch_meta,
+        mock_exec_out,
+        mock_exec_meta,
+        mock_val_out,
+        _mock_scan,
+    ) = _make_force_provider_mocks()
+    mock_arch_meta = {
+        **mock_arch_meta,
+        "provider_name": "gemini",
+        "primary_provider_attempted": "claude",
+        "primary_failure_category": "cred[it]_exhausted",
+    }
+
+    with (
+        patch("orchestrator.commands.scan.scan", side_effect=_mock_scan),
+        patch("orchestrator.agents.architect.run", return_value=(mock_arch_out, mock_arch_meta)),
+    ):
+        scan_res = runner.invoke(app, ["scan", str(target_repo), "--workspace", str(workspace_dir)])
+        assert scan_res.exit_code == 0
+
+        runs_dir = workspace_dir / "runs"
+        run_id = list(runs_dir.iterdir())[0].name
+
+        ws_mgr = WorkspaceManager(workspace_dir)
+        ws_mgr.write_artifact(run_id, "findings.json", mock_scout_out.model_dump_json(indent=2))
+
+        plan_res = runner.invoke(app, ["plan", run_id, "--workspace", str(workspace_dir)])
+
+    assert plan_res.exit_code == 0, plan_res.stdout
+    assert plan_res.exception is None
+    assert "cred[it]_exhausted" in plan_res.stdout
+
+
 def test_preview_force_provider_does_not_log_override_when_staging_cleanup_fails(
     target_repo: Path, workspace_dir: Path
 ):

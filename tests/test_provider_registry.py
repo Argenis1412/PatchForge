@@ -292,14 +292,18 @@ def test_architect_run_calls_init_provider_models_before_llm_call(tmp_path, monk
         return original_init(cfg)
 
     monkeypatch.setattr("orchestrator.agents.architect.init_provider_models", _spy_init)
+    from orchestrator.agents.architect.provider import ArchitectCallResult
+
     monkeypatch.setattr(
         "orchestrator.agents.architect.call_claude",
-        lambda *a, **kw: (
-            '{"validated_findings": [], "false_positives": [], "systemic_risks": [],'
-            ' "implementation_plan": [], "blockers": []}',
-            {"input": 1, "output": 1},
-            None,
-            "claude-3-5-haiku-20241022",
+        lambda *a, **kw: ArchitectCallResult(
+            raw=(
+                '{"validated_findings": [], "false_positives": [], "systemic_risks": [],'
+                ' "implementation_plan": [], "blockers": []}'
+            ),
+            tokens={"input": 1, "output": 1},
+            cost=None,
+            model_used="claude-3-5-haiku-20241022",
         ),
     )
 
@@ -322,14 +326,18 @@ def test_architect_run_from_issue_uses_registry_resolved_model(tmp_path, monkeyp
     )
     issue = IssueInput(title="t", severity="low", labels=[], body="b", raw="b")
 
+    from orchestrator.agents.architect.provider import ArchitectCallResult
+
     monkeypatch.setattr(
         "orchestrator.agents.architect.call_claude",
-        lambda *a, **kw: (
-            '{"validated_findings": [], "false_positives": [], "systemic_risks": [],'
-            ' "implementation_plan": [], "blockers": []}',
-            {"input": 1, "output": 1},
-            None,
-            "claude-3-5-haiku-20241022",
+        lambda *a, **kw: ArchitectCallResult(
+            raw=(
+                '{"validated_findings": [], "false_positives": [], "systemic_risks": [],'
+                ' "implementation_plan": [], "blockers": []}'
+            ),
+            tokens={"input": 1, "output": 1},
+            cost=None,
+            model_used="claude-3-5-haiku-20241022",
         ),
     )
 
@@ -351,14 +359,18 @@ def test_architect_run_prints_unknown_cost_without_crash(tmp_path, monkeypatch, 
     )
     scout_output = ScoutOutput(hotspots=[], summary="s", risks=["r"], recommended_order=[])
 
+    from orchestrator.agents.architect.provider import ArchitectCallResult
+
     monkeypatch.setattr(
         "orchestrator.agents.architect.call_claude",
-        lambda *a, **kw: (
-            '{"validated_findings": [], "false_positives": [], "systemic_risks": [],'
-            ' "implementation_plan": [], "blockers": []}',
-            {"input": 1, "output": 1},
-            None,
-            "claude-3-5-haiku-20241022",
+        lambda *a, **kw: ArchitectCallResult(
+            raw=(
+                '{"validated_findings": [], "false_positives": [], "systemic_risks": [],'
+                ' "implementation_plan": [], "blockers": []}'
+            ),
+            tokens={"input": 1, "output": 1},
+            cost=None,
+            model_used="claude-3-5-haiku-20241022",
         ),
     )
 
