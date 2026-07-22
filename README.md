@@ -78,3 +78,8 @@ Requires at least one API key (`ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, or `OPENRO
 - **Contracts over prompts** — internal stages communicate through typed schemas
 - **Small reliable changes** — bounded refactors beat broad unreliable automation
 - **Human approval** — repository modification happens only at `apply`
+
+## Contributing & Security
+
+- Want to contribute? See [CONTRIBUTING.md](./CONTRIBUTING.md) for the development workflow, branch naming, and QA gates.
+- Found a security issue? See [SECURITY.md](./SECURITY.md) for how to report it.
