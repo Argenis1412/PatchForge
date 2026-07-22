@@ -8,6 +8,7 @@ from orchestrator.agents.architect import (
     run,
     run_from_issue,
 )
+from orchestrator.agents.architect.provider import ArchitectCallResult
 from orchestrator.llm.parser import LLMParseError
 from orchestrator.schemas.architect_output import ArchitectOutput
 from orchestrator.schemas.config import TargetConfig
@@ -44,6 +45,10 @@ def _make_scout() -> ScoutOutput:
     return ScoutOutput(hotspots=[], summary="s", risks=["r"], recommended_order=[])
 
 
+def _claude_result(raw, tokens, cost, model_used, **kw) -> ArchitectCallResult:
+    return ArchitectCallResult(raw=raw, tokens=tokens, cost=cost, model_used=model_used, **kw)
+
+
 # ---------------------------------------------------------------------------
 # run() integration
 # ---------------------------------------------------------------------------
@@ -52,11 +57,8 @@ def _make_scout() -> ScoutOutput:
 class TestArchitectRun:
     @pytest.mark.unit
     def test_clean_json(self, mock_claude):
-        mock_claude.return_value = (
-            _CLEAN_JSON,
-            {"input": 1, "output": 1},
-            0.01,
-            "claude-sonnet-4-6",
+        mock_claude.return_value = _claude_result(
+            _CLEAN_JSON, {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6"
         )
         output, meta = run(_make_scout())
         assert isinstance(output, ArchitectOutput)
@@ -65,21 +67,27 @@ class TestArchitectRun:
     @pytest.mark.unit
     def test_trailing_text(self, mock_claude):
         raw = _CLEAN_JSON + "\n\nLet me know if you need adjustments."
-        mock_claude.return_value = (raw, {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6")
+        mock_claude.return_value = _claude_result(
+            raw, {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6"
+        )
         output, meta = run(_make_scout())
         assert isinstance(output, ArchitectOutput)
 
     @pytest.mark.unit
     def test_preamble_text(self, mock_claude):
         raw = "Here is my analysis:\n" + _CLEAN_JSON
-        mock_claude.return_value = (raw, {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6")
+        mock_claude.return_value = _claude_result(
+            raw, {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6"
+        )
         output, meta = run(_make_scout())
         assert isinstance(output, ArchitectOutput)
 
     @pytest.mark.unit
     def test_preamble_fenced_trailing(self, mock_claude):
         raw = "Preamble\n\n```json\n" + _CLEAN_JSON + "\n```\n\nTrailing text"
-        mock_claude.return_value = (raw, {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6")
+        mock_claude.return_value = _claude_result(
+            raw, {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6"
+        )
         output, meta = run(_make_scout())
         assert isinstance(output, ArchitectOutput)
 
@@ -90,24 +98,25 @@ class TestArchitectRun:
             ' "validated_findings": [], "false_positives": [],'
             ' "systemic_risks": [], "implementation_plan": [], "blockers": []}'
         )
-        mock_claude.return_value = (raw, {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6")
+        mock_claude.return_value = _claude_result(
+            raw, {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6"
+        )
         output, meta = run(_make_scout())
         assert isinstance(output, ArchitectOutput)
 
     @pytest.mark.unit
     def test_raises_on_invalid_json(self, mock_claude):
-        mock_claude.return_value = (
-            "not json at all",
-            {"input": 1, "output": 1},
-            0.01,
-            "claude-sonnet-4-6",
+        mock_claude.return_value = _claude_result(
+            "not json at all", {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6"
         )
         with pytest.raises(LLMParseError):
             run(_make_scout())
 
     @pytest.mark.unit
     def test_raises_on_empty_response(self, mock_claude):
-        mock_claude.return_value = ("", {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6")
+        mock_claude.return_value = _claude_result(
+            "", {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6"
+        )
         with pytest.raises(LLMParseError):
             run(_make_scout())
 
@@ -125,11 +134,8 @@ def _make_issue() -> IssueInput:
 class TestArchitectRunFromIssue:
     @pytest.mark.unit
     def test_clean_json(self, mock_claude):
-        mock_claude.return_value = (
-            _CLEAN_JSON,
-            {"input": 1, "output": 1},
-            0.01,
-            "claude-sonnet-4-6",
+        mock_claude.return_value = _claude_result(
+            _CLEAN_JSON, {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6"
         )
         output, meta = run_from_issue(_make_issue())
         assert isinstance(output, ArchitectOutput)
@@ -138,17 +144,16 @@ class TestArchitectRunFromIssue:
     @pytest.mark.unit
     def test_trailing_text(self, mock_claude):
         raw = _CLEAN_JSON + "\n\nLet me know if you need adjustments."
-        mock_claude.return_value = (raw, {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6")
+        mock_claude.return_value = _claude_result(
+            raw, {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6"
+        )
         output, meta = run_from_issue(_make_issue())
         assert isinstance(output, ArchitectOutput)
 
     @pytest.mark.unit
     def test_raises_on_invalid_json(self, mock_claude):
-        mock_claude.return_value = (
-            "not json at all",
-            {"input": 1, "output": 1},
-            0.01,
-            "claude-sonnet-4-6",
+        mock_claude.return_value = _claude_result(
+            "not json at all", {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6"
         )
         with pytest.raises(LLMParseError):
             run_from_issue(_make_issue())
@@ -160,11 +165,8 @@ class TestArchitectRunFromIssue:
             body="{x: 1, y: 2}",
             raw="---\ntitle: Braces\n---\n{x: 1, y: 2}",
         )
-        mock_claude.return_value = (
-            _CLEAN_JSON,
-            {"input": 1, "output": 1},
-            0.01,
-            "claude-sonnet-4-6",
+        mock_claude.return_value = _claude_result(
+            _CLEAN_JSON, {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6"
         )
         output, meta = run_from_issue(issue)
         assert isinstance(output, ArchitectOutput)
@@ -178,22 +180,16 @@ class TestArchitectRunFromIssue:
 class TestArchitectFallback:
     @pytest.mark.unit
     def test_fallback_model_used_in_meta(self, mock_claude):
-        mock_claude.return_value = (
-            _CLEAN_JSON,
-            {"input": 100, "output": 50},
-            0.01,
-            "gemini-2.5-flash",
+        mock_claude.return_value = _claude_result(
+            _CLEAN_JSON, {"input": 100, "output": 50}, 0.01, "gemini-2.5-flash"
         )
         _, meta = run(_make_scout())
         assert meta["model_used"] == "gemini-2.5-flash"
 
     @pytest.mark.unit
     def test_run_from_issue_fallback_model(self, mock_claude):
-        mock_claude.return_value = (
-            _CLEAN_JSON,
-            {"input": 100, "output": 50},
-            0.01,
-            "openrouter/free",
+        mock_claude.return_value = _claude_result(
+            _CLEAN_JSON, {"input": 100, "output": 50}, 0.01, "openrouter/free"
         )
         _, meta = run_from_issue(_make_issue())
         assert meta["model_used"] == "openrouter/free"
@@ -228,12 +224,12 @@ class TestArchitectProviderChain:
         monkeypatch.setattr(arch_provider, "_call_chain", lambda *a, **kw: chain_result)
         monkeypatch.setattr(arch_provider, "log_call", lambda *a, **kw: None)
 
-        raw, tokens, cost, model_used = arch_provider.call_claude("prompt", "architect")
+        result = arch_provider.call_claude("prompt", "architect")
 
-        assert raw == _CLEAN_JSON
-        assert model_used == "gemini-2.5-flash"
-        assert cost == pytest.approx(0.375)
-        assert tokens == {"input": 1_000_000, "output": 1_000_000}
+        assert result.raw == _CLEAN_JSON
+        assert result.model_used == "gemini-2.5-flash"
+        assert result.cost == pytest.approx(0.375)
+        assert result.tokens == {"input": 1_000_000, "output": 1_000_000}
 
     @pytest.mark.unit
     def test_claude_default_uses_registry_resolved_model_and_chain_cost(self, monkeypatch):
@@ -247,10 +243,10 @@ class TestArchitectProviderChain:
         monkeypatch.setattr(arch_provider, "_call_chain", lambda *a, **kw: chain_result)
         monkeypatch.setattr(arch_provider, "log_call", lambda *a, **kw: None)
 
-        _, _, cost, model_used = arch_provider.call_claude("prompt", "architect")
+        result = arch_provider.call_claude("prompt", "architect")
 
-        assert model_used == "claude-sonnet-4-6"
-        assert cost == pytest.approx(18.0)
+        assert result.model_used == "claude-sonnet-4-6"
+        assert result.cost == pytest.approx(18.0)
 
     @pytest.mark.unit
     def test_none_cost_propagates_when_model_overridden(self, monkeypatch):
@@ -271,9 +267,9 @@ class TestArchitectProviderChain:
             lambda *a, **kw: logged_costs.append(kw.get("cost_usd")),
         )
 
-        _, _, cost, _ = arch_provider.call_claude("prompt", "architect")
+        result = arch_provider.call_claude("prompt", "architect")
 
-        assert cost is None
+        assert result.cost is None
         assert logged_costs == [None]
 
     @pytest.mark.unit
@@ -348,11 +344,8 @@ class TestArchitectTargetFilesInjection:
         _touch(tmp_path / "README.md")
         config = _make_target_config(tmp_path)
 
-        mock_claude.return_value = (
-            _CLEAN_JSON,
-            {"input": 1, "output": 1},
-            0.01,
-            "claude-sonnet-4-6",
+        mock_claude.return_value = _claude_result(
+            _CLEAN_JSON, {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6"
         )
         run(_make_scout(), config)
 
@@ -366,11 +359,8 @@ class TestArchitectTargetFilesInjection:
         _touch(tmp_path / "src" / "app.py")
         config = _make_target_config(tmp_path)
 
-        mock_claude.return_value = (
-            _CLEAN_JSON,
-            {"input": 1, "output": 1},
-            0.01,
-            "claude-sonnet-4-6",
+        mock_claude.return_value = _claude_result(
+            _CLEAN_JSON, {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6"
         )
         run_from_issue(_make_issue(), config)
 
@@ -380,11 +370,8 @@ class TestArchitectTargetFilesInjection:
 
     @pytest.mark.unit
     def test_run_no_config_shows_unavailable(self, mock_claude):
-        mock_claude.return_value = (
-            _CLEAN_JSON,
-            {"input": 1, "output": 1},
-            0.01,
-            "claude-sonnet-4-6",
+        mock_claude.return_value = _claude_result(
+            _CLEAN_JSON, {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6"
         )
         run(_make_scout(), config=None)
 
@@ -394,11 +381,8 @@ class TestArchitectTargetFilesInjection:
 
     @pytest.mark.unit
     def test_run_from_issue_no_config_shows_unavailable(self, mock_claude):
-        mock_claude.return_value = (
-            _CLEAN_JSON,
-            {"input": 1, "output": 1},
-            0.01,
-            "claude-sonnet-4-6",
+        mock_claude.return_value = _claude_result(
+            _CLEAN_JSON, {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6"
         )
         run_from_issue(_make_issue(), config=None)
 
@@ -408,11 +392,8 @@ class TestArchitectTargetFilesInjection:
 
     @pytest.mark.unit
     def test_prompt_contains_path_constraint_instruction(self, mock_claude):
-        mock_claude.return_value = (
-            _CLEAN_JSON,
-            {"input": 1, "output": 1},
-            0.01,
-            "claude-sonnet-4-6",
+        mock_claude.return_value = _claude_result(
+            _CLEAN_JSON, {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6"
         )
         run(_make_scout())
 
@@ -422,11 +403,8 @@ class TestArchitectTargetFilesInjection:
 
     @pytest.mark.unit
     def test_run_from_issue_prompt_contains_path_constraint_instruction(self, mock_claude):
-        mock_claude.return_value = (
-            _CLEAN_JSON,
-            {"input": 1, "output": 1},
-            0.01,
-            "claude-sonnet-4-6",
+        mock_claude.return_value = _claude_result(
+            _CLEAN_JSON, {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6"
         )
         run_from_issue(_make_issue())
 
@@ -445,11 +423,8 @@ class TestArchitectTargetFilesInjection:
         (pkg / "helper.py").write_text("def assist():\n    pass\n", encoding="utf-8")
         config = _make_target_config(tmp_path)
 
-        mock_claude.return_value = (
-            _CLEAN_JSON,
-            {"input": 1, "output": 1},
-            0.01,
-            "claude-sonnet-4-6",
+        mock_claude.return_value = _claude_result(
+            _CLEAN_JSON, {"input": 1, "output": 1}, 0.01, "claude-sonnet-4-6"
         )
         run(_make_scout(), config)
 

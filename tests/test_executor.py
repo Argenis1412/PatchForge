@@ -10,6 +10,7 @@ from orchestrator.agents.executor.providers import (
     KNOWN_PROVIDER_NAMES,
     ProviderChainResult,
     _call_chain,
+    _categorize_failure,
     _provider_by_name,
 )
 from orchestrator.schemas.architect_output import ArchitectOutput, Task
@@ -228,6 +229,100 @@ def test_call_chain_success_preserves_partial_failures(monkeypatch):
     assert result.success[0] == "patched code"
     assert len(result.failures) == 1
     assert result.failures[0][0] == "_fail_first"
+
+
+# ---------------------------------------------------------------------------
+# D-011d Part 1 — primary_provider_attempted / primary_failure_category
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_call_chain_no_fallback_when_primary_succeeds(monkeypatch):
+    def _call_succeed(prompt, run_id):
+        return ("patched code", 100, 50)
+
+    result = _call_chain([_call_succeed], "test prompt", "run_003")
+    assert result.success is not None
+    assert result.provider_name == result.primary_provider_attempted == "succeed"
+    assert result.primary_failure_category is None
+
+
+@pytest.mark.unit
+def test_call_chain_reports_primary_provider_and_category_on_fallback(monkeypatch):
+    """AC1/criterio único: provider_name != primary_provider_attempted signals
+    a genuine fallback, with the category derived from the primary's own
+    failure — not from whichever provider happened to fail last."""
+
+    def _call_fail_primary(prompt, run_id):
+        raise Exception("402 credit balance too low")
+
+    def _call_succeed(prompt, run_id):
+        return ("patched code", 100, 50)
+
+    monkeypatch.setattr(
+        "orchestrator.agents.executor.providers._recoverable_exceptions",
+        lambda: (Exception,),
+    )
+    result = _call_chain([_call_fail_primary, _call_succeed], "test prompt", "run_004")
+
+    assert result.success is not None
+    assert result.primary_provider_attempted == "fail_primary"
+    assert result.provider_name == "succeed"
+    assert result.provider_name != result.primary_provider_attempted
+    assert result.primary_failure_category == "other"  # plain Exception, not a known API error type
+
+
+@pytest.mark.unit
+def test_call_chain_primary_provider_attempted_set_even_on_total_failure(monkeypatch):
+    def _fail_a(prompt, run_id):
+        raise Exception("a failed")
+
+    def _fail_b(prompt, run_id):
+        raise Exception("b failed")
+
+    monkeypatch.setattr(
+        "orchestrator.agents.executor.providers._recoverable_exceptions",
+        lambda: (Exception,),
+    )
+    result = _call_chain([_fail_a, _fail_b], "test prompt", "run_005")
+
+    assert result.success is None
+    assert result.primary_provider_attempted == "_fail_a"
+    # failures keeps its original 2-tuple shape — regression guard for a
+    # design mistake caught during planning that would have broken this
+    # exact unpacking in agents/architect/provider.py and applier.py.
+    for name, err in result.failures:
+        assert isinstance(name, str)
+        assert isinstance(err, str)
+
+
+@pytest.mark.unit
+def test_call_chain_empty_chain_has_no_primary():
+    result = _call_chain([], "test prompt", "run_006")
+    assert result.primary_provider_attempted is None
+    assert result.primary_failure_category is None
+
+
+@pytest.mark.unit
+def test_categorize_failure_dispatches_by_type():
+    from orchestrator.circuit_breaker import CircuitBreakerOpenError
+
+    exc = CircuitBreakerOpenError("gemini", "OPEN", 30.0)
+    assert _categorize_failure(exc) == "circuit_breaker_open"
+    assert _categorize_failure(Exception("some random error")) == "other"
+
+
+@pytest.mark.unit
+def test_categorize_failure_credit_and_rate_limit_substrings():
+    import anthropic
+
+    credit_exc = anthropic.APIError("402 credit balance too low", request=MagicMock(), body=None)
+    rate_exc = anthropic.APIError("429 rate limit exceeded", request=MagicMock(), body=None)
+    other_exc = anthropic.APIError("500 internal error", request=MagicMock(), body=None)
+
+    assert _categorize_failure(credit_exc) == "credit_exhausted"
+    assert _categorize_failure(rate_exc) == "rate_limited"
+    assert _categorize_failure(other_exc) == "other"
 
 
 @pytest.mark.unit
