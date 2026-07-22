@@ -206,7 +206,7 @@ def execute(
 
         for change in fallback_changes:
             console.print(
-                f"[yellow]Fallback ({change.file}): "
+                f"[yellow]Fallback ({escape(change.file)}): "
                 f"{escape(str(change.primary_provider_attempted))} falló "
                 f"({escape(str(change.primary_failure_category))}) → "
                 f"se usó {escape(str(change.provider_name))}[/yellow]"

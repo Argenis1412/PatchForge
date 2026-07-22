@@ -589,8 +589,8 @@ def test_syntax_error_after_fallback_excluded_from_warning(
 def test_fallback_warning_escapes_rich_markup(
     env, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    """A category or provider value containing literal brackets must not
-    raise MarkupError or corrupt the printed line."""
+    """A category, provider, or file path value containing literal brackets
+    must not raise MarkupError or corrupt the printed line."""
     run_id = env["run_id"]
 
     diff_text = "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-hello\n+world"
@@ -598,7 +598,7 @@ def test_fallback_warning_escapes_rich_markup(
         applied=[
             FileChange(
                 task_id="T1",
-                file="file.txt",
+                file="weird[1].txt",
                 status=TaskStatus.APPLIED,
                 diff=diff_text,
                 provider_name="openrouter",

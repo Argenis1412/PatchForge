@@ -407,6 +407,51 @@ def test_apply_task_no_fallback_success_has_matching_primary(tmp_path, monkeypat
 
 
 @pytest.mark.unit
+def test_apply_task_threads_fallback_fields_on_noop(tmp_path, monkeypatch):
+    """A fallback whose response is idempotent (no diff) must still thread
+    the fallback fields onto the NOOP FileChange — a reachable combination
+    (primary fails, fallback's response happens to match the original)."""
+    from orchestrator.agents.executor.applier import _apply_task
+
+    source_file = tmp_path / "test.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    task = Task(
+        task_id="t1",
+        title="change x",
+        description="change x to 2",
+        files_to_modify=["test.py"],
+        priority="high",
+        effort="low",
+        risk_level="low",
+        dependencies=[],
+    )
+
+    monkeypatch.setattr(
+        "orchestrator.agents.executor.providers._recoverable_exceptions",
+        lambda: (Exception,),
+    )
+    cb_gemini_mock = MagicMock()
+    cb_gemini_mock.call.side_effect = lambda fn: (_ for _ in ()).throw(
+        Exception("circuit breaker open")
+    )
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini_mock)
+
+    cb_openrouter_mock = MagicMock()
+    cb_openrouter_mock.call.side_effect = lambda fn: ("x = 1\n", 10, 5)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_openrouter", cb_openrouter_mock)
+
+    change = _apply_task(task, "run_fb5", tmp_path, staging)
+
+    assert change.status == "noop"
+    assert change.provider_name == "openrouter"
+    assert change.primary_provider_attempted == "gemini"
+    assert change.primary_failure_category == "other"
+
+
+@pytest.mark.unit
 def test_apply_task_exhaustion_leaves_fallback_fields_none(tmp_path, monkeypatch):
     from orchestrator.agents.executor.applier import _apply_task
 
