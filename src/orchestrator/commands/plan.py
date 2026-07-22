@@ -234,30 +234,23 @@ def execute(
         goal = scout_output.summary
 
     # 4.5 Warn + persist if the provider chain silently fell back (D-011d)
-    primary_provider_attempted = meta.get("primary_provider_attempted")
-    provider_used = meta.get("provider_name")
-    if primary_provider_attempted is not None and primary_provider_attempted != provider_used:
+    fallback = architect_agent.detect_fallback(meta)
+    if fallback:
         from rich.markup import escape
 
-        failure_category = meta.get("primary_failure_category")
+        used = escape(str(fallback.provider_used))
         console.print(
-            f"[yellow]Fallback: {escape(str(primary_provider_attempted))} falló "
-            f"({escape(str(failure_category))}) → se usó {escape(str(provider_used))}[/yellow]"
+            f"[yellow]Fallback: {escape(fallback.primary_provider_attempted)} falló "
+            f"({escape(str(fallback.failure_category))}) → se usó {used}[/yellow]"
         )
-        log_event(
-            trace_id=run_id,
+        architect_agent.log_architect_fallback(
+            fallback,
             run_id=run_id,
-            level="warning",
+            trace_id=run_id,
             source="pipeline",
-            stage="architect",
-            event="provider_fallback",
-            data={
-                "primary_provider": primary_provider_attempted,
-                "used_provider": provider_used,
-                "category": failure_category,
-            },
             logs_dir=logs_dir,
             run_dir=run_dir,
+            level="warning",
         )
 
     # 5. Check plan gate (shared)

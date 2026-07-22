@@ -648,6 +648,28 @@ def test_collect_fallback_changes_includes_pending_review_fallback():
     assert collect_fallback_changes(result) == [change]
 
 
+@pytest.mark.unit
+def test_log_fallback_events_defaults_to_warning_level(tmp_path):
+    """D-011d Part 3: the executor fallback event's severity was silently
+    "info" (log_event's default) while the architect's equivalent event was
+    "warning" — operationally backwards, since executor-stage fallback is
+    more critical (silent code-quality degradation during patch generation)
+    than architect-stage fallback (planning)."""
+    import json
+
+    from orchestrator.agents.executor.fallback import log_fallback_events
+
+    change = _fc()
+    logs_dir = tmp_path / "logs"
+    log_fallback_events([change], run_id="r1", trace_id="r1", logs_dir=logs_dir, run_dir=None)
+
+    lines = (logs_dir / "pipeline.jsonl").read_text(encoding="utf-8").splitlines()
+    events = [json.loads(line) for line in lines]
+    fallback_events = [e for e in events if e.get("event") == "provider_fallback"]
+    assert len(fallback_events) == 1
+    assert fallback_events[0]["level"] == "warning"
+
+
 # ---------------------------------------------------------------------------
 # D-011d Part 2 — schema backward-compatibility
 # ---------------------------------------------------------------------------

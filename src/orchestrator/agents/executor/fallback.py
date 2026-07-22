@@ -40,6 +40,7 @@ def log_fallback_events(
     trace_id: str,
     logs_dir: Path,
     run_dir: Optional[Path],
+    level: str = "warning",
 ) -> None:
     """Persist one provider_fallback event per fallback change.
 
@@ -52,6 +53,7 @@ def log_fallback_events(
             log_event(
                 trace_id=trace_id,
                 run_id=run_id,
+                level=level,
                 source="executor",
                 stage="executor",
                 event="provider_fallback",

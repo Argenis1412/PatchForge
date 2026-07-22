@@ -204,6 +204,101 @@ class TestArchitectFallback:
 
 
 # ---------------------------------------------------------------------------
+# D-011d Part 3 — agents/architect/fallback.py (shared by plan.py and ci.py)
+# ---------------------------------------------------------------------------
+
+
+class TestArchitectFallbackHelper:
+    @pytest.mark.unit
+    def test_detect_fallback_returns_none_when_primary_attempted_is_none(self):
+        from orchestrator.agents.architect.fallback import detect_fallback
+
+        assert (
+            detect_fallback({"primary_provider_attempted": None, "provider_name": "claude"}) is None
+        )
+
+    @pytest.mark.unit
+    def test_detect_fallback_returns_none_when_providers_match(self):
+        from orchestrator.agents.architect.fallback import detect_fallback
+
+        meta = {"primary_provider_attempted": "claude", "provider_name": "claude"}
+        assert detect_fallback(meta) is None
+
+    @pytest.mark.unit
+    def test_detect_fallback_returns_info_when_providers_differ(self):
+        from orchestrator.agents.architect.fallback import ArchitectFallback, detect_fallback
+
+        meta = {
+            "primary_provider_attempted": "claude",
+            "provider_name": "gemini",
+            "primary_failure_category": "credit_exhausted",
+        }
+        result = detect_fallback(meta)
+        assert result == ArchitectFallback(
+            primary_provider_attempted="claude",
+            provider_used="gemini",
+            failure_category="credit_exhausted",
+        )
+
+    @pytest.mark.unit
+    def test_log_architect_fallback_emits_event(self, tmp_path):
+        import json
+
+        from orchestrator.agents.architect.fallback import ArchitectFallback, log_architect_fallback
+
+        fallback = ArchitectFallback(
+            primary_provider_attempted="claude",
+            provider_used="gemini",
+            failure_category="credit_exhausted",
+        )
+        logs_dir = tmp_path / "logs"
+        log_architect_fallback(
+            fallback,
+            run_id="r1",
+            trace_id="r1",
+            source="ci",
+            logs_dir=logs_dir,
+            run_dir=None,
+            level="warning",
+        )
+        lines = (logs_dir / "pipeline.jsonl").read_text(encoding="utf-8").splitlines()
+        events = [json.loads(line) for line in lines]
+        fallback_events = [e for e in events if e.get("event") == "provider_fallback"]
+        assert len(fallback_events) == 1
+        ev = fallback_events[0]
+        assert ev["source"] == "ci"
+        assert ev["level"] == "warning"
+        assert ev["stage"] == "architect"
+        assert ev["data"]["primary_provider"] == "claude"
+        assert ev["data"]["used_provider"] == "gemini"
+        assert ev["data"]["category"] == "credit_exhausted"
+
+    @pytest.mark.unit
+    def test_log_architect_fallback_tolerates_oserror(self, monkeypatch, tmp_path):
+        from orchestrator.agents.architect.fallback import ArchitectFallback, log_architect_fallback
+
+        def _raise(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr("orchestrator.agents.architect.fallback.log_event", _raise)
+
+        fallback = ArchitectFallback(
+            primary_provider_attempted="claude",
+            provider_used="gemini",
+            failure_category="credit_exhausted",
+        )
+        # Must not raise.
+        log_architect_fallback(
+            fallback,
+            run_id="r1",
+            trace_id="r1",
+            source="ci",
+            logs_dir=tmp_path / "logs",
+            run_dir=None,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Provider chain unit tests — exercise architect/provider.py:call_claude directly
 # ---------------------------------------------------------------------------
 
