@@ -32,7 +32,7 @@ Three issue files were used:
 patchforge scan %TEMP%\...\target --workspace %TEMP%\...\workspace --risk-budget high
 ```
 
-**Result:** ✅ CLI rejected `high` immediately (`'high' is not 'low' or 'medium'`), exit code != 0. D-010d fix (#254/#269) confirmed — `scan.execute()` now validates `risk_budget` before proceeding.
+**Result:** ✅ CLI rejected `high` immediately (`"Invalid value for --risk-budget. Valid options are 'low' or 'medium'."`), exit code != 0. D-010d fix (#254/#269) confirmed — `main.py`'s `scan()` command validates `risk_budget` before calling `scan.execute()`.
 
 ## Pipeline Results
 
@@ -125,13 +125,13 @@ Run C was blocked by Anthropic credit exhaustion causing gemini fallback (see D-
 - **Behaviour:** Run A3's patch modified `plan.py` as well as `main.py`, changing `execute()`'s `workspace` parameter from `Optional[Path] = None` to `Optional[Path] = typer.Option(None, "--workspace", help=...)`. `execute()` is a plain Python function called from `main.py`'s Typer callback — not itself a Typer command. The `typer.Option()` default is syntactically valid Python but semantically wrong: Typer evaluates it only when the function is registered as a command handler, not when called directly. The default is never triggered in practice because `main.py` always passes `workspace` explicitly, so `pytest` passed (835/0 failed).
 - **Impact:** The patch introduced incorrect code that goes undetected by the test suite. Any caller who invokes `plan.execute()` directly without `workspace` would receive a `OptionInfo` object instead of `None`.
 - **Discovered by:** Dogfooding-011, Run A3 (noted during post-apply diff review)
-- **Why deferred:** Root cause is a multi-file plan where the architect plans changes in both `main.py` and `plan.py`; the executor applied a Typer pattern blindly to the wrong function. Mitigation: issue files should scope to the minimal set of files; a single-file plan would not have produced this mistake. The validation gate (pytest) did not catch it because the wrong default is never reached at test time.
+- **Why deferred:** Root cause is a multi-file plan where the executor applied a Typer pattern from `main.py` blindly to `plan.py`. Mitigation: issue files should scope to the minimal set of files; a single-file plan reduces the risk of cross-file pattern bleeding, though it does not guarantee the executor won't apply the wrong pattern within a single file. The validation gate (pytest) did not catch it because the wrong default is never reached at test time. A regression test for `plan.execute()`'s signature was added to `tests/test_plan.py` to catch a future recurrence.
 
 ### D-011d — gemini-2.5-flash fallback cannot reliably generate valid Python for medium-sized files
 
 - **File:** `src/orchestrator/agents/executor/applier.py` (executor), `src/orchestrator/agents/executor/validation.py` (`ast.parse` gate)
 - **Behaviour:** When Anthropic API credits are exhausted, the architect and executor fall back to `gemini-2.5-flash`. For files around 380 lines (`src/orchestrator/main.py`), gemini produced both "unterminated string literal (detected at line 81)" (attempt 1) and "invalid syntax (line 1)" (attempt 2) — two different failure modes, both from `ast.parse`. The failures are nondeterministic and not reproducibly the same type. The `ast.parse` gate correctly rejects the bad output, but there is no recovery — the task errors out and leaves an empty patch.
-- **Impact:** When Anthropic credits are exhausted, the pipeline's effective file-size ceiling drops dramatically (from ~1000 lines with claude-sonnet to ~100–200 lines with gemini). This silently degrades pipeline reliability: the operator gets executor errors that look identical to D-011b but have a different root cause (wrong model, not file size alone). There is no warning in the output that a credit-exhausted fallback is in use.
+- **Impact:** When Anthropic credits are exhausted, the pipeline's effective file-size ceiling drops. With gemini-2.5-flash, failure was observed at ~380 lines (`src/orchestrator/main.py`); the exact ceiling is unknown since no smaller files were tested in this session. This silently degrades pipeline reliability: the operator gets executor errors that look identical to D-011b but have a different root cause (wrong model, not file size alone). There is no warning in the output that a credit-exhausted fallback is in use.
 - **Discovered by:** Dogfooding-011, Run C attempts 1 and 2 (gemini-2.5-flash fallback confirmed by `Done | model=gemini-2.5-flash` log line in both plan and executor calls)
 - **Why deferred:** Two separate issues: (1) the executor's full-file replacement approach is not gemini-compatible at medium file sizes — requires executor redesign; (2) the system gives no signal when a lower-capability fallback is in use — a warning when the registry-specified model is not the one that actually ran would help operators notice credit exhaustion.
 

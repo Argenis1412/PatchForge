@@ -1,4 +1,18 @@
+import inspect
+
+from orchestrator.commands.plan import execute as plan_execute
 from orchestrator.schemas.architect_output import Task
+
+
+def test_plan_execute_workspace_default_is_none():
+    # Regression for D-011c: a generated patch once changed plan.execute()'s
+    # workspace parameter to typer.Option(None, ...), which is semantically
+    # wrong because execute() is a plain function, not a Typer command handler.
+    # Confirm the default is bare None so direct callers receive None, not an
+    # OptionInfo object, when workspace is omitted.
+    params = inspect.signature(plan_execute).parameters
+    assert "workspace" in params
+    assert params["workspace"].default is None
 
 
 def test_defaults():

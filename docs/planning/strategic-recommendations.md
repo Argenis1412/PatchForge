@@ -23,18 +23,26 @@ audience, not to become "better than Cursor for everyone".
 ### 1. Ship a validator plugin system before anything else in P5
 
 **Why it matters most:** every single non-you user hits this on day one.
-`ruff` + `pytest` hardcoded in `validator/runners.py` is the single
-biggest reason a curious visitor tries PatchForge on their repo, fails,
-and never comes back. All other technical debt is invisible to new users;
-this one is fatal on first contact.
+`validator/__init__.py` does accept `config.lint_command` and
+`config.test_command` overrides and can skip pytest when
+`config.capabilities.effective_supports_tests` is false — but only for
+the existing ruff and pytest runners. There is no way to substitute
+flake8, mypy, tox, or a custom test runner without editing source. The
+extensibility gap, not a hardcoding of the commands themselves, is what
+blocks a first-time user on a non-ruff/non-pytest repo. All other
+technical debt is invisible to new users; this one is fatal on first
+contact.
 
 **Shape:** a `validators` field in `orchestrator.json` that names
 adapters (`ruff`, `pytest`, `flake8`, `mypy`, `pylint`, `unittest`,
 `tox`, or a shell command with a stable exit-code contract). Adapters
 live in `src/orchestrator/agents/validator/adapters/`, one file each,
-implementing a small typed interface (`run() -> ValidatorOutput`).
-Existing `ruff`/`pytest` become the first two adapters, not special
-cases.
+implementing a small typed interface (`run() -> ValidatorOutput`). This
+is distinct from the existing public entry point
+`validator/__init__.py::run`, which returns `tuple[ValidatorOutput,
+dict]` and does orchestration; the adapter interface is for individual
+tool implementations only. Existing `ruff`/`pytest` become the first two
+adapters, not special cases.
 
 **Anti-pattern to avoid:** don't build a "plugin discovery" system with
 entry points, dynamic loading, or a marketplace. Ship 4-5 adapters
@@ -128,16 +136,21 @@ picked in recommendation #2, it's out.
 
 ### 5. Fix the timeout/config hardcoding while it's still trivial
 
-**Why:** 30-second git timeouts in `git.py` will fail silently on any
-large repo, any slow filesystem (NFS, remote Docker volumes, WSL2 on
-mechanical drives). Same for patch-size limits, validator timeouts, etc.
-This is a category of "obvious bugs waiting to be reported" that you can
-close preemptively in ~1 week total by centralizing them in
-`orchestrator.json`.
+**Why:** 30-second git timeouts scattered across `git.py` will fail
+silently on any large repo, any slow filesystem (NFS, remote Docker
+volumes, WSL2 on mechanical drives). The validator runner already has a
+configurable timeout (`config.validator_timeout` / `DEFAULT_TIMEOUT =
+450s`), but `validation_workspace.py`'s `ruff format` call is hardcoded
+at 60s independently — a separate source of truth that won't be covered
+by a `validator_timeout` bump alone. Same for patch-size limits and
+other subprocess calls.
 
 **Shape:** one `TargetConfig.timeouts` sub-model with named entries
-(`git_op`, `validator_run`, `patch_apply`), defaults preserving current
-behavior, all `subprocess.run(..., timeout=30)` sites read from it.
+(`git_op`, `validator_run`, `patch_apply`, `format_run`), defaults
+preserving current behavior. `git.py`'s `timeout=30` sites and
+`validation_workspace.py`'s formatter timeout both read from it; the
+existing `validator_timeout` field becomes an alias or is migrated to
+`timeouts.validator_run`.
 
 **Why now not later:** the longer these constants live in code, the
 more places they get copied to. Fix once, cheaply, before the surface
@@ -206,7 +219,7 @@ the schema_version debt. Scope: ~1 day once validator plugins land.
 
 - **You are single-point-of-failure for the project.** If you take a
   month off, everything stops. Before P5 finishes, either (a) recruit
-  one collaborator who understands the tesis and can review PRs
+  one collaborator who understands the thesis and can review PRs
   independently, or (b) write down enough about *why* decisions were
   made (not just *what* was decided) that someone could resume the
   project cold. `docs/context/` is a good start; the plan docs are
@@ -243,7 +256,7 @@ no users has no product-market fit no matter how well-engineered.
 ## Final honest line
 
 PatchForge is the best-engineered solo-dev project I've seen in this
-space. The tesis is correct, the discipline is real, the code shows
+space. The thesis is correct, the discipline is real, the code shows
 craft. The risk isn't quality — it's that you'll build a masterpiece
 nobody uses because you optimized the engineering and postponed the
 market work. Fix that imbalance and this becomes something serious.
