@@ -74,13 +74,13 @@ docs/issue-33-doctor-docstrings
 
 2. **Write your code** following the project's style (see below)
 
-3. **Run QA before committing** (all three are mandatory, not optional):
+3. **Run QA before committing**: `ruff check .` and `ruff format --check .` are always mandatory. `pytest` is mandatory for any change that isn't documentation-only — see [Testing](#testing) below.
    ```bash
    ruff check .
    ruff format --check .
    pytest
    ```
-   Do not commit if any of these fail.
+   Do not commit if a required check fails.
 
 4. **Commit with a conventional message**:
    ```bash
