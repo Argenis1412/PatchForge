@@ -19,6 +19,34 @@
 
 ## Log
 
+### [2026-07-22] Dogfooding 011 — Analysis-only task blocks entire DAG (D-011a)
+
+- **File:** `src/orchestrator/agents/architect/` (plan generation), `src/orchestrator/agents/executor/` (task executor, DAG scheduler)
+- **Debt:** An issue file that leaves the implementation approach open-ended (e.g. "the architect should inspect the surrounding code before proposing the fix") produces a plan where T1 is an analysis task that returns prose, not Python. T1 → `ast.parse` failure → all downstream tasks blocked as DAG dependents. The pipeline exits at `preview` with zero patch output and no clear message that the issue file was the root cause.
+- **Discovered by:** Dogfooding-011, Run A (`issue-failure-json.md` was deliberately open-ended; produced a 4-task plan with T1=analysis)
+- **Why deferred:** Not a product bug — the architect is doing what it's asked. Mitigation is workflow: issue files must name the file and approach explicitly; analysis tasks are not a supported executor output type. Documented as an issue-writing rule.
+
+### [2026-07-22] Dogfooding 011 — Executor file-size ceiling varies by model (D-011b)
+
+- **File:** `src/orchestrator/agents/executor/applier.py` (full-file replacement approach)
+- **Debt:** The executor sends the full file content to the LLM and asks for the modified file back. Files above the model's effective output window produce truncated Python → `ast.parse` failure. Observed failure points: haiku failed on ~1000-line files (51K chars); gemini-2.5-flash failed on ~380-line files. The exact ceiling for each model is unknown — these are the largest files tested at failure, not empirically determined limits. The error message (`"unterminated string literal"` or `"invalid syntax"`) is technically correct but gives no hint that the root cause is model output truncation vs. a content error.
+- **Discovered by:** Dogfooding-011, Run A2 (haiku + `apply.py` ~1000 lines) and Run C (gemini + `main.py` ~380 lines)
+- **Why deferred:** Executor redesign (chunked or diff-only mode) is a significant architectural change, out of scope for the current phase. The file-size ceiling is a documented limitation of the full-file replacement approach noted in `docs/planning/strategic-recommendations.md`.
+
+### [2026-07-22] Dogfooding 011 — Executor applied `typer.Option()` to a non-Typer function (D-011c)
+
+- **File:** `src/orchestrator/commands/plan.py:30` (`execute()` signature), generated patch (Run A3)
+- **Debt:** Run A3's patch modified both `main.py` and `plan.py`. In `plan.py`, the executor changed `execute()`'s `workspace` parameter from `Optional[Path] = None` to `Optional[Path] = typer.Option(None, "--workspace", help=...)`. `execute()` is a plain Python function called from `main.py`'s Typer callback — not a Typer command handler — so the `typer.Option()` default is semantically wrong (Typer evaluates it only when registered as a command). The patch passed `pytest` (835 passed) because `main.py` always passes `workspace` explicitly, so the wrong default is never triggered at test time. Any direct caller of `plan.execute()` without `workspace` would receive a `OptionInfo` object instead of `None`.
+- **Discovered by:** Dogfooding-011, Run A3 (noted during post-apply diff review; the fix was applied only to the target clone, never to the main PatchForge repo)
+- **Why deferred:** Root cause is a multi-file plan where the executor blindly applied a Typer pattern from `main.py` to `plan.py`. Mitigation: issue files should scope to the minimum files needed; single-file plans reduce the risk of cross-file pattern bleeding, though they do not guarantee the executor won't apply the wrong pattern within a single file. The validation gate (pytest) did not catch it because no test calls `plan.execute()` with default `workspace`. A signature regression test was added to `tests/test_plan.py`.
+
+### [2026-07-22] Dogfooding 011 — gemini-2.5-flash fallback silently degrades executor for medium-sized files (D-011d)
+
+- **File:** `src/orchestrator/agents/executor/applier.py` (executor), `src/orchestrator/agents/architect/provider.py` (fallback chain)
+- **Debt:** When Anthropic API credits are exhausted, both the architect and executor fall back to `gemini-2.5-flash`. For files around 380 lines (`src/orchestrator/main.py`), gemini produced "unterminated string literal (detected at line 81)" on the first attempt and "invalid syntax (line 1)" on a second independent attempt — two different failure modes, suggesting nondeterministic truncation or malformed output. The `ast.parse` gate correctly rejects both, but there is no signal in the output that a credit-exhausted fallback is in use. The operator sees the same executor error messages as D-011b (file too large for the model), with no indication the real cause is the degraded fallback model.
+- **Discovered by:** Dogfooding-011, Run C (both attempts; `Done | model=gemini-2.5-flash` confirmed in architect log for both plan calls after Anthropic 402)
+- **Why deferred:** Two separate improvements needed: (1) the executor's full-file replacement approach is incompatible with gemini-2.5-flash for medium-sized files — requires executor redesign (same root as D-011b); (2) the system logs the final model used at DEBUG level but does not emit a visible warning when the registry-specified or default model was not the one that actually ran. A user-visible "fallback activated: <primary> → <actual>" line in the plan/preview output would make credit exhaustion immediately diagnosable.
+
 ### [2026-07-19] Issue #258 (all parts closed) — crash-window gap in dirt capture is inherent to the current design, not fixed
 
 - **File:** `src/orchestrator/commands/apply.py` (`--allow-dirty` dirt capture: `stash_create_dirt` + reset onto the target branch), `src/orchestrator/git.py` (`stash_create_dirt`, `store_dirt_ref`)
