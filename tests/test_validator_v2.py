@@ -88,6 +88,42 @@ def test_v2_cleanup_failure_is_incomplete(monkeypatch, tmp_path):
 
 
 @pytest.mark.unit
+def test_v2_failed_execution_remains_failed_when_later_declarations_are_not_run(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(adapters, "_raw_result", lambda *_: ProcessResult(return_code=1))
+
+    output = run_v2_validators(
+        "run-5b", tmp_path, [_validator("lint"), _validator("tests", "pytest")], 30
+    )
+
+    assert [tool.status for tool in output.tools] == [
+        ExecutionState.FAILED,
+        ExecutionState.NOT_RUN,
+    ]
+    assert output.overall_status is OverallStatus.FAILED
+
+
+@pytest.mark.unit
+def test_v2_timeout_remains_failed_when_later_declarations_are_not_run(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        adapters,
+        "_raw_result",
+        lambda *_: ProcessResult(return_code=None, timed_out=True),
+    )
+
+    output = run_v2_validators(
+        "run-5c", tmp_path, [_validator("lint"), _validator("tests", "pytest")], 30
+    )
+
+    assert [tool.status for tool in output.tools] == [
+        ExecutionState.TIMEOUT,
+        ExecutionState.NOT_RUN,
+    ]
+    assert output.overall_status is OverallStatus.FAILED
+
+
+@pytest.mark.unit
 def test_historical_v1_output_remains_readable_without_profile():
     from orchestrator.schemas.validator_output import ValidatorOutput
 

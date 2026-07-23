@@ -126,7 +126,6 @@ def run_v2_validators(
         overall_status = OverallStatus.APPROVED
     elif states & {
         ExecutionState.UNAVAILABLE,
-        ExecutionState.NOT_RUN,
         ExecutionState.CLEANUP_FAILED,
     }:
         overall_status = OverallStatus.INCOMPLETE
