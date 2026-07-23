@@ -43,6 +43,16 @@ def test_explicit_v1_config_is_loaded_as_legacy_profile(tmp_path):
     assert config.test_command == ["pytest", "tests"]
 
 
+def test_direct_legacy_config_rejects_validators(tmp_path):
+    with pytest.raises(ValueError, match="requires orchestrator.json schema_version 2.0"):
+        TargetConfig(
+            schema_version=LEGACY_SCHEMA_VERSION,
+            target_path=tmp_path,
+            workspace_path=_workspace(tmp_path),
+            validators=[{"id": "lint", "adapter": "ruff"}],
+        )
+
+
 def test_legacy_unknown_fields_remain_ignored(tmp_path):
     _write_config(tmp_path, {"legacy_extension": {"enabled": True}})
 

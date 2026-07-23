@@ -197,6 +197,8 @@ class TargetConfig(BaseModel):
     def _validate_workspace_is_external(self) -> "TargetConfig":
         self.workspace_path = validate_workspace_path(self.target_path, self.workspace_path)
         if self.validators is not None:
+            if self.schema_version == LEGACY_SCHEMA_VERSION:
+                raise ValueError("validators requires orchestrator.json schema_version 2.0")
             ids = [validator.id for validator in self.validators]
             if len(ids) != len(set(ids)):
                 raise ValueError("Validator ids must be unique")
