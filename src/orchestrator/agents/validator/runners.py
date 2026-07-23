@@ -1,6 +1,5 @@
 """Subprocess runners for ruff, pytest, and tsc with overlay workspace support."""
 
-import os
 import shutil
 import subprocess
 import sys
@@ -11,6 +10,7 @@ from pathlib import Path
 from orchestrator.schemas.validator_output import ToolResult
 
 from .logging import _get_logger
+from .process import build_venv_environment, prepare_process
 
 DEFAULT_TIMEOUT = 450
 assert DEFAULT_TIMEOUT > 0
@@ -36,13 +36,8 @@ def _resolve_cmd(cmd_override: list[str] | None, default: list[str]) -> list[str
 
 
 def _build_env_with_venv(project_root: Path) -> dict[str, str] | None:
-    for subdir in ("bin", "Scripts"):
-        venv_bin = project_root / ".venv" / subdir
-        if venv_bin.is_dir():
-            env = os.environ.copy()
-            env["PATH"] = str(venv_bin) + os.pathsep + env.get("PATH", "")
-            return env
-    return None
+    """Backward-compatible alias for shared process preparation."""
+    return build_venv_environment(project_root)
 
 
 def _run(
@@ -53,17 +48,20 @@ def _run(
     timeout: int = DEFAULT_TIMEOUT,
     env: dict[str, str] | None = None,
 ) -> ToolResult:
-    _get_logger().info("[%s] Running %s: %s (cwd=%s)", run_id, tool_name, " ".join(cmd), cwd)
+    prepared = prepare_process(cmd, cwd, environment=env)
+    _get_logger().info(
+        "[%s] Running %s: %s (cwd=%s)", run_id, tool_name, " ".join(prepared.argv), prepared.cwd
+    )
     t0 = time.perf_counter()
 
     try:
         proc = subprocess.run(
-            cmd,
-            cwd=str(cwd),
+            prepared.argv,
+            cwd=str(prepared.cwd),
             capture_output=True,
             text=True,
             timeout=timeout,
-            env=env,
+            env=prepared.env,
         )
     except FileNotFoundError:
         msg = f"Command not found: {cmd[0]} — is it installed and in PATH?"
