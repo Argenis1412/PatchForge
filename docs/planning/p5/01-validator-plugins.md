@@ -25,6 +25,14 @@ adapters. The system does not discover or load third-party plugins.
   tox and explicitly configured commands.
 - Add typed execution states, ordered execution and declared/effective role
   coverage.
+- Persist a compatible V2 execution profile with declaration identity,
+  fail-closed overall status and terminal execution state. Historical records
+  without a profile remain explicitly readable as V1.
+- Treat command overrides, `command`, and `tox` as declared-only coverage;
+  only fixed standard commands provide verified coverage.
+- Stop ordered execution after any non-approved result and record the remaining
+  declarations as not run. Process-tree cleanup failure is incomplete and
+  never authorizable.
 
 ### Phase 3 — Versioned results and authorization decisions
 
@@ -62,3 +70,12 @@ adapters. The system does not discover or load third-party plugins.
   visibly rather than silently falling back to defaults.
 - Process preparation gives callers one immutable argv/cwd/environment
   representation without executing through a shell.
+
+## Phase 2 boundaries
+
+Phase 2 extends the current result models with optional V2 metadata rather
+than formally versioning `validation.json`; that artifact versioning,
+historical-result policy and `ValidationDecision` remain Phase 3 work. Phase 2
+does not add sandboxing, hermetic execution, plugin discovery, doctor
+integration, candidate promotion, or a guarantee over deliberately detached
+child processes.
