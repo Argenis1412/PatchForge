@@ -25,6 +25,11 @@ _STANDARD_COMMANDS: dict[str, list[str]] = {
     "ruff": [sys.executable, "-m", "ruff", "check", "."],
     "pytest": [sys.executable, "-m", "pytest", ".", "--tb=short", "-q"],
     "tsc": ["npx", "tsc", "--noEmit"],
+    "flake8": ["flake8", "."],
+    "mypy": ["mypy", "."],
+    "pylint": ["pylint", "."],
+    "unittest": [sys.executable, "-m", "unittest", "discover"],
+    "tox": ["tox"],
 }
 
 
