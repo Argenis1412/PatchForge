@@ -13,8 +13,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 from typing import Optional
 
+from orchestrator.agents.validator.process import prepare_process
 from orchestrator.schemas.findings import ToolInfo
 
 
@@ -37,13 +39,16 @@ def _probe_module(cmd: str, timeout: int = 10) -> Optional[ToolInfo]:
     env.pop("PYTHONPATH", None)
     try:
         with tempfile.TemporaryDirectory(prefix="probe_", ignore_cleanup_errors=True) as probe_dir:
+            prepared = prepare_process(
+                [sys.executable, "-m", cmd, "--version"], Path(probe_dir), environment=env
+            )
             res = subprocess.run(
-                [sys.executable, "-m", cmd, "--version"],
+                list(prepared.argv),
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                cwd=probe_dir,
-                env=env,
+                cwd=str(prepared.cwd),
+                env=prepared.env,
             )
     except (subprocess.TimeoutExpired, OSError):
         return None
@@ -64,11 +69,14 @@ def _probe_path(cmd: str, timeout: int = 10) -> ToolInfo:
     if shutil.which(cmd) is None:
         return ToolInfo(available=False)
     try:
+        prepared = prepare_process([cmd, "--version"], Path.cwd())
         res = subprocess.run(
-            [cmd, "--version"],
+            list(prepared.argv),
             capture_output=True,
             text=True,
             timeout=timeout,
+            cwd=str(prepared.cwd),
+            env=prepared.env,
         )
         raw = (res.stdout or res.stderr).strip()
         version = raw.splitlines()[0] if (res.returncode == 0 and raw) else None

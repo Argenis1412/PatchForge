@@ -1,11 +1,14 @@
 """Target configuration: loading, detection, and validation of workspace paths."""
 
 __all__ = [
+    "LEGACY_SCHEMA_VERSION",
     "SCHEMA_VERSION",
     "ProviderModelConfig",
     "ProvidersConfig",
     "TargetCapabilities",
     "TargetConfig",
+    "ValidatorConfig",
+    "ValidatorRole",
     "default_workspace_path",
     "detect_capabilities",
     "validate_workspace_path",
@@ -15,8 +18,9 @@ import hashlib
 import json
 import logging
 import os
+from enum import Enum
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -24,7 +28,82 @@ from orchestrator.git import resolve_git_root as _resolve_git_root
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "2.0"
+LEGACY_SCHEMA_VERSION = "1.0"
+
+
+class ValidatorRole(str, Enum):
+    LINT = "lint"
+    TEST = "test"
+    TYPECHECK = "typecheck"
+
+
+_FIXED_ADAPTER_ROLES: dict[str, tuple[ValidatorRole, ...]] = {
+    "ruff": (ValidatorRole.LINT,),
+    "flake8": (ValidatorRole.LINT,),
+    "pylint": (ValidatorRole.LINT,),
+    "pytest": (ValidatorRole.TEST,),
+    "unittest": (ValidatorRole.TEST,),
+    "mypy": (ValidatorRole.TYPECHECK,),
+    "tsc": (ValidatorRole.TYPECHECK,),
+}
+
+
+class ValidatorConfig(BaseModel):
+    """A V2 declaration of one ordered validator instance."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    adapter: Literal[
+        "ruff", "pytest", "tsc", "flake8", "mypy", "pylint", "unittest", "tox", "command"
+    ]
+    roles: Optional[List[ValidatorRole]] = None
+    command: Optional[List[str]] = None
+    success_codes: List[int] = Field(default_factory=lambda: [0])
+
+    @field_validator("id")
+    @classmethod
+    def _validate_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Validator id must not be empty")
+        return value
+
+    @field_validator("command")
+    @classmethod
+    def _validate_command(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        invalid_command = value is not None and (
+            not value or any(not isinstance(arg, str) or not arg for arg in value)
+        )
+        if invalid_command:
+            raise ValueError("Validator command must contain non-empty string arguments")
+        return value
+
+    @field_validator("success_codes")
+    @classmethod
+    def _validate_success_codes(cls, value: List[int]) -> List[int]:
+        if not value or len(set(value)) != len(value):
+            raise ValueError("success_codes must be a non-empty list of unique integers")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_adapter_contract(self) -> "ValidatorConfig":
+        if self.roles is not None and len(set(self.roles)) != len(self.roles):
+            raise ValueError("Validator roles must be unique")
+        fixed_roles = _FIXED_ADAPTER_ROLES.get(self.adapter)
+        if fixed_roles is not None:
+            if self.roles is None:
+                self.roles = list(fixed_roles)
+            elif tuple(self.roles) != fixed_roles:
+                expected = [role.value for role in fixed_roles]
+                raise ValueError(f"{self.adapter} roles must be {expected}")
+        elif self.adapter == "command":
+            if self.command is None or not self.roles:
+                raise ValueError("command requires command and roles")
+        elif self.adapter == "tox" and not self.roles:
+            raise ValueError("tox requires one or more declared roles")
+        return self
 
 
 def _workspace_hash(root_path: Path) -> str:
@@ -89,7 +168,7 @@ class TargetCapabilities(BaseModel):
 
 
 class TargetConfig(BaseModel):
-    schema_version: str = SCHEMA_VERSION
+    schema_version: Literal[LEGACY_SCHEMA_VERSION, SCHEMA_VERSION] = SCHEMA_VERSION
     target_path: Path
     workspace_path: Path
     ignore_dirs: List[str] = [
@@ -108,6 +187,7 @@ class TargetConfig(BaseModel):
     test_command: Optional[List[str]] = None
     typecheck_command: Optional[List[str]] = None
     validator_timeout: Optional[int] = Field(default=None, gt=0)
+    validators: Optional[List[ValidatorConfig]] = None
 
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
 
@@ -116,6 +196,12 @@ class TargetConfig(BaseModel):
     @model_validator(mode="after")
     def _validate_workspace_is_external(self) -> "TargetConfig":
         self.workspace_path = validate_workspace_path(self.target_path, self.workspace_path)
+        if self.validators is not None:
+            if self.schema_version == LEGACY_SCHEMA_VERSION:
+                raise ValueError("validators requires orchestrator.json schema_version 2.0")
+            ids = [validator.id for validator in self.validators]
+            if len(ids) != len(set(ids)):
+                raise ValueError("Validator ids must be unique")
         return self
 
     @classmethod
@@ -157,6 +243,7 @@ class TargetConfig(BaseModel):
         default_workspace = default_workspace_path(target_path)
 
         config_data = {
+            "schema_version": LEGACY_SCHEMA_VERSION,
             "target_path": target_path,
             "workspace_path": default_workspace,
             "capabilities": detected_caps,
@@ -168,34 +255,56 @@ class TargetConfig(BaseModel):
             try:
                 with open(config_file_path, "r", encoding="utf-8") as f:
                     file_data = json.load(f)
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValueError(f"Invalid orchestrator.json: {exc}") from exc
 
-                # Merge top-level config keys
-                for key in [
-                    "workspace_path",
-                    "ignore_dirs",
-                    "extensions",
-                    "lint_command",
-                    "test_command",
-                    "typecheck_command",
-                    "validator_timeout",
-                    "providers",
-                ]:
-                    if key in file_data and file_data[key] is not None:
-                        if key == "workspace_path":
-                            config_data[key] = Path(file_data[key]).expanduser().resolve()
-                        else:
-                            config_data[key] = file_data[key]
+            if not isinstance(file_data, dict):
+                raise ValueError("Invalid orchestrator.json: root value must be an object")
 
-                # Merge capabilities overrides from file
-                if "capabilities" in file_data and isinstance(file_data["capabilities"], dict):
-                    for cap_key, val in file_data["capabilities"].items():
-                        stripped = cap_key.replace("effective_", "").replace("detected_", "")
-                        eff_key = f"effective_{stripped}"
-                        if hasattr(detected_caps, eff_key):
-                            setattr(detected_caps, eff_key, bool(val))
-            except Exception as e:
-                # If loading config fails, we proceed with defaults but log a warning
-                print(f"[Warning] Failed to load config file: {e}")
+            version = file_data.get("schema_version", LEGACY_SCHEMA_VERSION)
+            if version not in (LEGACY_SCHEMA_VERSION, SCHEMA_VERSION):
+                raise ValueError(f"Unsupported orchestrator.json schema_version: {version!r}")
+            if version == LEGACY_SCHEMA_VERSION and "validators" in file_data:
+                raise ValueError("validators requires orchestrator.json schema_version 2.0")
+
+            allowed_keys = {
+                "schema_version",
+                "workspace_path",
+                "ignore_dirs",
+                "extensions",
+                "lint_command",
+                "test_command",
+                "typecheck_command",
+                "validator_timeout",
+                "providers",
+                "capabilities",
+            }
+            if version == SCHEMA_VERSION:
+                allowed_keys.add("validators")
+            unknown_keys = set(file_data) - allowed_keys
+            if unknown_keys and version == SCHEMA_VERSION:
+                names = ", ".join(sorted(unknown_keys))
+                raise ValueError(f"Invalid orchestrator.json: unknown fields: {names}")
+
+            config_data["schema_version"] = version
+            for key in allowed_keys - {"schema_version", "capabilities"}:
+                if key in file_data and file_data[key] is not None:
+                    if key == "workspace_path":
+                        config_data[key] = Path(file_data[key]).expanduser().resolve()
+                    else:
+                        config_data[key] = file_data[key]
+
+            if "capabilities" in file_data:
+                if not isinstance(file_data["capabilities"], dict):
+                    raise ValueError("Invalid orchestrator.json: capabilities must be an object")
+                for cap_key, val in file_data["capabilities"].items():
+                    stripped = cap_key.replace("effective_", "").replace("detected_", "")
+                    eff_key = f"effective_{stripped}"
+                    if not hasattr(detected_caps, eff_key):
+                        raise ValueError(
+                            f"Invalid orchestrator.json: unknown capability {cap_key!r}"
+                        )
+                    setattr(detected_caps, eff_key, bool(val))
 
         # 3. Apply CLI Overrides
         if workspace_path is not None:
