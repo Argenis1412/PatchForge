@@ -43,7 +43,7 @@ def _probe_module(cmd: str, timeout: int = 10) -> Optional[ToolInfo]:
                 [sys.executable, "-m", cmd, "--version"], Path(probe_dir), environment=env
             )
             res = subprocess.run(
-                prepared.argv,
+                list(prepared.argv),
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -71,7 +71,7 @@ def _probe_path(cmd: str, timeout: int = 10) -> ToolInfo:
     try:
         prepared = prepare_process([cmd, "--version"], Path.cwd())
         res = subprocess.run(
-            prepared.argv,
+            list(prepared.argv),
             capture_output=True,
             text=True,
             timeout=timeout,
