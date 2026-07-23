@@ -16,6 +16,7 @@ from orchestrator.circuit_breaker import circuit_breaker_for
 from orchestrator.observability.logging import get_file_logger as get_file_logger
 from orchestrator.schemas.validator_output import ToolResult, ValidatorOutput
 
+from .adapters import run_v2_validators
 from .logging import _get_logger
 from .logging import _logger as _logger
 from .runners import DEFAULT_TIMEOUT, run_pytest, run_ruff, run_tsc
@@ -49,6 +50,27 @@ def run(
 
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:6]
     _get_logger(logs_dir).info("=== Validator run %s (timeout=%ds) ===", run_id, timeout)
+
+    if config.validators is not None:
+        output = run_v2_validators(run_id, project_root, config.validators, timeout)
+        failed = [result for result in output.tools if result.passed is False]
+        if failed:
+            for tool_result in failed:
+                summary, _ = _summarize_errors([tool_result], run_id)
+                tool_result.error_summary = summary
+            output.llm_summary, output.model_used_for_summary = _summarize_errors(failed, run_id)
+        _get_logger().info(
+            "[%s] Finished V2 | overall=%s | state=%s",
+            run_id,
+            "PASS" if output.overall_passed else "NOT APPROVED",
+            output.overall_status,
+        )
+        return output, {
+            "tokens_input": 0,
+            "tokens_output": 0,
+            "cost_usd": 0.0,
+            "model_used": output.model_used_for_summary,
+        }
 
     results: list[ToolResult] = []
 
