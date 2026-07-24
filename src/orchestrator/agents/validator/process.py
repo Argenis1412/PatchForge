@@ -106,8 +106,8 @@ def execute_process(prepared: PreparedProcess, timeout: int) -> ProcessResult:
             start_new_session=os.name != "nt",
             creationflags=creationflags,
         )
-    except FileNotFoundError:
-        return ProcessResult(return_code=None, unavailable=True)
+    except OSError as exc:
+        return ProcessResult(return_code=None, unavailable=True, stderr=str(exc))
 
     try:
         stdout, stderr = process.communicate(timeout=timeout)

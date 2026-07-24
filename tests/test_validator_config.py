@@ -80,6 +80,13 @@ def test_v2_config_assigns_fixed_adapter_roles(tmp_path):
     assert config.validators[1].roles == [ValidatorRole.TYPECHECK]
 
 
+def test_v2_config_rejects_empty_validator_declarations(tmp_path):
+    _write_config(tmp_path, {"schema_version": SCHEMA_VERSION, "validators": []})
+
+    with pytest.raises(ValueError, match="at least one declaration"):
+        TargetConfig.load(tmp_path, workspace_path=_workspace(tmp_path))
+
+
 def test_v2_command_requires_declared_roles_and_argv(tmp_path):
     _write_config(
         tmp_path,

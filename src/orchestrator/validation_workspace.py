@@ -107,7 +107,11 @@ def write_validation_json(workspace: ValidationWorkspace, results: ValidatorOutp
     dest_path = workspace.temporary_root / "validation.json"
     temp_path = dest_path.with_suffix(".json.tmp")
     temp_path.write_text(results.model_dump_json(indent=2), encoding="utf-8")
-    temp_path.replace(dest_path)
+    try:
+        temp_path.replace(dest_path)
+    except OSError:
+        temp_path.unlink(missing_ok=True)
+        raise
     return dest_path
 
 

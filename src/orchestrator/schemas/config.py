@@ -199,6 +199,8 @@ class TargetConfig(BaseModel):
         if self.validators is not None:
             if self.schema_version == LEGACY_SCHEMA_VERSION:
                 raise ValueError("validators requires orchestrator.json schema_version 2.0")
+            if not self.validators:
+                raise ValueError("validators must contain at least one declaration")
             ids = [validator.id for validator in self.validators]
             if len(ids) != len(set(ids)):
                 raise ValueError("Validator ids must be unique")

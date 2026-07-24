@@ -13,7 +13,7 @@ __all__ = [
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ExecutionState(str, Enum):
@@ -68,3 +68,25 @@ class ValidatorOutput(BaseModel):
     model_used_for_summary: str = ""  # empty if all passed (Gemini was not invoked)
     result_profile: Literal["v1", "v2"] | None = None
     overall_status: OverallStatus | None = None
+
+    @model_validator(mode="after")
+    def _validate_v2_result(self) -> "ValidatorOutput":
+        """Require V2 metadata while preserving historical V1 records."""
+        if self.result_profile != "v2":
+            return self
+        if self.overall_status is None:
+            raise ValueError("V2 validator output requires overall_status")
+        for tool in self.tools:
+            if tool.validator_id is None:
+                raise ValueError("V2 tool result requires validator_id")
+            if tool.adapter is None:
+                raise ValueError("V2 tool result requires adapter")
+            if tool.declaration_index is None:
+                raise ValueError("V2 tool result requires declaration_index")
+            if tool.status is None:
+                raise ValueError("V2 tool result requires status")
+            if not tool.declared_roles:
+                raise ValueError("V2 tool result requires declared_roles")
+            if not tool.role_coverage:
+                raise ValueError("V2 tool result requires role_coverage")
+        return self

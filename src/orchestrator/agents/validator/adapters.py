@@ -38,7 +38,11 @@ def _has_frontend(project_root: Path) -> bool:
 
 
 def _raw_result(declaration: ValidatorConfig, project_root: Path, timeout: int) -> ProcessResult:
-    if declaration.adapter == "tsc" and not _has_frontend(project_root):
+    if (
+        declaration.adapter == "tsc"
+        and declaration.command is None
+        and not _has_frontend(project_root)
+    ):
         return ProcessResult(return_code=None, unavailable=True)
     command = declaration.command or _STANDARD_COMMANDS.get(declaration.adapter)
     if command is None:
@@ -111,6 +115,15 @@ def run_v2_validators(
     timeout: int,
 ) -> ValidatorOutput:
     """Run V2 declarations in order, stopping after any non-approved result."""
+    if not validators:
+        return ValidatorOutput(
+            overall_passed=False,
+            overall_status=OverallStatus.INCOMPLETE,
+            result_profile="v2",
+            tools=[],
+            run_id=run_id,
+        )
+
     results: list[ToolResult] = []
     for index, declaration in enumerate(validators):
         raw = _raw_result(declaration, project_root, timeout)
