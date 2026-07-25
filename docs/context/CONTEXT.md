@@ -15,9 +15,16 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 966 passed, 6 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 1046 passed, 6 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3). `SqliteCircuitBreakerStore` is now thread-safe (issue #219).
+
+**Validator plugins:** Issue #282 Phases 1-3 are complete. New
+`validation.json` artifacts are schema-versioned and carry explicit policy,
+requirements, subject, and audit decision. V1 configuration remains
+transitionally compatible; unversioned historical artifacts are readable but
+not authorization credentials. Cross-process authorization transfer,
+environment attestation, and candidate promotion remain deferred.
 
 ---
 

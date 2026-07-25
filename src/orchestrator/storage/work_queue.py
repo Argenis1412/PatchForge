@@ -317,6 +317,11 @@ def _execute_apply_with_checkpoints(
     )
     from orchestrator.schemas.artifacts import ApplyResult
     from orchestrator.schemas.config import TargetConfig
+    from orchestrator.validation_decision import (
+        bind_validation_subject,
+        evaluate_validation,
+        expected_validation_subject,
+    )
 
     run_dir = workspace.run_dir(run_id)
     wal_path = run_dir / "apply.json"
@@ -348,6 +353,7 @@ def _execute_apply_with_checkpoints(
 
     # ---- Phase 0: fresh entry --------------------------------------------
     pre_apply_head = current_head(repo_path)
+    config = TargetConfig.load(target_path=repo_path, workspace_path=workspace.root)
     apply_result = ApplyResult(
         run_id=run_id,
         applied_at=datetime.now(timezone.utc),
@@ -375,13 +381,32 @@ def _execute_apply_with_checkpoints(
             _wal_write(apply_result, wal_path)
         raise PatchApplyError(f"git apply failed: {ap.stderr}")
 
-    # Post-apply validation against the freshly applied tree.
-    config = TargetConfig.load(target_path=repo_path, workspace_path=workspace.root)
+    # Post-apply validation against the freshly applied tree using the
+    # configuration captured before the patch could change it.
     try:
         val_out, _ = run_validator(config=config, staging_dir=None)  # validate real working tree
     except Exception:
         val_out = None
-    if val_out is not None and not val_out.overall_passed:
+    expected_subject = None
+    if val_out is not None:
+        patch_checksum = hashlib.sha256(patch_path.read_bytes()).hexdigest()
+        val_out = bind_validation_subject(
+            val_out, base_commit=pre_apply_head, patch_checksum=patch_checksum
+        )
+        if getattr(val_out, "schema_version", None) == 2:
+            expected_subject = expected_validation_subject(
+                run_id=val_out.run_id,
+                project_root=repo_path,
+                base_commit=pre_apply_head,
+                patch_checksum=patch_checksum,
+            )
+
+    if (
+        val_out is None
+        or not evaluate_validation(
+            val_out, fresh=True, expected_subject=expected_subject
+        ).authorized
+    ):
         try:
             force_reset_apply(repo_path, pre_apply_head)
             delete_local_branch(repo_path, branch, force=True)

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Union
 from orchestrator.circuit_breaker import circuit_breaker_for
 from orchestrator.observability.logging import get_file_logger as get_file_logger
 from orchestrator.schemas.validator_output import ToolResult, ValidatorOutput
+from orchestrator.validation_decision import attach_validation_decision
 
 from .adapters import run_v2_validators
 from .logging import _get_logger
@@ -65,6 +66,7 @@ def run(
             "PASS" if output.overall_passed else "NOT APPROVED",
             output.overall_status,
         )
+        output = attach_validation_decision(output, config)
         return output, {
             "tokens_input": 0,
             "tokens_output": 0,
@@ -150,6 +152,7 @@ def run(
         run_id=run_id,
         model_used_for_summary=model_used,
     )
+    output = attach_validation_decision(output, config)
 
     _get_logger().info(
         "[%s] Finished | overall=%s | failed_tools=%s",

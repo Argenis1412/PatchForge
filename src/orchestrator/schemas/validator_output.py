@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 __all__ = [
+    "AuthorizationProfile",
     "CoverageStatus",
+    "DecisionReason",
     "ExecutionState",
     "OverallStatus",
     "ToolResult",
+    "ValidationDecision",
+    "ValidationRequirements",
+    "ValidationSubject",
     "ValidatorOutput",
 ]
 
@@ -35,6 +40,47 @@ class OverallStatus(str, Enum):
     APPROVED = "approved"
     FAILED = "failed"
     INCOMPLETE = "incomplete"
+
+
+class AuthorizationProfile(str, Enum):
+    """Stable authorization semantics, independent from artifact shape."""
+
+    LEGACY_V1_COMPAT = "legacy_v1_compat@1"
+    V2_VERIFIED_ROLES = "v2_verified_roles@1"
+
+
+class DecisionReason(str, Enum):
+    """Machine-readable reasons emitted by validation authorization."""
+
+    APPROVED = "approved"
+    LEGACY_FAILED = "legacy_failed"
+    OVERALL_NOT_APPROVED = "overall_not_approved"
+    ROLE_NOT_VERIFIED = "role_not_verified"
+    UNSUPPORTED_ARTIFACT = "unsupported_artifact"
+
+
+class ValidationRequirements(BaseModel):
+    """Canonical validation requirements captured before execution."""
+
+    roles: list[str] = Field(default_factory=list)
+    validator_ids: list[str] = Field(default_factory=list)
+    digest: str
+
+
+class ValidationSubject(BaseModel):
+    """Execution identity to which validation evidence is scoped."""
+
+    run_id: str
+    project_identity: str
+    base_commit: str | None = None
+    patch_checksum: str | None = None
+
+
+class ValidationDecision(BaseModel):
+    """Derived authorization outcome; persisted for audit, not replay authority."""
+
+    authorized: bool
+    reasons: list[DecisionReason]
 
 
 class ToolResult(BaseModel):
@@ -68,6 +114,11 @@ class ValidatorOutput(BaseModel):
     model_used_for_summary: str = ""  # empty if all passed (Gemini was not invoked)
     result_profile: Literal["v1", "v2"] | None = None
     overall_status: OverallStatus | None = None
+    schema_version: Literal[2] | None = None
+    authorization_profile: AuthorizationProfile | None = None
+    validation_requirements: ValidationRequirements | None = None
+    validation_subject: ValidationSubject | None = None
+    decision: ValidationDecision | None = None
 
     @model_validator(mode="after")
     def _validate_v2_result(self) -> "ValidatorOutput":
