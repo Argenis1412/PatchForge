@@ -72,7 +72,11 @@ def execute(
     from orchestrator.schemas.experiment import Experiment
     from orchestrator.schemas.issue import parse_issue_markdown
     from orchestrator.storage import _wal_write
-    from orchestrator.validation_decision import bind_validation_subject, evaluate_validation
+    from orchestrator.validation_decision import (
+        bind_validation_subject,
+        evaluate_validation,
+        expected_validation_subject,
+    )
     from orchestrator.validation_workspace import (
         apply_patch_to_copy,
         create_validation_workspace,
@@ -459,10 +463,12 @@ def execute(
 
     patch_path = run_dir / "patch.diff"
     validator_output = None
+    validation_target_path = target_path
     try:
         with create_validation_workspace(
             original_root=target_path, patch_path=patch_path
         ) as val_ws:
+            validation_target_path = val_ws.temporary_root
             apply_res = apply_patch_to_copy(val_ws.temporary_root, val_ws.patch_path)
             if apply_res.return_code != 0:
                 from orchestrator.schemas.validator_output import ValidatorOutput
@@ -495,6 +501,14 @@ def execute(
         base_commit=run_metadata.base_commit,
         patch_checksum=patch_checksum,
     )
+    expected_subject = None
+    if getattr(validator_output, "schema_version", None) == 2:
+        expected_subject = expected_validation_subject(
+            run_id=validator_output.run_id,
+            project_root=validation_target_path,
+            base_commit=run_metadata.base_commit,
+            patch_checksum=patch_checksum,
+        )
     workspace_mgr.write_artifact(
         run_id, "validation.json", validator_output.model_dump_json(indent=2)
     )
@@ -515,7 +529,9 @@ def execute(
     }
     run_metadata.provider_config = exec_meta.get("models_resolved")
 
-    if not evaluate_validation(validator_output, fresh=True).authorized:
+    if not evaluate_validation(
+        validator_output, fresh=True, expected_subject=expected_subject
+    ).authorized:
         run_metadata.status = "validation_failed"
         run_metadata.updated_at = datetime.now(timezone.utc)
         workspace_mgr.write_run_json(run_id, run_metadata)

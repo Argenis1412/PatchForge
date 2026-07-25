@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from orchestrator.schemas.validator_output import (
@@ -35,6 +36,18 @@ def _requirements_for(config: "TargetConfig") -> ValidationRequirements:
         roles=roles,
         validator_ids=[item["id"] for item in payload],
         digest=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+    )
+
+
+def expected_validation_subject(
+    *, run_id: str, project_root: Path, base_commit: str, patch_checksum: str
+) -> ValidationSubject:
+    """Build the caller-authoritative identity for fresh validation evidence."""
+    return ValidationSubject(
+        run_id=run_id,
+        project_identity=str(project_root.resolve()),
+        base_commit=base_commit,
+        patch_checksum=patch_checksum,
     )
 
 
@@ -109,8 +122,12 @@ def bind_validation_subject(
     """Bind fresh validation evidence to the candidate handled by a caller."""
     if not isinstance(output, ValidatorOutput) or output.validation_subject is None:
         return output
-    subject = output.validation_subject.model_copy(
-        update={"base_commit": base_commit, "patch_checksum": patch_checksum}
-    )
+    subject = output.validation_subject
+    updates = {}
+    if subject.base_commit is None:
+        updates["base_commit"] = base_commit
+    if subject.patch_checksum is None:
+        updates["patch_checksum"] = patch_checksum
+    subject = subject.model_copy(update=updates)
     bound = output.model_copy(update={"validation_subject": subject})
     return bound.model_copy(update={"decision": evaluate_validation(bound)})

@@ -13,6 +13,7 @@ from orchestrator.validation_decision import (
     attach_validation_decision,
     bind_validation_subject,
     evaluate_validation,
+    expected_validation_subject,
 )
 
 
@@ -119,6 +120,38 @@ def test_subject_mismatch_denies_a_fresh_v2_result(monkeypatch, tmp_path):
             output,
             expected_subject=output.validation_subject.model_copy(
                 update={"patch_checksum": "c" * 64}
+            ),
+        ).authorized
+        is False
+    )
+
+
+@pytest.mark.unit
+def test_binding_does_not_replace_existing_subject_identity(monkeypatch, tmp_path):
+    monkeypatch.setattr(adapters, "_raw_result", lambda *_: ProcessResult(return_code=0))
+    config = _config(tmp_path, [ValidatorConfig(id="lint", adapter="ruff")])
+    output = attach_validation_decision(
+        run_v2_validators("run-v2", tmp_path, config.validators or [], 30), config
+    )
+    tampered = output.model_copy(
+        update={
+            "validation_subject": output.validation_subject.model_copy(
+                update={"base_commit": "wrong-base", "patch_checksum": "a" * 64}
+            )
+        }
+    )
+    bound = bind_validation_subject(tampered, base_commit="b" * 40, patch_checksum="c" * 64)
+
+    assert bound.validation_subject.base_commit == "wrong-base"
+    assert (
+        evaluate_validation(
+            bound,
+            fresh=True,
+            expected_subject=expected_validation_subject(
+                run_id="run-v2",
+                project_root=tmp_path,
+                base_commit="b" * 40,
+                patch_checksum="c" * 64,
             ),
         ).authorized
         is False

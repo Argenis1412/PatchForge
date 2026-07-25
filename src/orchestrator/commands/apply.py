@@ -139,7 +139,11 @@ def execute(
     )
     from orchestrator.schemas.config import default_workspace_path
     from orchestrator.schemas.git import ApplyCheckStatus
-    from orchestrator.validation_decision import bind_validation_subject, evaluate_validation
+    from orchestrator.validation_decision import (
+        bind_validation_subject,
+        evaluate_validation,
+        expected_validation_subject,
+    )
 
     # 1. Resolve workspace path and ensure run exists
     if workspace is not None:
@@ -869,9 +873,17 @@ def execute(
                 post_val_output = None
 
         if post_val_output is not None:
+            expected_subject = None
+            if getattr(post_val_output, "schema_version", None) == 2:
+                expected_subject = expected_validation_subject(
+                    run_id=post_val_output.run_id,
+                    project_root=target_path,
+                    base_commit=pre_apply_head,
+                    patch_checksum=actual_checksum,
+                )
             post_val_output = bind_validation_subject(
                 post_val_output,
-                base_commit=run_metadata.base_commit,
+                base_commit=pre_apply_head,
                 patch_checksum=actual_checksum,
             )
             workspace_mgr.write_artifact(
@@ -879,7 +891,7 @@ def execute(
             )
 
         post_val_decision = (
-            evaluate_validation(post_val_output, fresh=True)
+            evaluate_validation(post_val_output, fresh=True, expected_subject=expected_subject)
             if post_val_output is not None
             else None
         )

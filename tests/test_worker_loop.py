@@ -504,6 +504,7 @@ def test_apply_pr_body_includes_triggered_by(
     repo_path = workspace.run_dir(run_id) / "repo"
     repo_path.mkdir(parents=True)
     (workspace.run_dir(run_id) / "patch.diff").write_text("dummy patch\n", encoding="utf-8")
+    phase_one_events: list[str] = []
 
     # Mock every subprocess/git touchpoint reached before Phase 4.
     monkeypatch.setattr("orchestrator.git.current_head", lambda *a, **kw: "0" * 40)
@@ -513,7 +514,9 @@ def test_apply_pr_body_includes_triggered_by(
     )
     monkeypatch.setattr(
         "orchestrator.git.apply_patch",
-        lambda *a, **kw: MagicMock(return_code=0, stderr=""),
+        lambda *a, **kw: (
+            phase_one_events.append("apply_patch") or MagicMock(return_code=0, stderr="")
+        ),
     )
     monkeypatch.setattr(
         "orchestrator.git.git_push",
@@ -523,10 +526,9 @@ def test_apply_pr_body_includes_triggered_by(
         "orchestrator.storage.work_queue.subprocess.run",
         lambda *a, **kw: MagicMock(returncode=0, stderr="", stdout=""),
     )
-    # Skip Phase 1 post-apply validation (TargetConfig.load + validator).
     monkeypatch.setattr(
         "orchestrator.schemas.config.TargetConfig.load",
-        classmethod(lambda cls, **kw: MagicMock()),
+        classmethod(lambda cls, **kw: phase_one_events.append("config") or MagicMock()),
     )
     monkeypatch.setattr(
         "orchestrator.agents.validator.run",
@@ -547,6 +549,7 @@ def test_apply_pr_body_includes_triggered_by(
     )
 
     fake_github.create_pr.assert_called_once()
+    assert phase_one_events.index("config") < phase_one_events.index("apply_patch")
     body = fake_github.create_pr.call_args.kwargs["body"]
     assert "**Triggered by:** github:octocat" in body
 
