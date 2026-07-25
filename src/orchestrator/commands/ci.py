@@ -72,6 +72,7 @@ def execute(
     from orchestrator.schemas.experiment import Experiment
     from orchestrator.schemas.issue import parse_issue_markdown
     from orchestrator.storage import _wal_write
+    from orchestrator.validation_decision import evaluate_validation
     from orchestrator.validation_workspace import (
         apply_patch_to_copy,
         create_validation_workspace,
@@ -509,7 +510,7 @@ def execute(
     }
     run_metadata.provider_config = exec_meta.get("models_resolved")
 
-    if not validator_output.overall_passed:
+    if not evaluate_validation(validator_output, fresh=True).authorized:
         run_metadata.status = "validation_failed"
         run_metadata.updated_at = datetime.now(timezone.utc)
         workspace_mgr.write_run_json(run_id, run_metadata)

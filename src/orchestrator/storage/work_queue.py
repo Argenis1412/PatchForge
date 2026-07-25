@@ -381,7 +381,9 @@ def _execute_apply_with_checkpoints(
         val_out, _ = run_validator(config=config, staging_dir=None)  # validate real working tree
     except Exception:
         val_out = None
-    if val_out is not None and not val_out.overall_passed:
+    from orchestrator.validation_decision import evaluate_validation
+
+    if val_out is None or not evaluate_validation(val_out, fresh=True).authorized:
         try:
             force_reset_apply(repo_path, pre_apply_head)
             delete_local_branch(repo_path, branch, force=True)

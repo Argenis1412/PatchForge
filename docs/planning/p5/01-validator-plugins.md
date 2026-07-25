@@ -1,7 +1,7 @@
 # P5 — 1. Validator Plugins
 
 > **GitHub issue:** #282  
-> **Status:** In progress — Phase 1
+> **Status:** In progress — Phases 1-3 complete
 
 ## Goal
 
@@ -38,6 +38,10 @@ adapters. The system does not discover or load third-party plugins.
 
 - Version `validation.json`, distinguish verified V2 results from historical
   V1 records and centralize authorization in `ValidationDecision`.
+- Preserve new V1 executions through an explicit compatibility authorization
+  profile; historical unversioned artifacts are diagnostic only.
+- Bind decisions to canonical validation requirements and the validation
+  subject. Persisted artifacts are audit evidence, not cross-process authority.
 
 ### Phase 4 — Candidate promotion
 
@@ -79,3 +83,12 @@ historical-result policy and `ValidationDecision` remain Phase 3 work. Phase 2
 does not add sandboxing, hermetic execution, plugin discovery, doctor
 integration, candidate promotion, or a guarantee over deliberately detached
 child processes.
+
+## Phase 3 boundaries
+
+Phase 3 versions newly written validation artifacts and centralizes policy for
+fresh validation inside `apply`, CI, and worker flows. It does not add a
+credential that lets a later process reuse `validation.json` as authorization;
+that trusted transfer belongs with candidate promotion. `verified` remains
+contextual evidence of an in-tree standard command, not a hermetic, signed, or
+environment-reproducible attestation.

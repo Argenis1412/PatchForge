@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for issue #282, phase 1.
+Accepted for issue #282, phases 1-3.
 
 ## Decision
 
@@ -48,3 +48,26 @@ Validator processes are supervised as a managed process tree. A timeout is
 persisted only after cleanup is confirmed; cleanup that cannot be confirmed is
 recorded as `cleanup_failed` and is non-authorizable. This does not provide a
 hermetic sandbox or control intentionally detached processes.
+
+## Phase 3 artifact and authorization contract
+
+New `validation.json` writers emit additive artifact schema version `2` with
+an explicit authorization profile, canonical validation requirements, a
+validation subject, and a derived decision. Artifact schema and authorization
+policy version independently: supported profiles are `legacy_v1_compat@1` and
+`v2_verified_roles@1`; unknown versions or profiles are non-authorizable.
+
+`legacy_v1_compat@1` is selected only for new executions of a versionless V1
+configuration and preserves its `overall_passed` behavior during the
+transition. V2 configuration selects `v2_verified_roles@1`, which authorizes
+only an approved result whose canonical required roles all have `verified`
+coverage. `command`, `tox`, and command overrides remain `declared_only` and
+cannot satisfy that profile.
+
+Historical unversioned artifacts remain readable for diagnosis but are never
+authorization credentials. Persisted decisions are audit evidence only: a
+separate `apply` run or worker must validate within its own controlled flow
+before it confirms a mutation. The persisted artifact does not transfer
+authority across process boundaries. `verified` records contextual execution
+of a fixed in-tree standard command; it is not a hermetic or signed
+attestation of a toolchain or environment.

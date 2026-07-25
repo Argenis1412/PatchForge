@@ -139,6 +139,7 @@ def execute(
     )
     from orchestrator.schemas.config import default_workspace_path
     from orchestrator.schemas.git import ApplyCheckStatus
+    from orchestrator.validation_decision import evaluate_validation
 
     # 1. Resolve workspace path and ensure run exists
     if workspace is not None:
@@ -872,10 +873,16 @@ def execute(
                 run_id, "post_apply_validation.json", post_val_output.model_dump_json(indent=2)
             )
 
+        post_val_decision = (
+            evaluate_validation(post_val_output, fresh=True)
+            if post_val_output is not None
+            else None
+        )
+
         # 10. Handle post-apply validation failure or execution error: roll
         # back automatically. post_val_output is None only when run_validator
         # raised, which must never be treated as an implicit pass.
-        if post_val_output is None or not post_val_output.overall_passed:
+        if post_val_decision is None or not post_val_decision.authorized:
             console.print(
                 "[bold yellow]Post-apply validation failed. Rolling back...[/bold yellow]"
             )
