@@ -72,6 +72,8 @@ class ValidationSubject(BaseModel):
 
     run_id: str
     project_identity: str
+    base_commit: str | None = None
+    patch_checksum: str | None = None
 
 
 class ValidationDecision(BaseModel):

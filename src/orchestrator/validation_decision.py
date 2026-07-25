@@ -28,15 +28,9 @@ if TYPE_CHECKING:
 
 def _requirements_for(config: "TargetConfig") -> ValidationRequirements:
     validators = config.validators or []
-    payload = [
-        {
-            "id": validator.id,
-            "roles": [role.value for role in validator.roles or []],
-        }
-        for validator in validators
-    ]
+    payload = [validator.model_dump(mode="json") for validator in validators]
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    roles = sorted({role for item in payload for role in item["roles"]})
+    roles = sorted({role for item in payload for role in item["roles"] or []})
     return ValidationRequirements(
         roles=roles,
         validator_ids=[item["id"] for item in payload],
@@ -44,7 +38,12 @@ def _requirements_for(config: "TargetConfig") -> ValidationRequirements:
     )
 
 
-def evaluate_validation(output: ValidatorOutput, *, fresh: bool = False) -> ValidationDecision:
+def evaluate_validation(
+    output: ValidatorOutput,
+    *,
+    fresh: bool = False,
+    expected_subject: ValidationSubject | None = None,
+) -> ValidationDecision:
     """Evaluate validation evidence according to its explicit policy.
 
     ``fresh`` is reserved for a result returned directly by the validator in
@@ -63,6 +62,8 @@ def evaluate_validation(output: ValidatorOutput, *, fresh: bool = False) -> Vali
         or getattr(output, "validation_requirements", None) is None
         or getattr(output, "validation_subject", None) is None
     ):
+        return ValidationDecision(authorized=False, reasons=[DecisionReason.UNSUPPORTED_ARTIFACT])
+    if expected_subject is not None and output.validation_subject != expected_subject:
         return ValidationDecision(authorized=False, reasons=[DecisionReason.UNSUPPORTED_ARTIFACT])
     if output.authorization_profile is AuthorizationProfile.LEGACY_V1_COMPAT:
         reason = DecisionReason.APPROVED if output.overall_passed else DecisionReason.LEGACY_FAILED
@@ -100,3 +101,16 @@ def attach_validation_decision(output: ValidatorOutput, config: "TargetConfig") 
         }
     )
     return versioned.model_copy(update={"decision": evaluate_validation(versioned)})
+
+
+def bind_validation_subject(
+    output: ValidatorOutput, *, base_commit: str, patch_checksum: str
+) -> ValidatorOutput:
+    """Bind fresh validation evidence to the candidate handled by a caller."""
+    if not isinstance(output, ValidatorOutput) or output.validation_subject is None:
+        return output
+    subject = output.validation_subject.model_copy(
+        update={"base_commit": base_commit, "patch_checksum": patch_checksum}
+    )
+    bound = output.model_copy(update={"validation_subject": subject})
+    return bound.model_copy(update={"decision": evaluate_validation(bound)})

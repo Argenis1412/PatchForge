@@ -72,7 +72,7 @@ def execute(
     from orchestrator.schemas.experiment import Experiment
     from orchestrator.schemas.issue import parse_issue_markdown
     from orchestrator.storage import _wal_write
-    from orchestrator.validation_decision import evaluate_validation
+    from orchestrator.validation_decision import bind_validation_subject, evaluate_validation
     from orchestrator.validation_workspace import (
         apply_patch_to_copy,
         create_validation_workspace,
@@ -490,6 +490,11 @@ def execute(
         workspace_mgr.write_run_json(run_id, run_metadata)
         return _fail("preview_failed", f"Validator failed: {exc}")
 
+    validator_output = bind_validation_subject(
+        validator_output,
+        base_commit=run_metadata.base_commit,
+        patch_checksum=patch_checksum,
+    )
     workspace_mgr.write_artifact(
         run_id, "validation.json", validator_output.model_dump_json(indent=2)
     )

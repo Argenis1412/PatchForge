@@ -139,7 +139,7 @@ def execute(
     )
     from orchestrator.schemas.config import default_workspace_path
     from orchestrator.schemas.git import ApplyCheckStatus
-    from orchestrator.validation_decision import evaluate_validation
+    from orchestrator.validation_decision import bind_validation_subject, evaluate_validation
 
     # 1. Resolve workspace path and ensure run exists
     if workspace is not None:
@@ -869,6 +869,11 @@ def execute(
                 post_val_output = None
 
         if post_val_output is not None:
+            post_val_output = bind_validation_subject(
+                post_val_output,
+                base_commit=run_metadata.base_commit,
+                patch_checksum=actual_checksum,
+            )
             workspace_mgr.write_artifact(
                 run_id, "post_apply_validation.json", post_val_output.model_dump_json(indent=2)
             )

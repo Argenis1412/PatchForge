@@ -317,6 +317,7 @@ def _execute_apply_with_checkpoints(
     )
     from orchestrator.schemas.artifacts import ApplyResult
     from orchestrator.schemas.config import TargetConfig
+    from orchestrator.validation_decision import bind_validation_subject, evaluate_validation
 
     run_dir = workspace.run_dir(run_id)
     wal_path = run_dir / "apply.json"
@@ -381,7 +382,11 @@ def _execute_apply_with_checkpoints(
         val_out, _ = run_validator(config=config, staging_dir=None)  # validate real working tree
     except Exception:
         val_out = None
-    from orchestrator.validation_decision import evaluate_validation
+    if val_out is not None:
+        patch_checksum = hashlib.sha256(patch_path.read_bytes()).hexdigest()
+        val_out = bind_validation_subject(
+            val_out, base_commit=pre_apply_head, patch_checksum=patch_checksum
+        )
 
     if val_out is None or not evaluate_validation(val_out, fresh=True).authorized:
         try:
