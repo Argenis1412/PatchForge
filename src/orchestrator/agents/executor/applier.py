@@ -12,6 +12,24 @@ from .logging import _get_logger
 from .providers import _PROVIDER_CHAIN, MAX_RETRIES, _call_chain, _provider_by_name
 from .validation import strip_fences, validate_python_content
 
+# This protects only the current strategy that sends an existing file's full
+# content to an LLM. Strategies that do not transmit full source content do
+# not use this guardrail.
+_MAX_FULL_FILE_EDIT_CHARS = 12_000
+
+
+def _full_file_edit_preflight(relative_path: str, source_content: str) -> str | None:
+    """Return an error when a full-file LLM edit exceeds the strategy limit."""
+    source_chars = len(source_content)
+    if source_chars <= _MAX_FULL_FILE_EDIT_CHARS:
+        return None
+    return (
+        f"Full-file LLM edit preflight rejected {relative_path}: source has "
+        f"{source_chars} characters, exceeding limit {_MAX_FULL_FILE_EDIT_CHARS}. "
+        "Split the edit into a smaller file or use an editing strategy that does not send "
+        "the complete file content."
+    )
+
 
 def _build_prompt(task: Task, file_path: Path, file_content: str) -> str:
     return f"""You are a precise code editor. Apply exactly one change to the file below.
@@ -91,6 +109,17 @@ def _apply_task(
         original_content = ""
         is_new_file = True
         _get_logger().info("[%s] New file: %s", run_id, relative_path)
+
+    if not is_new_file:
+        preflight_error = _full_file_edit_preflight(relative_path, original_content)
+        if preflight_error:
+            _get_logger().error("[%s] Task %s — %s", run_id, task.task_id, preflight_error)
+            return FileChange(
+                task_id=task.task_id,
+                file=relative_path,
+                status=TaskStatus.ERROR,
+                error=preflight_error,
+            )
 
     prompt = (
         _build_create_prompt(task, file_path)

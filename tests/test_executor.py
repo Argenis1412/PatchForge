@@ -172,6 +172,98 @@ def test_apply_task_rejects_path_traversal(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Full-file LLM edit preflight
+# ---------------------------------------------------------------------------
+
+
+def _full_file_task(path: str = "module.txt") -> Task:
+    return Task(
+        task_id="full-file",
+        title="edit file",
+        description="make one change",
+        files_to_modify=[path],
+        priority="medium",
+        effort="low",
+        risk_level="low",
+        dependencies=[],
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("source_size", [11_999, 12_000])
+def test_apply_task_full_file_preflight_allows_content_at_or_below_limit(
+    tmp_path, monkeypatch, source_size
+):
+    from orchestrator.agents.executor.applier import _apply_task
+
+    (tmp_path / "module.txt").write_text("x" * (source_size - 1) + "\n", encoding="utf-8")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    provider = MagicMock()
+    provider.call.side_effect = lambda fn: ("updated\n", 10, 5)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", provider)
+
+    change = _apply_task(_full_file_task(), "run_preflight", tmp_path, staging)
+
+    assert change.status == "applied"
+    provider.call.assert_called_once()
+
+
+@pytest.mark.unit
+def test_apply_task_full_file_preflight_rejects_before_provider_or_staging(tmp_path, monkeypatch):
+    from orchestrator.agents.executor.applier import _apply_task
+
+    (tmp_path / "module.txt").write_text("x" * 12_001, encoding="utf-8")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    call_chain = MagicMock()
+    monkeypatch.setattr("orchestrator.agents.executor.applier._call_chain", call_chain)
+
+    change = _apply_task(_full_file_task(), "run_preflight", tmp_path, staging)
+
+    assert change.status == "error"
+    assert change.error is not None
+    assert "module.txt" in change.error
+    assert "12001 characters" in change.error
+    assert "12000" in change.error
+    call_chain.assert_not_called()
+    assert not (staging / "module.txt").exists()
+
+
+@pytest.mark.unit
+def test_apply_task_full_file_preflight_uses_materialized_staging_content(tmp_path, monkeypatch):
+    from orchestrator.agents.executor.applier import _apply_task
+
+    (tmp_path / "module.txt").write_text("small\n", encoding="utf-8")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / "module.txt").write_text("x" * 12_001, encoding="utf-8")
+    call_chain = MagicMock()
+    monkeypatch.setattr("orchestrator.agents.executor.applier._call_chain", call_chain)
+
+    change = _apply_task(_full_file_task(), "run_preflight", tmp_path, staging)
+
+    assert change.status == "error"
+    call_chain.assert_not_called()
+
+
+@pytest.mark.unit
+def test_apply_task_full_file_preflight_skips_new_file_creation(tmp_path, monkeypatch):
+    from orchestrator.agents.executor.applier import _apply_task
+
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    provider = MagicMock()
+    provider.call.side_effect = lambda fn: ("x" * 12_001, 10, 5)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", provider)
+
+    change = _apply_task(_full_file_task("new.txt"), "run_preflight", tmp_path, staging)
+
+    assert change.status == "applied"
+    provider.call.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
 # Fix #2 — ProviderChainResult and failure tracking
 # ---------------------------------------------------------------------------
 
