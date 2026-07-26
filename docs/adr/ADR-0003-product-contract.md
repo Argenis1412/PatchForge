@@ -42,14 +42,19 @@ The CLI workflow remains:
 ```bash
 patchforge doctor .
 patchforge scan .
-patchforge plan .
-patchforge preview .
-patchforge apply run_001
+# Use the run_id printed by scan for the remaining stages.
+patchforge plan <run_id>
+patchforge preview <run_id>
+patchforge apply <run_id>
 ```
 
 ---
 
 ## Repository Safety Contract
+
+The workspace behavior described in older revisions of this ADR is historical;
+the current implementation stores its default workspace outside the target and
+rejects explicit paths that resolve inside it.
 
 The system SHALL NOT modify repository contents unless:
 
@@ -60,11 +65,15 @@ The system SHALL NOT modify repository contents unless:
 
 This contract is the core trust boundary of the product. No action taken by the system before an explicit `apply` command may mutate the target repository's working tree.
 
-> **⚠ Current implementation caveat**: `TargetConfig.load()` still defaults `workspace_path` to `<target>/workspace`, which means `scan` and `run` commands write logs and artifacts inside the target repository before any `apply` command. Until the workspace redesign lands, users must pass an explicit `--workspace /tmp/patchforge-workspace` (or equivalent path outside the target tree) to satisfy this contract today.
+> **Workspace behavior**: `TargetConfig.load()` defaults `workspace_path` outside the target repository. Explicit `--workspace` paths are rejected when they resolve inside the target tree, so no extra flag is required for the default-safe behavior.
 
 ---
 
 ## Patch Lifecycle
+
+The default workspace is outside the target repository, and explicit workspace
+paths are rejected when they resolve inside the target repository. The older
+workspace caveat above is historical and no longer describes the implementation.
 
 Every generated patch is tied to a specific `base_commit` of the repository. Because the state of a repository can change between the time a patch is generated and when it is applied, the patch is subject to a lifecycle.
 

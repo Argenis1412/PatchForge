@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-07-22
+> Last updated: 2026-07-25
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 1046 passed, 6 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 1047 passed, 6 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3). `SqliteCircuitBreakerStore` is now thread-safe (issue #219).
 
@@ -25,6 +25,10 @@ requirements, subject, and audit decision. V1 configuration remains
 transitionally compatible; unversioned historical artifacts are readable but
 not authorization credentials. Cross-process authorization transfer,
 environment attestation, and candidate promotion remain deferred.
+
+**QA status:** CI verifies the full test suite, Ruff lint, and Ruff formatting on
+every change. See the [CI workflow](https://github.com/Argenis1412/PatchForge/actions/workflows/ci.yml)
+for the current result; the historical count in this document is not a live metric.
 
 ---
 

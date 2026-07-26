@@ -13,9 +13,10 @@ AI-powered, safety-first code modification tool. Generates, validates, and appli
 ```bash
 patchforge doctor .
 patchforge scan .
-patchforge plan .
-patchforge preview .
-patchforge apply run_001
+# Use the run_id printed by scan for the remaining stages.
+patchforge plan <run_id>
+patchforge preview <run_id>
+patchforge apply <run_id>
 ```
 
 The internal runtime uses specialized agents, typed Pydantic contracts, and structured observability. The user-facing product is organized around repositories, plans, patches, validation, and Git review.
@@ -38,7 +39,7 @@ Most AI coding tools optimize for speed. PatchForge optimizes for trust — chan
 ## Current Status
 
 - **Phase:** P4 — Trust & Configuration (P0/P1/P2/P3 complete)
-- **QA:** pytest +900 passed, 6 skipped | `ruff check src/ tests/` → 0 errors | `ruff format --check src/ tests/` → clean
+- **QA:** CI verifies the full test suite, Ruff lint, and Ruff formatting on every change. See the [CI workflow](https://github.com/Argenis1412/PatchForge/actions/workflows/ci.yml) for the current result.
 - [Roadmap](./docs/planning/roadmap.md) | [Full project context](./docs/context/CONTEXT.md)
 
 ## Quickstart
@@ -51,15 +52,19 @@ patchforge scan ./your-project --workspace /tmp/patchforge-workspace
 ## Development
 
 ```bash
-# Quick QA (lint + format check + tests)
-make qa
+# Quick QA (portable on PowerShell, macOS, and Linux)
+python -m ruff check .
+python -m ruff format --check .
+python -m pytest tests/ -v -n auto
 
-# Individual steps:
-make lint       # ruff check
-make format     # ruff format --check
-make test       # pytest -v
-make fix        # auto-fix lint and format
+# Auto-fix lint and formatting (opt-in)
+python -m ruff check --fix .
+python -m ruff format .
 ```
+
+The repository also includes a `Makefile` with equivalent `make qa`, `make lint`,
+`make format`, `make test`, and `make fix` shortcuts for environments where GNU
+Make is installed. PowerShell and Windows do not provide `make` by default.
 
 ## Docker
 

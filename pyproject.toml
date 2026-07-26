@@ -1,7 +1,7 @@
 [project]
 name = "orchestrator-core"
 version = "1.1.0"
-description = "Target-agnostic orchestration runtime for multi-stage software engineering workflows"
+description = "PatchForge safety-first code modification and validation tool"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
@@ -29,10 +29,10 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Argenis1412/orchestrator-core"
-Repository = "https://github.com/Argenis1412/orchestrator-core"
-Documentation = "https://github.com/Argenis1412/orchestrator-core#readme"
-"Bug Tracker" = "https://github.com/Argenis1412/orchestrator-core/issues"
+Homepage = "https://github.com/Argenis1412/PatchForge"
+Repository = "https://github.com/Argenis1412/PatchForge"
+Documentation = "https://github.com/Argenis1412/PatchForge#readme"
+"Bug Tracker" = "https://github.com/Argenis1412/PatchForge/issues"
 
 [project.scripts]
 patchforge = "orchestrator.main:app"

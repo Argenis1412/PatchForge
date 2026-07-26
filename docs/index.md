@@ -28,18 +28,18 @@ The target command flow is:
 ```bash
 patchforge doctor .
 patchforge scan .
-patchforge plan .
-patchforge preview .
-patchforge apply run_001
+# Use the run_id printed by scan for the remaining stages.
+patchforge plan <run_id>
+patchforge preview <run_id>
+patchforge apply <run_id>
 ```
 
 The target safety rule is:
 
 > No command before `apply` may modify the target repository working tree.
 
-Current caveat: the implementation currently defaults workspace writes to `<target>/workspace`. Use
-`--workspace /tmp/patchforge-workspace` for scans when you want to keep generated artifacts outside
-the target repository until the workspace redesign is implemented.
+The default workspace is stored outside the target repository. Explicit `--workspace` paths are also
+validated and rejected when they resolve inside the target repository.
 
 ### Product Concepts
 
@@ -75,7 +75,7 @@ Design and architecture decisions are documented in Architecture Decision Record
 
 - V1, P0, P1, P2, P3 complete.
 - Current phase: P4 — Trust & Configuration.
-- QA: pytest 714 passed, 2 skipped | ruff 0 errors.
+- QA: CI verifies the full test suite, Ruff lint, and Ruff formatting on every change. See the [CI workflow](https://github.com/Argenis1412/PatchForge/actions/workflows/ci.yml) for the current result.
 
 See the [Roadmap](./planning/roadmap.md) for current priorities and
 [Scout Vision](./planning/scout-vision.md) for the long-term second product line.
