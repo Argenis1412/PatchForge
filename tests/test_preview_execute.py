@@ -17,6 +17,13 @@ import typer
 
 from orchestrator.schemas.architect_output import ArchitectOutput, Task
 from orchestrator.schemas.artifacts import RunMetadata
+from orchestrator.schemas.execution_plan import (
+    ExecutablePlanV2,
+    ExecutionPlanContractError,
+    ExecutionTask,
+    FileEditOperation,
+    PlanViolation,
+)
 from orchestrator.schemas.executor_output import (
     ExecutorOutput,
     FileChange,
@@ -323,6 +330,53 @@ def test_executor_fails(env, monkeypatch: pytest.MonkeyPatch) -> None:
 
     _assert_target_unchanged(target, before)
     _assert_failure_evidence(wm, run_id)
+
+
+def test_preview_uses_persisted_execution_plan(env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A V2 execution artifact takes precedence over the legacy proposal."""
+    wm, run_id = env["wm"], env["run_id"]
+    target = env["target"]
+    before = _snapshot_target(target)
+    execution_plan = ExecutablePlanV2(
+        plan_contract_version=2,
+        base_commit=env["head_sha"],
+        tasks=[
+            ExecutionTask(
+                task_id="T1",
+                operation=FileEditOperation(kind="file_edit", path="file.txt", content="changed\n"),
+            )
+        ],
+    )
+    wm.write_artifact(run_id, "execution_plan.json", execution_plan.model_dump_json())
+
+    monkeypatch.setattr("orchestrator.clients.bootstrap.bootstrap_environment", lambda **kw: None)
+    legacy_run = MagicMock(side_effect=AssertionError("legacy executor must not be called"))
+    v2_run = MagicMock(
+        side_effect=ExecutionPlanContractError(
+            [
+                PlanViolation(
+                    task_fingerprint="v2-task",
+                    field="operation.path",
+                    code="noncanonical_target",
+                    message="use a canonical path",
+                    value="src/../worker.py",
+                )
+            ]
+        )
+    )
+    monkeypatch.setattr("orchestrator.agents.executor.run", legacy_run)
+    monkeypatch.setattr("orchestrator.agents.executor.run_execution_plan", v2_run)
+
+    with pytest.raises(typer.Exit) as exc:
+        _execute(run_id, workspace=env["workspace_path"])
+    assert exc.value.exit_code == 1
+    v2_run.assert_called_once()
+    legacy_run.assert_not_called()
+    failure = json.loads(
+        (wm.run_dir(run_id) / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1]
+    )
+    assert failure["data"]["execution_plan_error"]["violations"][0]["task_fingerprint"] == "v2-task"
+    _assert_target_unchanged(target, before)
 
 
 # ── Scenario 5: Empty patch ─────────────────────────────────────────────────

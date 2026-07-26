@@ -7,11 +7,17 @@ __all__ = [
     "collect_fallback_changes",
     "log_fallback_events",
     "rollback_to_commit",
+    "run_execution_plan",
     "run",
 ]
 
+import hashlib
 import json
+import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,8 +26,10 @@ from typing import Optional, Union
 from orchestrator import paths as _paths
 from orchestrator.exceptions import SchedulerInvariantError
 from orchestrator.observability.events import log_event
+from orchestrator.plan_validation import validate_execution_plan, validate_legacy_executor_plan
 from orchestrator.schemas.architect_output import ArchitectOutput
 from orchestrator.schemas.config import TargetConfig
+from orchestrator.schemas.execution_plan import ExecutablePlanV2, MutationPreconditionError
 from orchestrator.schemas.executor_output import ExecutorOutput, FileChange, TaskStatus
 
 from . import applier as _applier
@@ -62,6 +70,124 @@ def _safe_log_event(
         _get_logger().warning("[%s] Failed to emit event %s: %s", run_id, event, exc)
 
 
+def _base_file_content(
+    project_root: Path, base_commit: str, relative_path: str
+) -> tuple[str, bool]:
+    """Read a source file from an execution plan's immutable Git tree."""
+    commit = subprocess.run(
+        ["git", "rev-parse", "--verify", f"{base_commit}^{{commit}}"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if commit.returncode != 0:
+        raise MutationPreconditionError(
+            f"base snapshot {base_commit!r} is unavailable; replan against an existing commit"
+        )
+
+    entry = subprocess.run(
+        ["git", "cat-file", "-e", f"{base_commit}:{relative_path}"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if entry.returncode != 0:
+        return "", True
+
+    result = subprocess.run(
+        ["git", "show", f"{base_commit}:{relative_path}"],
+        cwd=project_root,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise MutationPreconditionError(
+            f"failed to read {relative_path} from base snapshot {base_commit!r}; replan required"
+        )
+    try:
+        return result.stdout.decode("utf-8"), False
+    except UnicodeDecodeError as exc:
+        raise MutationPreconditionError(
+            f"{relative_path} from base snapshot {base_commit!r} is not UTF-8; replan required"
+        ) from exc
+
+
+def run_execution_plan(
+    execution_plan: ExecutablePlanV2,
+    *,
+    project_root: Path,
+    staging_dir: Path,
+    run_id: str = "",
+) -> tuple[ExecutorOutput, dict]:
+    """Materialize a V2 plan as an all-or-nothing staging transaction.
+
+    The caller must construct ``ExecutablePlanV2`` through the shared
+    validation boundary.  Validation is repeated here before staging as a
+    defence against direct integrations.
+    """
+    project_root = project_root.resolve()
+    validate_execution_plan(execution_plan, project_root)
+
+    prepared: list[tuple[object, str, bool]] = []
+    for task in execution_plan.tasks:
+        operation = task.operation
+        original, is_new = _base_file_content(
+            project_root, execution_plan.base_commit, operation.path
+        )
+        if operation.expected_sha256 is not None:
+            actual = hashlib.sha256(original.encode("utf-8")).hexdigest()
+            if actual != operation.expected_sha256:
+                raise MutationPreconditionError(
+                    f"task {task.task_id} expects {operation.path} at checksum "
+                    f"{operation.expected_sha256}, found {actual}; replan required"
+                )
+        prepared.append((task, original, is_new))
+
+    if staging_dir.exists() and any(staging_dir.iterdir()):
+        raise MutationPreconditionError(
+            f"staging directory {staging_dir} is not empty; create a fresh execution staging area"
+        )
+
+    staging_dir.parent.mkdir(parents=True, exist_ok=True)
+    transaction_dir = Path(tempfile.mkdtemp(prefix=f".{staging_dir.name}-", dir=staging_dir.parent))
+    result = ExecutorOutput(run_id=run_id, model="deterministic-execution-plan-v2")
+    try:
+        for task, original, is_new in prepared:
+            operation = task.operation
+            destination = transaction_dir / operation.path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(operation.content, encoding="utf-8")
+            diff = _applier._make_diff(
+                original, operation.content, operation.path, is_new_file=is_new
+            )
+            result.applied.append(
+                FileChange(
+                    task_id=task.task_id,
+                    file=operation.path,
+                    status=TaskStatus.APPLIED if diff else TaskStatus.NOOP,
+                    diff=diff or None,
+                    original_content=original,
+                    modified_content=operation.content,
+                )
+            )
+        if staging_dir.exists():
+            staging_dir.rmdir()
+        os.replace(transaction_dir, staging_dir)
+    except Exception:
+        shutil.rmtree(transaction_dir, ignore_errors=True)
+        raise
+
+    return result, {
+        "tokens_input": 0,
+        "tokens_output": 0,
+        "cost_usd": 0.0,
+        "model_used": result.model,
+        "models_resolved": {},
+        "cost_llm": 0.0,
+    }
+
+
 def run(
     architect_output: ArchitectOutput,
     run_id: Optional[str] = None,
@@ -85,6 +211,12 @@ def run(
     if staging_dir is None:
         staging_dir = config.workspace_path / "outputs" / "staging" / run_id
     event_logs_dir = logs_dir if logs_dir is not None else file_logs_dir
+
+    # The legacy proposal contract has no explicit mutation payload.  Validate
+    # its one non-negotiable executor invariant here so every ingress (CLI,
+    # CI, worker, and direct callers) rejects analysis-only tasks before any
+    # provider call or staging mutation.
+    validate_legacy_executor_plan(architect_output, project_root)
 
     # Initialize logger
     _get_logger(file_logs_dir)
