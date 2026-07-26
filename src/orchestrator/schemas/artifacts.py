@@ -5,6 +5,7 @@ __all__ = [
     "ApplyResult",
     "CURRENT_SCHEMA_VERSION",
     "EVENTS_JSONL",
+    "EXECUTION_PLAN_JSON",
     "EXPERIMENT_JSON",
     "FINDINGS_JSON",
     "ISSUE_MD",
@@ -51,6 +52,7 @@ class PatchLifecycleState(str, Enum):
 RUN_JSON = "run.json"
 FINDINGS_JSON = "findings.json"
 PLAN_JSON = "plan.json"
+EXECUTION_PLAN_JSON = "execution_plan.json"
 PATCH_DIFF = "patch.diff"
 VALIDATION_JSON = "validation.json"
 EVENTS_JSONL = "events.jsonl"

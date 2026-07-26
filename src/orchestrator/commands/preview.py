@@ -22,7 +22,9 @@ from orchestrator.clients.bootstrap import bootstrap_environment
 from orchestrator.observability.events import log_event, log_failure
 from orchestrator.risk import check_patch_gate
 from orchestrator.schemas.architect_output import ArchitectOutput
+from orchestrator.schemas.artifacts import EXECUTION_PLAN_JSON
 from orchestrator.schemas.config import TargetConfig, default_workspace_path
+from orchestrator.schemas.execution_plan import ExecutablePlanV2
 from orchestrator.schemas.executor_output import TaskStatus
 from orchestrator.schemas.validator_output import ValidatorOutput
 from orchestrator.validation_workspace import (
@@ -74,6 +76,16 @@ def execute(
         architect_output = ArchitectOutput.model_validate_json(plan_content)
     except Exception as exc:
         console.print(f"[bold red]Error reading implementation plan: {exc}[/bold red]")
+        raise typer.Exit(code=1) from None
+
+    try:
+        execution_plan = ExecutablePlanV2.model_validate_json(
+            workspace_mgr.read_artifact(run_id, EXECUTION_PLAN_JSON)
+        )
+    except FileNotFoundError:
+        execution_plan = None
+    except Exception as exc:
+        console.print(f"[bold red]Error reading execution plan: {exc}[/bold red]")
         raise typer.Exit(code=1) from None
 
     # 2.5 Verify experiment context if experiment.json is present
@@ -171,15 +183,23 @@ def execute(
             "[green]Executing planned tasks and generating patch...", total=None
         )
         try:
-            executor_output, exec_meta = executor_agent.run(
-                architect_output=architect_output,
-                run_id=run_id,
-                config=config,
-                staging_dir=staging_dir,
-                force_provider=force_provider,
-                logs_dir=logs_dir,
-                run_dir=run_dir,
-            )
+            if execution_plan is None:
+                executor_output, exec_meta = executor_agent.run(
+                    architect_output=architect_output,
+                    run_id=run_id,
+                    config=config,
+                    staging_dir=staging_dir,
+                    force_provider=force_provider,
+                    logs_dir=logs_dir,
+                    run_dir=run_dir,
+                )
+            else:
+                executor_output, exec_meta = executor_agent.run_execution_plan(
+                    execution_plan,
+                    project_root=target_path,
+                    staging_dir=staging_dir,
+                    run_id=run_id,
+                )
             progress.update(task, completed=100)
         except Exception as exc:
             progress.update(task, completed=100)

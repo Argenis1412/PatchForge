@@ -166,7 +166,7 @@ def _is_deterministic(exc: BaseException) -> bool:
         GitConflictError,
         SchemaValidationError,
     )
-    return isinstance(exc, deterministic)
+    return getattr(exc, "retryable", True) is False or isinstance(exc, deterministic)
 
 
 def _cb_open_sleep_seconds(conn_coord: sqlite3.Connection) -> float:
@@ -257,9 +257,11 @@ def _run_llm_stage(
     """Execute one LLM stage. Signatures match the existing agent modules verbatim."""
     from orchestrator.agents.architect import run as run_architect
     from orchestrator.agents.executor import run as run_executor
+    from orchestrator.agents.executor import run_execution_plan
     from orchestrator.agents.scout import run as run_scout
     from orchestrator.agents.validator import run as run_validator
     from orchestrator.schemas.config import TargetConfig
+    from orchestrator.schemas.execution_plan import ExecutablePlanV2
 
     config = TargetConfig.load(target_path=repo_path, workspace_path=workspace.root)
     staging = workspace.staging_dir_for_run(run_id)
@@ -269,7 +271,19 @@ def _run_llm_stage(
     elif stage == "architect":
         out, _ = run_architect(prior_outputs["scout"], config, run_id=run_id, trace_id=run_id)
     elif stage == "executor":
-        out, _ = run_executor(prior_outputs["architect"], config, staging_dir=staging)
+        execution_path = workspace.run_dir(run_id) / "execution_plan.json"
+        if execution_path.exists():
+            execution_plan = ExecutablePlanV2.model_validate_json(
+                execution_path.read_text(encoding="utf-8")
+            )
+            out, _ = run_execution_plan(
+                execution_plan,
+                project_root=repo_path,
+                staging_dir=staging,
+                run_id=run_id,
+            )
+        else:
+            out, _ = run_executor(prior_outputs["architect"], config, staging_dir=staging)
     elif stage == "validator":
         out, _ = run_validator(config=config, staging_dir=staging)
     else:
