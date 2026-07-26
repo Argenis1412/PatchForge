@@ -1,3 +1,5 @@
+from unittest.mock import MagicMock
+
 import pytest
 
 from orchestrator.agents.executor import run
@@ -5,7 +7,7 @@ from orchestrator.agents.executor.scheduler import _build_dag, _topological_orde
 from orchestrator.exceptions import CycleDetectedError, SchedulerInvariantError
 from orchestrator.schemas.architect_output import ArchitectOutput, Task
 from orchestrator.schemas.config import TargetConfig
-from orchestrator.schemas.executor_output import FileChange, TaskStatus
+from orchestrator.schemas.executor_output import ExecutorOutput, FileChange, TaskStatus
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -288,6 +290,41 @@ def test_multi_file_task_partial_error(tmp_path, monkeypatch):
     assert len(output.applied) == 1  # f2 APPLIED
     b_change = next(c for c in output.errors if c.task_id == "B")
     assert b_change.status == TaskStatus.SKIPPED
+
+
+@pytest.mark.unit
+def test_full_file_preflight_preserves_prior_task_operations_and_serializes_result(
+    tmp_path, monkeypatch
+):
+    """A rejected operation does not roll back earlier files in its task."""
+    (tmp_path / "small.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "large.py").write_text("x" * 12_001, encoding="utf-8")
+    cb_gemini = MagicMock()
+    cb_gemini.call.side_effect = lambda fn: ("x = 2\n", 10, 5)
+    monkeypatch.setattr("orchestrator.agents.executor.providers._cb_gemini", cb_gemini)
+
+    task = Task(
+        task_id="A",
+        title="mixed files",
+        description="",
+        files_to_modify=["small.py", "large.py"],
+        priority="medium",
+        effort="low",
+        risk_level="low",
+        dependencies=[],
+    )
+    dependent = _make_task("B", ["A"])
+    staging = tmp_path / "staging"
+
+    output, _ = run(_arch_out([task, dependent]), config=_cfg(tmp_path), staging_dir=staging)
+
+    assert (staging / "small.py").read_text(encoding="utf-8") == "x = 2\n"
+    assert cb_gemini.call.call_count == 1
+    rejected = next(change for change in output.errors if change.file == "large.py")
+    assert rejected.status == TaskStatus.ERROR
+    skipped = next(change for change in output.errors if change.task_id == "B")
+    assert skipped.status == TaskStatus.SKIPPED
+    assert ExecutorOutput.model_validate_json(output.model_dump_json()) == output
 
 
 @pytest.mark.unit
