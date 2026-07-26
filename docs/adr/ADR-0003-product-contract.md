@@ -42,14 +42,19 @@ The CLI workflow remains:
 ```bash
 patchforge doctor .
 patchforge scan .
-patchforge plan .
-patchforge preview .
-patchforge apply run_001
+# Use the run_id printed by scan for the remaining stages.
+patchforge plan <run_id>
+patchforge preview <run_id>
+patchforge apply <run_id>
 ```
 
 ---
 
 ## Repository Safety Contract
+
+The workspace behavior described in older revisions of this ADR is historical;
+the current implementation stores its default workspace outside the target and
+rejects explicit paths that resolve inside it.
 
 The system SHALL NOT modify repository contents unless:
 
@@ -65,6 +70,10 @@ This contract is the core trust boundary of the product. No action taken by the 
 ---
 
 ## Patch Lifecycle
+
+The default workspace is outside the target repository, and explicit workspace
+paths are rejected when they resolve inside the target repository. The older
+workspace caveat above is historical and no longer describes the implementation.
 
 Every generated patch is tied to a specific `base_commit` of the repository. Because the state of a repository can change between the time a patch is generated and when it is applied, the patch is subject to a lifecycle.
 
