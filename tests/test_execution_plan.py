@@ -102,6 +102,25 @@ def test_duplicate_targets_are_aggregated_as_contract_violation(tmp_path: Path):
     assert any(item["code"] == "duplicate_mutation_target" for item in payload["violations"])
 
 
+def test_case_variant_targets_are_aggregated_as_contract_violation(tmp_path: Path):
+    repo, commit = _git_repo(tmp_path)
+    plan = _plan(commit, path="Worker.py")
+    plan.tasks.append(
+        ExecutionTask(
+            task_id="T2",
+            operation=FileEditOperation(kind="file_edit", path="worker.py", content="value = 3\n"),
+        )
+    )
+
+    with pytest.raises(ExecutionPlanContractError) as raised:
+        validate_execution_plan(plan, repo)
+
+    assert any(
+        item["code"] == "duplicate_mutation_target" and item["value"] == "worker.py"
+        for item in raised.value.model_dump()["violations"]
+    )
+
+
 def test_noncanonical_target_is_rejected_before_staging(tmp_path: Path):
     repo, commit = _git_repo(tmp_path)
     plan = _plan(commit, path="src/../worker.py")
@@ -132,6 +151,21 @@ def test_missing_base_snapshot_requires_replan(tmp_path: Path):
         run_execution_plan(_plan("0" * 40), project_root=repo, staging_dir=repo / "staging")
 
     assert raised.value.requires_replan is True
+
+
+def test_non_utf8_base_blob_requires_replan(tmp_path: Path):
+    repo, _ = _git_repo(tmp_path)
+    (repo / "worker.py").write_bytes(b"\xff")
+    subprocess.run(["git", "add", "worker.py"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "binary base"], cwd=repo, check=True, capture_output=True
+    )
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    with pytest.raises(MutationPreconditionError, match="not UTF-8"):
+        run_execution_plan(_plan(commit), project_root=repo, staging_dir=repo / "staging")
 
 
 def test_legacy_analysis_only_task_is_rejected_before_provider_call(tmp_path: Path):

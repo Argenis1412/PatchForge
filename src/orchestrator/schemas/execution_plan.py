@@ -86,6 +86,22 @@ class MutationPreconditionError(Exception):
     retryable = False
     requires_replan = True
 
+    def model_dump(self) -> dict[str, object]:
+        return {
+            "code": "execution_plan_mutation_precondition_failed",
+            "category": self.category,
+            "retryable": self.retryable,
+            "requires_replan": self.requires_replan,
+            "message": str(self),
+        }
+
+
+def execution_error_payload(exc: BaseException) -> dict[str, object] | None:
+    """Return the stable public payload for known execution-plan errors."""
+    if isinstance(exc, (ExecutionPlanContractError, MutationPreconditionError)):
+        return exc.model_dump()
+    return None
+
 
 def task_fingerprint(task: object) -> str:
     """Return a deterministic diagnostic fingerprint for a task-like value."""

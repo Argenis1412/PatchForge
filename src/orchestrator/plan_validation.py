@@ -128,7 +128,8 @@ def validate_execution_plan(plan: ExecutablePlanV2, target_path: Path) -> None:
             )
             continue
 
-        if path in seen:
+        normalized_path = path.casefold()
+        if normalized_path in seen:
             violations.append(
                 PlanViolation(
                     task_fingerprint=fingerprint,
@@ -138,7 +139,7 @@ def validate_execution_plan(plan: ExecutablePlanV2, target_path: Path) -> None:
                     value=path,
                 )
             )
-        seen.add(path)
+        seen.add(normalized_path)
 
     if violations:
         raise ExecutionPlanContractError(violations)

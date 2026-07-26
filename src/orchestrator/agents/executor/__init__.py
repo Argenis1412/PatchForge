@@ -100,14 +100,17 @@ def _base_file_content(
         ["git", "show", f"{base_commit}:{relative_path}"],
         cwd=project_root,
         capture_output=True,
-        text=True,
-        encoding="utf-8",
     )
     if result.returncode != 0:
         raise MutationPreconditionError(
             f"failed to read {relative_path} from base snapshot {base_commit!r}; replan required"
         )
-    return result.stdout, False
+    try:
+        return result.stdout.decode("utf-8"), False
+    except UnicodeDecodeError as exc:
+        raise MutationPreconditionError(
+            f"{relative_path} from base snapshot {base_commit!r} is not UTF-8; replan required"
+        ) from exc
 
 
 def run_execution_plan(

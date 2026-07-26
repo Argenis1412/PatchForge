@@ -19,8 +19,10 @@ from orchestrator.schemas.architect_output import ArchitectOutput, Task
 from orchestrator.schemas.artifacts import RunMetadata
 from orchestrator.schemas.execution_plan import (
     ExecutablePlanV2,
+    ExecutionPlanContractError,
     ExecutionTask,
     FileEditOperation,
+    PlanViolation,
 )
 from orchestrator.schemas.executor_output import (
     ExecutorOutput,
@@ -349,7 +351,19 @@ def test_preview_uses_persisted_execution_plan(env, monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr("orchestrator.clients.bootstrap.bootstrap_environment", lambda **kw: None)
     legacy_run = MagicMock(side_effect=AssertionError("legacy executor must not be called"))
-    v2_run = MagicMock(side_effect=RuntimeError("V2 execution reached"))
+    v2_run = MagicMock(
+        side_effect=ExecutionPlanContractError(
+            [
+                PlanViolation(
+                    task_fingerprint="v2-task",
+                    field="operation.path",
+                    code="noncanonical_target",
+                    message="use a canonical path",
+                    value="src/../worker.py",
+                )
+            ]
+        )
+    )
     monkeypatch.setattr("orchestrator.agents.executor.run", legacy_run)
     monkeypatch.setattr("orchestrator.agents.executor.run_execution_plan", v2_run)
 
@@ -358,6 +372,10 @@ def test_preview_uses_persisted_execution_plan(env, monkeypatch: pytest.MonkeyPa
     assert exc.value.exit_code == 1
     v2_run.assert_called_once()
     legacy_run.assert_not_called()
+    failure = json.loads(
+        (wm.run_dir(run_id) / "events.jsonl").read_text(encoding="utf-8").splitlines()[-1]
+    )
+    assert failure["data"]["execution_plan_error"]["violations"][0]["task_fingerprint"] == "v2-task"
     _assert_target_unchanged(target, before)
 
 

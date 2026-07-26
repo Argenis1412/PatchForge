@@ -14,7 +14,10 @@ import pytest
 
 from orchestrator.exceptions import CircuitBreakerOpenError, PatchApplyError
 from orchestrator.schemas.artifacts import ApplyResult, RunMetadata
+from orchestrator.schemas.config import TargetConfig
+from orchestrator.schemas.execution_plan import ExecutionPlanContractError, PlanViolation
 from orchestrator.schemas.executor_output import ExecutorOutput, FileChange, TaskStatus
+from orchestrator.schemas.validator_output import ValidatorOutput
 from orchestrator.storage import _sqlite_connect
 from orchestrator.storage.lock import SqliteCircuitBreakerStore
 from orchestrator.storage.work_queue import (
@@ -23,6 +26,7 @@ from orchestrator.storage.work_queue import (
     _execute_apply_with_checkpoints,
     _hydrate_stage,
     _is_deterministic,
+    _run_llm_stage,
     init_queue_db,
     worker_loop,
 )
@@ -259,6 +263,67 @@ def test_worker_loop_deterministic_error_to_dead_letter(
     row = conn.execute("SELECT status, error FROM work_queue WHERE run_id=?", (run_id,)).fetchone()
     assert row["status"] == "dead_letter"
     assert "bad payload" in row["error"]
+
+
+def test_worker_serializes_execution_plan_contract_error_to_dead_letter(
+    qdb_path, cdb_path, workspace, fake_store, fake_github, monkeypatch
+):
+    run_id = _seed_job(qdb_path, {"issue_number": 81, "clone_url": "x"})
+    error = ExecutionPlanContractError(
+        [
+            PlanViolation(
+                task_fingerprint="fingerprint",
+                field="operation.path",
+                code="noncanonical_target",
+                message="use canonical path",
+                value="src/../worker.py",
+            )
+        ]
+    )
+    monkeypatch.setattr(
+        "orchestrator.storage.work_queue._execute_pipeline_with_resume",
+        lambda *args, **kwargs: (_ for _ in ()).throw(error),
+    )
+
+    worker_loop(qdb_path, cdb_path, workspace, fake_store, fake_github, iterations=1)
+
+    conn = _sqlite_connect(qdb_path)
+    row = conn.execute("SELECT status, error FROM work_queue WHERE run_id=?", (run_id,)).fetchone()
+    assert row["status"] == "dead_letter"
+    payload = json.loads(row["error"])
+    assert payload["code"] == "execution_plan_contract_invalid"
+    assert payload["violations"][0]["task_fingerprint"] == "fingerprint"
+
+
+def test_worker_v2_validator_receives_staged_overlay(
+    tmp_path: Path, workspace: WorkspaceManager, monkeypatch: pytest.MonkeyPatch
+):
+    run_id = "v2-overlay"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "unchanged.py").write_text("original\n", encoding="utf-8")
+    workspace.create_run_directory(run_id)
+    staging = workspace.staging_dir_for_run(run_id)
+    (staging / "changed.py").write_text("staged\n", encoding="utf-8")
+    (workspace.run_dir(run_id) / "execution_plan.json").write_text("{}", encoding="utf-8")
+    config = TargetConfig(target_path=repo, workspace_path=workspace.root)
+    monkeypatch.setattr(TargetConfig, "load", classmethod(lambda cls, **kwargs: config))
+
+    observed: list[Path] = []
+
+    def fake_validator(*, config, staging_dir):
+        observed.append(config.target_path)
+        assert staging_dir is None
+        assert (config.target_path / "unchanged.py").read_text(encoding="utf-8") == "original\n"
+        assert (config.target_path / "changed.py").read_text(encoding="utf-8") == "staged\n"
+        return ValidatorOutput(overall_passed=True, tools=[]), {}
+
+    monkeypatch.setattr("orchestrator.agents.validator.run", fake_validator)
+
+    _run_llm_stage("validator", run_id, repo, workspace, {})
+
+    assert observed and observed[0] != repo
+    assert not observed[0].exists()
 
 
 def test_worker_loop_transient_error_backoff_then_dead_letter(

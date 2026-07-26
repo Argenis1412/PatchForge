@@ -20,8 +20,10 @@ import hashlib
 import json
 import random
 import secrets
+import shutil
 import sqlite3
 import subprocess
+import tempfile
 import threading
 import time
 from datetime import datetime, timezone
@@ -260,6 +262,7 @@ def _run_llm_stage(
     from orchestrator.agents.executor import run_execution_plan
     from orchestrator.agents.scout import run as run_scout
     from orchestrator.agents.validator import run as run_validator
+    from orchestrator.schemas.artifacts import EXECUTION_PLAN_JSON
     from orchestrator.schemas.config import TargetConfig
     from orchestrator.schemas.execution_plan import ExecutablePlanV2
 
@@ -271,7 +274,7 @@ def _run_llm_stage(
     elif stage == "architect":
         out, _ = run_architect(prior_outputs["scout"], config, run_id=run_id, trace_id=run_id)
     elif stage == "executor":
-        execution_path = workspace.run_dir(run_id) / "execution_plan.json"
+        execution_path = workspace.run_dir(run_id) / EXECUTION_PLAN_JSON
         if execution_path.exists():
             execution_plan = ExecutablePlanV2.model_validate_json(
                 execution_path.read_text(encoding="utf-8")
@@ -285,7 +288,23 @@ def _run_llm_stage(
         else:
             out, _ = run_executor(prior_outputs["architect"], config, staging_dir=staging)
     elif stage == "validator":
-        out, _ = run_validator(config=config, staging_dir=staging)
+        execution_path = workspace.run_dir(run_id) / EXECUTION_PLAN_JSON
+        if execution_path.exists():
+            candidate_root = Path(tempfile.mkdtemp(prefix="patchforge-validation-"))
+            try:
+                shutil.copytree(
+                    repo_path,
+                    candidate_root,
+                    dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns(".git"),
+                )
+                shutil.copytree(staging, candidate_root, dirs_exist_ok=True)
+                candidate_config = config.model_copy(update={"target_path": candidate_root})
+                out, _ = run_validator(config=candidate_config, staging_dir=None)
+            finally:
+                shutil.rmtree(candidate_root, ignore_errors=True)
+        else:
+            out, _ = run_validator(config=config, staging_dir=staging)
     else:
         raise ValueError(f"unknown LLM stage: {stage}")
     return out
@@ -656,9 +675,15 @@ def worker_loop(
                 )
             except Exception as e:
                 if _is_deterministic(e) or row["retries"] >= 2:
+                    from orchestrator.schemas.execution_plan import execution_error_payload
+
+                    error_payload = execution_error_payload(e)
+                    error_text = (
+                        json.dumps(error_payload, sort_keys=True) if error_payload else repr(e)
+                    )
                     conn_queue.execute(
                         "UPDATE work_queue SET status='dead_letter', error=? WHERE run_id=?",
-                        (repr(e), run_id),
+                        (error_text, run_id),
                     )
                 else:
                     backoff = BACKOFF_MINUTES[row["retries"]]
