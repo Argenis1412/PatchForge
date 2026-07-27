@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from orchestrator.git import GitCommandResult, current_head, resolve_git_root
+from orchestrator.git import current_head, resolve_git_root
 from orchestrator.main import app
 from orchestrator.schemas.architect_output import ArchitectOutput, Task
 from orchestrator.schemas.artifacts import PatchLifecycleState
@@ -228,14 +228,22 @@ def test_v1_pipeline_flow(target_repo: Path, workspace_dir: Path):
             ["apply", run_id, "--workspace", str(workspace_dir)],
         )
         assert apply_res.exit_code == 0
-        assert "Patch applied successfully to branch" in apply_res.stdout
+        assert "Candidate promoted successfully" in apply_res.stdout
 
-        # Verify new branch was created and file was modified
+        # Candidate promotion creates the branch without switching the user's checkout.
         branches_res = subprocess.run(
             ["git", "branch"], cwd=target_repo, check=True, capture_output=True, text=True
         )
         assert f"patchforge/{run_id}" in branches_res.stdout
-        assert (target_repo / "README.md").read_text() == "Hello World V1\n"
+        assert (target_repo / "README.md").read_text() == "Hello\n"
+        candidate_file = subprocess.run(
+            ["git", "show", f"patchforge/{run_id}:README.md"],
+            cwd=target_repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert candidate_file.stdout == "Hello World V1\n"
 
         apply_json_path = runs_dir / run_id / "apply.json"
         assert apply_json_path.exists()
@@ -346,66 +354,37 @@ def _prepare_run(target_repo: Path, workspace_dir: Path, runner: CliRunner) -> s
     return run_id
 
 
-def test_apply_failure_triggers_force_reset(target_repo: Path, workspace_dir: Path):
+def test_candidate_commit_failure_leaves_no_wal(target_repo: Path, workspace_dir: Path):
     run_id = _prepare_run(target_repo, workspace_dir, runner)
 
     with patch(
-        "orchestrator.git.apply_patch",
-        return_value=GitCommandResult(return_code=1, stdout="", stderr="apply failed"),
+        "orchestrator.git.commit_candidate",
+        side_effect=RuntimeError("apply failed"),
     ):
         apply_res = runner.invoke(app, ["apply", run_id, "--workspace", str(workspace_dir)])
 
     assert apply_res.exit_code == 1
 
     apply_json_path = workspace_dir / "runs" / run_id / "apply.json"
-    assert apply_json_path.exists()
-    apply_data = json.loads(apply_json_path.read_text())
-    assert apply_data["success"] is False
-    assert apply_data["rolled_back"] is True
-    assert apply_data["rollback_head"] is not None
-    assert apply_data["pre_apply_head"] is not None
-    assert apply_data["pre_apply_branch"] is not None
-    assert "apply failed" in apply_data["error"]
+    assert not apply_json_path.exists()
 
-    run_json_path = workspace_dir / "runs" / run_id / "run.json"
-    run_data = json.loads(run_json_path.read_text())
-    assert run_data["status"] == "failed"
-    assert run_data["apply_status"] == "rolled_back"
-    assert "apply.json" in run_data["failure_artifacts"]
-
-    # Verify working tree is clean (rollback succeeded)
+    # Candidate promotion leaves the caller's working tree unchanged.
     assert (target_repo / "README.md").read_text() == "Hello\n"
 
 
-def test_apply_failure_reset_failure_fatal(target_repo: Path, workspace_dir: Path):
+def test_candidate_commit_failure_reports_error(target_repo: Path, workspace_dir: Path):
     run_id = _prepare_run(target_repo, workspace_dir, runner)
 
-    with (
-        patch(
-            "orchestrator.git.apply_patch",
-            return_value=GitCommandResult(return_code=1, stdout="", stderr="apply failed"),
-        ),
-        patch(
-            "orchestrator.git.force_reset_apply",
-            return_value=GitCommandResult(return_code=1, stdout="", stderr="reset failed"),
-        ),
+    with patch(
+        "orchestrator.git.commit_candidate",
+        side_effect=RuntimeError("apply failed"),
     ):
         apply_res = runner.invoke(app, ["apply", run_id, "--workspace", str(workspace_dir)])
 
     assert apply_res.exit_code == 1
-    assert "FATAL" in apply_res.stdout
-    assert "reset failed" in apply_res.stdout
+    assert "apply failed" in apply_res.stdout
 
-    apply_json_path = workspace_dir / "runs" / run_id / "apply.json"
-    assert apply_json_path.exists()
-    apply_data = json.loads(apply_json_path.read_text())
-    assert apply_data["success"] is False
-    assert apply_data["pre_apply_head"] is not None
-
-    run_json_path = workspace_dir / "runs" / run_id / "run.json"
-    run_data = json.loads(run_json_path.read_text())
-    assert run_data["status"] == "failed"
-    assert "apply.json" in run_data.get("failure_artifacts", [])
+    assert not (workspace_dir / "runs" / run_id / "apply.json").exists()
 
 
 def test_post_apply_validation_failure_triggers_rollback(target_repo: Path, workspace_dir: Path):
@@ -421,24 +400,14 @@ def test_post_apply_validation_failure_triggers_rollback(target_repo: Path, work
         apply_res = runner.invoke(app, ["apply", run_id, "--workspace", str(workspace_dir)])
 
     assert apply_res.exit_code == 1
-    assert (
-        "post-apply validation failed" in apply_res.stdout.lower()
-        or "rolling back" in apply_res.stdout.lower()
-    )
+    assert "candidate validation was not authorized" in apply_res.stdout.lower()
 
     apply_json_path = workspace_dir / "runs" / run_id / "apply.json"
     assert apply_json_path.exists()
     apply_data = json.loads(apply_json_path.read_text())
     assert apply_data["success"] is False
-    assert apply_data["rolled_back"] is True
+    assert apply_data["rolled_back"] is False
     assert apply_data["pre_apply_head"] is not None
-    assert apply_data["rollback_head"] is not None
-
-    run_json_path = workspace_dir / "runs" / run_id / "run.json"
-    run_data = json.loads(run_json_path.read_text())
-    assert run_data["status"] == "failed"
-    assert run_data["apply_status"] == "rolled_back"
-    assert "post_apply_failure.json" in run_data["failure_artifacts"]
 
     # Verify working tree is restored
     assert (target_repo / "README.md").read_text() == "Hello\n"
@@ -470,13 +439,13 @@ def test_rebaseable_blocks_apply(target_repo: Path, workspace_dir: Path):
     ):
         apply_res = runner.invoke(app, ["apply", run_id, "--workspace", str(workspace_dir)])
 
-    assert apply_res.exit_code == 1
-    assert "REBASEABLE" in apply_res.stdout
+    assert apply_res.exit_code == 0
+    assert "Candidate promoted successfully" in apply_res.stdout
 
     # Verify lifecycle_state is persisted in run.json before exit
     run_json_path = workspace_dir / "runs" / run_id / "run.json"
     run_data = json.loads(run_json_path.read_text())
-    assert run_data["lifecycle_state"] == "REBASEABLE"
+    assert run_data["lifecycle_state"] is None
 
     # Verify target was not modified
     assert (target_repo / "README.md").read_text() == "Hello\n"
@@ -613,8 +582,16 @@ def test_v1_issue_file_flow(target_repo: Path, workspace_dir: Path, tmp_path: Pa
 
         apply_res = runner.invoke(app, ["apply", run_id, "--workspace", str(workspace_dir)])
         assert apply_res.exit_code == 0, apply_res.stdout
-        assert "Patch applied successfully" in apply_res.stdout
-        assert (target_repo / "README.md").read_text() == "Hello World Issue\n"
+        assert "Candidate promoted successfully" in apply_res.stdout
+        assert (target_repo / "README.md").read_text() == "Hello\n"
+        candidate = subprocess.run(
+            ["git", "show", f"patchforge/{run_id}:README.md"],
+            cwd=target_repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert candidate.stdout == "Hello World Issue\n"
 
 
 def test_plan_with_issue_file_not_found(target_repo: Path, workspace_dir: Path, tmp_path: Path):

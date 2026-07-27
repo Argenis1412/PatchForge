@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from orchestrator.git import git_config_user_email, git_config_user_name
+from orchestrator.git import git_config_user_email, git_config_user_name, promote_candidate
 
 
 def _init_git_repo(
@@ -102,3 +102,17 @@ def test_git_config_user_name_returns_none_when_no_git_binary(tmp_path: Path):
 def test_git_config_user_email_returns_none_when_no_git_binary(tmp_path: Path):
     with patch("orchestrator.git.subprocess.run", side_effect=FileNotFoundError):
         assert git_config_user_email(tmp_path) is None
+
+
+def test_promote_candidate_rejects_invalid_ref_before_update_ref(git_repo: Path):
+    result = promote_candidate(
+        git_repo,
+        base_ref="refs/heads/main\ncreate refs/heads/injected",
+        base_commit="a" * 40,
+        candidate_ref="refs/heads/patchforge/run",
+        candidate_commit="b" * 40,
+        receipt_ref="refs/patchforge/promotions/run",
+    )
+
+    assert result.return_code != 0
+    assert "invalid ref" in result.stderr

@@ -365,11 +365,13 @@ def _execute_apply_with_checkpoints(
         wal: Optional[ApplyResult]
         try:
             wal = ApplyResult.model_validate_json(wal_path.read_text(encoding="utf-8"))
-        except Exception:
-            wal = None
+        except Exception as exc:
+            raise PatchApplyError("apply.json is corrupt; recovery is fail-closed") from exc
         if wal is not None and wal.status == "applied":
             return
         if wal is not None:
+            if wal.apply_protocol not in (None, "worker_legacy@1"):
+                raise PatchApplyError("apply.json belongs to a different apply protocol")
             if wal.status == "pr_created" and wal.pr_number:
                 with contextlib.suppress(Exception):
                     github.close_pr(wal.pr_number)
@@ -394,6 +396,7 @@ def _execute_apply_with_checkpoints(
         success=False,
         pre_apply_head=pre_apply_head,
         status="applying",
+        apply_protocol="worker_legacy@1",
     )
     _wal_write(apply_result, wal_path)
 

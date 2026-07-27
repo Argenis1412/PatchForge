@@ -291,7 +291,7 @@ def apply(
     allow_dirty: bool = typer.Option(
         False,
         "--allow-dirty",
-        help="Allow patch application even if the working tree has uncommitted changes",
+        help="Compatibility option; candidate promotion leaves the working tree unchanged",
     ),
     env_file: Optional[Path] = typer.Option(None, "--env-file", help="Path to a custom .env file"),
     workspace: Optional[Path] = typer.Option(

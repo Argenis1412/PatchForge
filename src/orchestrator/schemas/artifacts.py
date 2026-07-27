@@ -16,6 +16,7 @@ __all__ = [
     "RUN_JSON",
     "RunMetadata",
     "TARGET_CONFIG_SNAPSHOT_JSON",
+    "VALIDATION_POLICY_JSON",
     "VALIDATION_JSON",
     "compute_auto_apply_eligible",
 ]
@@ -25,7 +26,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class PatchLifecycleState(str, Enum):
@@ -61,6 +62,7 @@ POST_APPLY_VALIDATION_JSON = "post_apply_validation.json"
 ISSUE_MD = "issue.md"
 EXPERIMENT_JSON = "experiment.json"
 TARGET_CONFIG_SNAPSHOT_JSON = "target_config_snapshot.json"
+VALIDATION_POLICY_JSON = "validation_policy.json"
 
 
 CURRENT_SCHEMA_VERSION: int = 1
@@ -148,8 +150,34 @@ class ApplyResult(BaseModel):
     pre_apply_diff_backup: Optional[str] = None
     pr_number: Optional[int] = None
 
+    # Phase 4: protocol-scoped candidate promotion.  Optional fields keep
+    # historical apply.json records readable, but only a matching protocol is
+    # eligible for automatic recovery.
+    apply_protocol: Optional[str] = None
+    promotion_state: Optional[str] = None
+    candidate_ref: Optional[str] = None
+    candidate_commit: Optional[str] = None
+    promotion_receipt_ref: Optional[str] = None
+    promotion_receipt_commit: Optional[str] = None
+    expected_base_ref: Optional[str] = None
+    expected_base_commit: Optional[str] = None
+    policy_digest: Optional[str] = None
+    workspace_path: Optional[str] = None
+
     # Part 3: dirt capture for --allow-dirty
     dirt_stash_sha: Optional[str] = None
     dirt_restored: bool = False
     dirt_restore_failed: bool = False
     dirt_recovery_command: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_apply_protocol(self) -> "ApplyResult":
+        supported_protocols = {None, "ci_legacy@1", "worker_legacy@1", "candidate_promotion@1"}
+        if self.apply_protocol not in supported_protocols:
+            raise ValueError(f"unsupported apply protocol: {self.apply_protocol}")
+        if self.apply_protocol == "candidate_promotion@1":
+            if self.promotion_state not in {"promotion_prepared", "promotion_applied"}:
+                raise ValueError("candidate promotion WAL requires a supported promotion state")
+        elif self.promotion_state is not None:
+            raise ValueError("promotion state requires the candidate promotion protocol")
+        return self
