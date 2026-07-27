@@ -14,6 +14,7 @@ from orchestrator.validation_decision import (
     bind_validation_subject,
     evaluate_validation,
     expected_validation_subject,
+    validation_policy_for,
 )
 
 
@@ -66,7 +67,6 @@ def test_v2_requires_verified_coverage(monkeypatch, tmp_path):
     output = attach_validation_decision(
         run_v2_validators("run-v2", tmp_path, config.validators or [], 30), config
     )
-
     assert output.decision is not None and output.decision.authorized is False
     assert output.decision.reasons == [DecisionReason.ROLE_NOT_VERIFIED]
 
@@ -156,3 +156,28 @@ def test_binding_does_not_replace_existing_subject_identity(monkeypatch, tmp_pat
         ).authorized
         is False
     )
+
+
+@pytest.mark.unit
+def test_expected_policy_rejects_a_decision_from_different_validator_policy(tmp_path):
+    config = _config(tmp_path, [ValidatorConfig(id="lint", adapter="ruff")])
+    output = attach_validation_decision(ValidatorOutput(overall_passed=True), config)
+    different = _config(
+        tmp_path,
+        [ValidatorConfig(id="tests", adapter="pytest")],
+    )
+
+    assert (
+        evaluate_validation(
+            output, fresh=True, expected_policy=validation_policy_for(different)
+        ).authorized
+        is False
+    )
+
+
+@pytest.mark.unit
+def test_policy_digest_is_path_independent(tmp_path):
+    config = _config(tmp_path, [ValidatorConfig(id="lint", adapter="ruff")])
+    other = config.model_copy(update={"target_path": tmp_path / "candidate"})
+
+    assert validation_policy_for(config).digest == validation_policy_for(other).digest

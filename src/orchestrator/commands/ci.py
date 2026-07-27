@@ -566,6 +566,17 @@ def execute(
     branch_name = f"patchforge/{run_id}"
     pre_apply_head = current_head(target_path)
 
+    existing_apply = run_dir / "apply.json"
+    if existing_apply.exists():
+        try:
+            existing_protocol = ApplyResult.model_validate_json(
+                existing_apply.read_text(encoding="utf-8")
+            ).apply_protocol
+        except Exception:
+            existing_protocol = None
+        if existing_protocol not in (None, "ci_legacy@1"):
+            return _fail("apply_failed", "apply.json belongs to a different apply protocol")
+
     apply_result = ApplyResult(
         run_id=run_id,
         applied_at=datetime.now(timezone.utc),
@@ -573,6 +584,7 @@ def execute(
         success=False,
         pre_apply_head=pre_apply_head,
         status="applying",
+        apply_protocol="ci_legacy@1",
     )
     _wal_write(apply_result, run_dir / "apply.json")
 

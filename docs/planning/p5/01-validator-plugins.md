@@ -1,7 +1,7 @@
 # P5 — 1. Validator Plugins
 
 > **GitHub issue:** #282  
-> **Status:** In progress — Phases 1-3 complete
+> **Status:** In progress — Phase 4 candidate promotion implementation
 
 ## Goal
 
@@ -47,6 +47,10 @@ adapters. The system does not discover or load third-party plugins.
 
 - Validate an isolated candidate commit before publication and promote it with
   a Git compare-and-swap. No required validation occurs after publication.
+- Candidate policy is captured from the unpatched base tree, bound to the
+  candidate commit, and recovered through a protocol-scoped promotion receipt.
+- CLI candidate promotion uses `candidate_promotion@1`; CI and worker legacy
+  WALs are rejected across protocol boundaries until their own migration.
 
 ### Phase 5 — Diagnostics and end-to-end integration
 

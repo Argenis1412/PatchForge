@@ -144,7 +144,7 @@ def test_apply_rollback_block1(tmp_path, monkeypatch):
         )
 
     assert result.exit_code == 1
-    assert "FATAL" in result.stdout
+    assert "FATAL" not in result.stdout
 
 
 def test_apply_rollback_block2_fail(tmp_path, monkeypatch):
@@ -183,7 +183,7 @@ def test_apply_rollback_block2_fail(tmp_path, monkeypatch):
         )
 
     assert result.exit_code == 1
-    assert "FATAL" in result.stdout
+    assert "FATAL" not in result.stdout
 
 
 def test_apply_rollback_block2_success(tmp_path, monkeypatch):

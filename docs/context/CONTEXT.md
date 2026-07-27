@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-07-25
+> Last updated: 2026-07-26
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -15,16 +15,21 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 1047 passed, 6 skipped | `ruff check .` → 0 errors | `ruff format --check` → clean
+**QA:** `pytest` → 1010 passed, 5 skipped | `ruff check .` → 0 errors | `ruff format --check` → 147 files clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3). `SqliteCircuitBreakerStore` is now thread-safe (issue #219).
 
-**Validator plugins:** Issue #282 Phases 1-3 are complete. New
+**Validator plugins:** Issue #282 Phase 4 candidate promotion is implemented
+on `feat/issue-282-candidate-promotion`; Phase 5 integration remains pending.
+New
 `validation.json` artifacts are schema-versioned and carry explicit policy,
-requirements, subject, and audit decision. V1 configuration remains
-transitionally compatible; unversioned historical artifacts are readable but
-not authorization credentials. Cross-process authorization transfer,
-environment attestation, and candidate promotion remain deferred.
+requirements, subject, and audit decision. Candidate promotion captures its
+policy from the unpatched base tree, binds it to the candidate commit, and
+recovers promotion through an atomic candidate/receipt ref pair. V1
+configuration remains transitionally compatible; unversioned historical
+validation and apply artifacts are diagnostic only, not recovery credentials.
+Cross-process authorization transfer and environment attestation remain
+deferred.
 
 **QA status:** CI verifies the full test suite, Ruff lint, and Ruff formatting on
 every change. See the [CI workflow](https://github.com/Argenis1412/PatchForge/actions/workflows/ci.yml)

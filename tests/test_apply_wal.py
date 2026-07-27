@@ -130,3 +130,24 @@ def test_each_phase_persists_to_disk(tmp_path: Path) -> None:
     data = json.loads(apply_json.read_text())
     assert data["status"] == "committed_local"
     assert data["success"] is True
+
+
+def test_candidate_promotion_wal_persists_recovery_identity(tmp_path: Path) -> None:
+    result = _make_apply_result(
+        apply_protocol="candidate_promotion@1",
+        promotion_state="promotion_prepared",
+        candidate_ref="refs/heads/patchforge/run_20240101_000000_abc123",
+        candidate_commit="a" * 40,
+        promotion_receipt_ref="refs/patchforge/promotions/run_20240101_000000_abc123",
+        expected_base_ref="refs/heads/main",
+        expected_base_commit="b" * 40,
+        policy_digest="c" * 64,
+    )
+    path = tmp_path / "apply.json"
+
+    _wal_write(result, path)
+
+    restored = ApplyResult.model_validate_json(path.read_text())
+    assert restored.promotion_state == "promotion_prepared"
+    assert restored.candidate_commit == "a" * 40
+    assert restored.policy_digest == "c" * 64

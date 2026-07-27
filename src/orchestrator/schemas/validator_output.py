@@ -11,6 +11,7 @@ __all__ = [
     "ToolResult",
     "ValidationDecision",
     "ValidationRequirements",
+    "ValidationPolicy",
     "ValidationSubject",
     "ValidatorOutput",
 ]
@@ -67,6 +68,19 @@ class ValidationRequirements(BaseModel):
     digest: str
 
 
+class ValidationPolicy(BaseModel):
+    """Canonical, path-independent validator policy captured before a candidate."""
+
+    schema_version: str
+    validators: list[dict] = Field(default_factory=list)
+    lint_command: list[str] | None = None
+    test_command: list[str] | None = None
+    typecheck_command: list[str] | None = None
+    supports_tests: bool = True
+    validator_timeout: int | None = None
+    digest: str
+
+
 class ValidationSubject(BaseModel):
     """Execution identity to which validation evidence is scoped."""
 
@@ -74,6 +88,9 @@ class ValidationSubject(BaseModel):
     project_identity: str
     base_commit: str | None = None
     patch_checksum: str | None = None
+    candidate_commit: str | None = None
+    repository_identity: str | None = None
+    policy_digest: str | None = None
 
 
 class ValidationDecision(BaseModel):

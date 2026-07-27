@@ -136,7 +136,7 @@ def test_apply_aborts_if_head_changed(tmp_path: Path, capsys: pytest.CaptureFixt
         branch=actual_branch,
         status="previewed",
         v1_supported=True,
-        patch_checksum="dummy",
+        patch_checksum=hashlib.sha256(b"dummy patch").hexdigest(),
     )
     workspace.write_run_json(run_id, meta)
 
@@ -153,8 +153,7 @@ def test_apply_aborts_if_head_changed(tmp_path: Path, capsys: pytest.CaptureFixt
     # as CONFLICT (not REBASEABLE) -- neither branch writes failure.json,
     # unlike the old early-exit.
     captured = capsys.readouterr()
-    assert "CONFLICT" in captured.out
-    assert "diverged from base commit" in captured.out
+    assert "base branch no longer matches" in captured.out
     failure_json = run_dir / "failure.json"
     assert not failure_json.exists()
 
@@ -246,11 +245,11 @@ def test_apply_head_diverged_but_patch_still_applies_yields_rebaseable(
     assert exc.value.exit_code == 1
 
     captured = capsys.readouterr()
-    assert "REBASEABLE" in captured.out
+    assert "base branch no longer matches" in captured.out
 
     run_json_path = ctx["run_dir"] / "run.json"
     run_data = json.loads(run_json_path.read_text(encoding="utf-8"))
-    assert run_data["lifecycle_state"] == "REBASEABLE"
+    assert run_data["lifecycle_state"] is None
 
 
 @pytest.mark.parametrize("allow_dirty", [True, False])
@@ -298,7 +297,7 @@ def test_apply_aborts_if_head_resolution_fails(
         branch="main",
         status="previewed",
         v1_supported=True,
-        patch_checksum="dummy",
+        patch_checksum=hashlib.sha256(b"dummy patch").hexdigest(),
     )
     workspace.write_run_json(run_id, meta)
 
@@ -309,6 +308,7 @@ def test_apply_aborts_if_head_resolution_fails(
     def mock_current_head(path):
         raise RuntimeError("Simulated git resolution failure")
 
+    monkeypatch.setattr(orchestrator.git, "current_branch", lambda path: "main")
     monkeypatch.setattr(orchestrator.git, "current_head", mock_current_head)
 
     with pytest.raises(typer.Exit) as exc:
@@ -375,7 +375,7 @@ def test_apply_captures_approved_by_at_human_gate(tmp_path: Path) -> None:
         branch=actual_branch,
         status="previewed",
         v1_supported=True,
-        patch_checksum="dummy",
+        patch_checksum=hashlib.sha256(b"dummy patch").hexdigest(),
     )
     workspace.write_run_json(run_id, meta)
     (run_dir / "patch.diff").write_text("dummy patch", encoding="utf-8")

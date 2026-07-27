@@ -1,91 +1,56 @@
-"""Apply the validated patch to the target repository."""
-# noqa: module entry point
+"""Promote a validated, isolated candidate branch for a previewed run."""
 
 from __future__ import annotations
 
-__all__ = [
-    "execute",
-]
-
-import contextlib
+import hashlib
 import json
 import os
-import shutil
-import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from orchestrator.clients.bootstrap import bootstrap_environment
 from orchestrator.provenance import resolve_approved_by
-from orchestrator.schemas.config import TargetConfig
+from orchestrator.schemas.config import TargetConfig, default_workspace_path
 from orchestrator.storage import _wal_write
 from orchestrator.storage.lock import acquire_repo_lock, release_repo_lock
 from orchestrator.workspace import WorkspaceManager
 
-if TYPE_CHECKING:
-    from orchestrator.schemas.artifacts import ApplyResult
-
 console = Console()
 
-# Age (in days, based on run.json's mtime) past which an orphaned dirt
-# capture is flagged as a manual-cleanup candidate in the startup advisory.
-_ORPHAN_CLEANUP_CANDIDATE_DAYS = 7
+APPLY_PROTOCOL = "candidate_promotion@1"
+PROMOTION_PREPARED = "promotion_prepared"
+PROMOTION_APPLIED = "promotion_applied"
 
 
-def _hydrate_apply_result_for_resume(
-    run_dir: Path, run_id: str, patch_path: Path
-) -> Optional["ApplyResult"]:
-    """Load and validate apply.json for a resumable ALREADY_APPLIED state.
+def _candidate_branch(run_id: str, issue_number: int | None) -> str:
+    suffix = f"/issue_{issue_number}" if issue_number is not None else ""
+    return f"patchforge/{run_id}{suffix}"
 
-    Returns the parsed ApplyResult only if: status == "applying"; the WAL's
-    own run_id matches the run being resumed (rejects a WAL copied in from
-    another run's directory); the backup diff pointer is the canonical
-    run-local path (rejects a pointer redirected elsewhere on disk) and
-    refers to an existing regular file; and that file's bytes are identical
-    to the current patch.diff (rejects a backup that was swapped or
-    corrupted independently of the WAL). Returns None for any other
-    condition (missing/corrupt WAL, wrong status, missing/stale/mismatched
-    backup) -- callers must treat None as "not resumable, abort".
-    """
-    from orchestrator.schemas.artifacts import APPLY_JSON, ApplyResult
 
-    apply_json_path = run_dir / APPLY_JSON
-    if not apply_json_path.exists():
-        return None
+def _fail(message: str) -> None:
+    console.print(f"[bold red]Error: {message}[/bold red]")
+    raise typer.Exit(code=1)
 
-    try:
-        wal_result = ApplyResult.model_validate_json(apply_json_path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
 
-    if wal_result.run_id != run_id:
-        return None
-
-    if wal_result.status != "applying":
-        return None
-
-    if not wal_result.pre_apply_diff_backup:
-        return None
-
-    backup_path = Path(wal_result.pre_apply_diff_backup)
-    canonical_backup_path = run_dir / "patch.apply-backup.diff"
-    if backup_path.resolve() != canonical_backup_path.resolve():
-        return None
-    if not backup_path.is_file():
-        return None
-
-    try:
-        if backup_path.read_bytes() != patch_path.read_bytes():
-            return None
-    except OSError:
-        return None
-
-    return wal_result
+def _finish(workspace: WorkspaceManager, run_id: str, metadata, result) -> None:
+    result.success = True
+    result.status = "applied"
+    result.promotion_state = PROMOTION_APPLIED
+    result.applied_at = datetime.now(timezone.utc)
+    _wal_write(result, workspace.run_dir(run_id) / "apply.json")
+    metadata.status = "applied"
+    metadata.apply_status = "success"
+    metadata.updated_at = datetime.now(timezone.utc)
+    workspace.write_run_json(run_id, metadata)
+    console.print(
+        "[bold green]Candidate promoted successfully.[/bold green]\n"
+        f"Review it with:\n  git switch {result.branch}"
+    )
 
 
 def execute(
@@ -97,985 +62,195 @@ def execute(
     worker_id: Optional[str] = None,
     coordination_db_dir: Optional[Path] = None,
 ) -> None:
-    """Apply the validated patch to the target repository."""
+    """Build, validate, and atomically promote an isolated candidate commit.
+
+    ``allow_dirty`` is retained as a CLI compatibility option.  Candidate
+    construction never reads or mutates the caller's working tree.
+    """
+    del allow_dirty
     console.print(
         Panel(
-            f"[bold red]PatchForge Apply Patch (V1)[/bold red]\nRun ID: [yellow]{run_id}[/yellow]",
-            expand=False,
+            f"[bold red]PatchForge Candidate Promotion[/bold red]\n"
+            f"Run ID: [yellow]{run_id}[/yellow]"
         )
     )
+    bootstrap_environment(env_file)
 
-    import hashlib
-    from datetime import datetime, timezone
-
-    from orchestrator.agents.executor import rollback_to_commit
     from orchestrator.agents.validator import run as run_validator
-    from orchestrator.exceptions import RollbackError
     from orchestrator.git import (
-        apply_patch,
-        check_orphaned_dirt_refs,
-        create_controlled_branch,
+        candidate_worktree,
+        commit_candidate,
         current_branch,
         current_head,
-        delete_dirt_ref,
-        dirt_ref_name,
-        force_reset_apply,
-        has_merge_conflicts,
-        repository_state,
-        resolve_dirt_ref,
-        stash_apply_dirt,
-        stash_create_dirt,
-        store_dirt_ref,
-        try_apply_dry_run_reverse,
+        git_common_dir,
+        promote_candidate,
+        promotion_receipt_ref,
+        resolve_ref,
+        worktree_is_clean,
     )
-    from orchestrator.lifecycle import classify_lifecycle
-    from orchestrator.observability.events import log_event, log_failure
     from orchestrator.schemas.artifacts import (
         APPLY_JSON,
-        TARGET_CONFIG_SNAPSHOT_JSON,
+        VALIDATION_POLICY_JSON,
         ApplyResult,
-        PatchLifecycleState,
-        compute_auto_apply_eligible,
     )
-    from orchestrator.schemas.config import default_workspace_path
-    from orchestrator.schemas.git import ApplyCheckStatus
     from orchestrator.validation_decision import (
-        bind_validation_subject,
+        attach_validation_decision,
         evaluate_validation,
         expected_validation_subject,
+        validation_policy_for,
     )
 
-    # 1. Resolve workspace path and ensure run exists
-    if workspace is not None:
-        workspace_path = Path(workspace).resolve()
-    elif os.environ.get("PATCHFORGE_WORKSPACE"):
-        workspace_path = Path(os.environ["PATCHFORGE_WORKSPACE"]).resolve()
-    else:
-        workspace_path = default_workspace_path(Path.cwd())
-
-    workspace_mgr = WorkspaceManager(workspace_path)
+    workspace_path = (
+        Path(workspace).resolve()
+        if workspace is not None
+        else Path(
+            os.environ.get("PATCHFORGE_WORKSPACE", default_workspace_path(Path.cwd()))
+        ).resolve()
+    )
+    manager = WorkspaceManager(workspace_path)
     try:
-        workspace_mgr.ensure_run_exists(run_id)
+        manager.ensure_run_exists(run_id)
     except FileNotFoundError as exc:
-        console.print(f"[bold red]Error: {exc}[/bold red]")
-        raise typer.Exit(code=1) from None
-
-    # 2. Read run.json and patch.diff
-    run_metadata = workspace_mgr.read_run_json(run_id)
-
-    if issue_number is None and run_metadata.issue_number is not None:
-        issue_number = run_metadata.issue_number
-
-    # Computed early: the resume path needs this to verify the WAL's
-    # recorded branch matches what this invocation would create, before any
-    # git mutation or lock acquisition happens.
-    if issue_number is not None:
-        branch_name = f"patchforge/{run_id}/issue_{issue_number}"
-    else:
-        branch_name = f"patchforge/{run_id}"
-
-    if run_metadata.status != "previewed":
-        _status_msgs = {
-            "validation_failed": (
-                "Patch validation failed during preview. Review validation.json, "
-                "fix the issues, and run preview again."
-            ),
-            "applied": "This patch has already been applied. Start a new run.",
-        }
-        msg = _status_msgs.get(
-            run_metadata.status,
-            f"Run status is '{run_metadata.status}'. "
-            "Only successfully previewed runs can be applied.",
-        )
-        console.print(f"[bold red]Error: {msg}[/bold red]")
-        raise typer.Exit(code=1) from None
-
-    target_path = Path(run_metadata.target_path)
-
-    # This is the actual human gate — record who is approving now, not at
-    # scan/ci time when no approval has happened yet.
-    run_metadata.approved_by = resolve_approved_by(target_path)
-
-    # 2.5 Verify experiment context if experiment.json is present
-    from orchestrator.schemas.experiment import verify_experiment_or_warn
-
-    try:
-        verify_experiment_or_warn(workspace_mgr, run_id, target_path)
-    except ValueError as exc:
-        console.print(f"[bold red]Validation Error: {exc}[/bold red]")
-        raise typer.Exit(code=1) from None
-
-    logs_dir = workspace_path / "logs"
-    run_dir = workspace_mgr.run_dir(run_id)
+        _fail(str(exc))
+    metadata = manager.read_run_json(run_id)
+    if metadata.status not in {"previewed", "applied"}:
+        _fail(f"run status is {metadata.status!r}; only previewed runs can be promoted")
+    if issue_number is None:
+        issue_number = metadata.issue_number
+    branch = _candidate_branch(run_id, issue_number)
+    candidate_ref = f"refs/heads/{branch}"
+    receipt_ref = promotion_receipt_ref(run_id)
+    run_dir = manager.run_dir(run_id)
     patch_path = run_dir / "patch.diff"
+    if not patch_path.is_file() or not metadata.patch_checksum:
+        _fail("preview evidence is incomplete; patch.diff and its checksum are required")
+    patch_checksum = hashlib.sha256(patch_path.read_bytes()).hexdigest()
+    if patch_checksum != metadata.patch_checksum:
+        _fail("patch checksum mismatch; run preview again")
 
-    def _cleanup_dirt_ref_warn(dirt_stash_sha: str) -> None:
-        """Print a non-fatal warning if the dirt-capture ref cleanup fails.
+    if metadata.status == "applied":
+        console.print("[yellow]Run is already marked applied.[/yellow]")
+        return
 
-        The working tree is already correct at this point (dirt was
-        restored successfully) -- a failed ref delete only leaves the ref
-        behind for the startup orphan advisory to eventually flag, not a
-        data-safety issue.
-        """
-        if not delete_dirt_ref(target_path, run_id, dirt_stash_sha):
-            console.print(
-                "[bold yellow]Warning: your changes were restored, but cleaning "
-                "up the internal dirt-capture ref failed. This is harmless -- a "
-                "future run's startup advisory may flag it -- but you can remove "
-                f"it manually with:\n  git update-ref -d "
-                f"{dirt_ref_name(run_id)} {dirt_stash_sha}[/bold yellow]"
-            )
-
-    def _dirt_conflict_suffix() -> str:
-        """Note a partial merge if stash_apply_dirt's failure left conflict markers."""
-        return (
-            " (a partial merge left conflict markers in the tree)"
-            if has_merge_conflicts(target_path)
-            else ""
-        )
-
-    if not patch_path.exists():
-        console.print(f"[bold red]Error: patch.diff does not exist in {run_dir}[/bold red]")
-        raise typer.Exit(code=1) from None
-
-    # Advisory only: warn about any prior --allow-dirty run's dirt capture
-    # that was never restored (e.g. the process crashed before rollback
-    # could run). refs/patchforge/dirt/* is PatchForge's own private
-    # namespace, so every entry found there is unambiguously ours -- no
-    # name-collision suppression is needed here, unlike the old
-    # refs/stash-based design this replaced (which shared its addressing
-    # with the user's own `git stash` workflow).
-    #
-    # This read happens before the repo lock is acquired below -- it is
-    # purely informational (no state is mutated from it), so a TOCTOU race
-    # with a concurrent worker at worst shows slightly stale wording, never
-    # an incorrect action.
-    for orphan_run_id, orphan_sha in check_orphaned_dirt_refs(target_path):
-        if orphan_run_id == run_id:
-            # This run's own capture is handled by the resume/reuse path
-            # in this same invocation -- not an orphan from this run's
-            # perspective.
-            continue
-
-        resumable_hint = ""
-        orphan_apply_json = workspace_mgr.runs / orphan_run_id / APPLY_JSON
-        if orphan_apply_json.exists():
-            with contextlib.suppress(Exception):
-                orphan_wal = ApplyResult.model_validate_json(
-                    orphan_apply_json.read_text(encoding="utf-8")
-                )
-                if orphan_wal.status == "applying":
-                    resumable_hint = (
-                        f"This run might be resumable -- try: apply {orphan_run_id}. "
-                        "If that doesn't work, as a fallback, your working-tree state "
-                        "may be recoverable via: "
-                    )
-
-        age_note = ""
-        orphan_run_json = workspace_mgr.runs / orphan_run_id / "run.json"
-        if orphan_run_json.exists():
-            with contextlib.suppress(OSError):
-                age_days = int((time.time() - orphan_run_json.stat().st_mtime) // 86400)
-                if age_days >= _ORPHAN_CLEANUP_CANDIDATE_DAYS:
-                    age_note = (
-                        f" This capture is {age_days} day(s) old and is a "
-                        "candidate for manual cleanup if no longer needed: "
-                        f"git update-ref -d {dirt_ref_name(orphan_run_id)} {orphan_sha}"
-                    )
-
-        if resumable_hint:
-            console.print(
-                "[bold yellow]Warning: found an unresumed --allow-dirty dirt "
-                f"capture for run {orphan_run_id} ({orphan_sha}). "
-                f"{resumable_hint}"
-                f"git stash apply --index {orphan_sha}.{age_note}[/bold yellow]"
-            )
-        else:
-            console.print(
-                "[bold yellow]Warning: found an unresumed --allow-dirty dirt "
-                f"capture for run {orphan_run_id} ({orphan_sha}). Your "
-                "working-tree state may be recoverable via: "
-                f"git stash apply --index {orphan_sha}.{age_note}[/bold yellow]"
-            )
-
-    # Acquire repo lock BEFORE any isolation/lifecycle/branch/HEAD checks --
-    # including the very first HEAD read immediately below. A
-    # lock-acquisition failure means contention with another worker and
-    # must abort immediately.
-    acquired = False
-    repo_identity = str(target_path.resolve())
-    if coordination_db_dir is not None:
-        acquired = acquire_repo_lock(
-            repo_identity,
-            worker_id or "unknown",
-            ttl_seconds=300,
-            db_dir=coordination_db_dir,
-        )
-        if not acquired:
-            console.print(
-                "[bold red]Error: Could not acquire the repository lock — another "
-                "worker is currently operating on this repository. Aborting.[/bold red]"
-            )
-            raise typer.Exit(code=1) from None
-
+    lock_dir = coordination_db_dir or workspace_path
+    lock_owner = worker_id or run_id
+    if not acquire_repo_lock(metadata.target_path, lock_owner, db_dir=lock_dir):
+        _fail("another PatchForge operation holds the repository lock")
     try:
+        target = Path(metadata.target_path).resolve()
+        metadata.approved_by = resolve_approved_by(target)
+        manager.write_run_json(run_id, metadata)
         try:
-            current_head_sha = current_head(target_path)
+            base_branch = current_branch(target)
+            live_base = current_head(target)
         except RuntimeError as exc:
-            console.print(f"[bold red]Git Error: {exc}[/bold red]")
-            failure_path = run_dir / "failure.json"
-            failure_path.write_text(
-                json.dumps(
-                    {
-                        "error": "Failed to resolve HEAD",
-                        "message": str(exc),
-                    },
-                    indent=2,
-                ),
-                encoding="utf-8",
+            manager.write_artifact(
+                run_id,
+                "failure.json",
+                json.dumps({"error": "Failed to resolve HEAD", "message": str(exc)}, indent=2),
             )
-            raise typer.Exit(code=1) from None
+            _fail(f"failed to resolve HEAD: {exc}")
+        if base_branch == "HEAD":
+            _fail("candidate promotion requires an attached base branch")
+        base_ref = f"refs/heads/{base_branch}"
+        if live_base != metadata.base_commit:
+            _fail("base branch no longer matches this run's base_commit; run preview again")
 
-        # NOTE: no early "HEAD has changed" check here -- classify_lifecycle()
-        # below is the single dispatcher for HEAD-divergence outcomes
-        # (REBASEABLE if the patch still applies, CONFLICT otherwise). An
-        # early exit here would make the REBASEABLE branch unreachable in
-        # the normal flow (see docs/context/discoveries.md, issue #270).
-
-        # Bootstrap target environment. NOTE: TargetConfig.load() is NOT
-        # called here -- it reads orchestrator.json and walks the filesystem,
-        # both of which would observe the patch's own (uncommitted) mutations
-        # on the ALREADY_APPLIED resume path. It is loaded further down, inside
-        # the VALID-only happy path; the resume path loads the pre-apply
-        # snapshot instead (see below).
-        bootstrap_environment(env_file=env_file, target_path=target_path)
-
-        # Classify lifecycle state using the dedicated lifecycle module.
-        lifecycle_state = classify_lifecycle(run_id, workspace_mgr)
-
-        run_metadata.lifecycle_state = lifecycle_state
-        run_metadata.auto_apply_eligible = compute_auto_apply_eligible(
-            run_metadata.risk_budget, lifecycle_state, run_metadata.executor_had_errors
-        )
-        run_metadata.updated_at = datetime.now(timezone.utc)
-        workspace_mgr.write_run_json(run_id, run_metadata)
-
-        if lifecycle_state is PatchLifecycleState.CONFLICT:
-            # If this run captured dirt, the CONFLICT may actually be
-            # sub-case 2: a prior run restored the dirt successfully but
-            # crashed before writing the final WAL checkpoint, so
-            # classify_lifecycle's own reverse-check (based on the WAL's
-            # recorded state) no longer matches the live tree. Re-run the
-            # reverse-check independently here -- duplicating it is safe
-            # because the action taken (raise typer.Exit(code=1)) is
-            # identical either way; only the message text differs.
-            if run_metadata.dirt_stash_sha:
-                reverse = try_apply_dry_run_reverse(patch_path, target_path)
-                if reverse is ApplyCheckStatus.PASSED:
-                    console.print(
-                        "[bold red]Error: Patch lifecycle state is CONFLICT, but the "
-                        "patch content appears to already be present in the working "
-                        "tree.\n\nThis likely means a previous run restored your "
-                        "pre-existing working-tree changes (captured with "
-                        "--allow-dirty) but crashed before finishing.\n\n"
-                        "Check your working tree first -- if your pre-existing changes "
-                        "are already there alongside the patch, no recovery action is "
-                        "needed; just review or commit the current state.\n\n"
-                        "If your changes are missing, as a last resort:\n"
-                        f"  git stash apply --index {run_metadata.dirt_stash_sha}"
-                        "[/bold red]"
+        wal_path = run_dir / APPLY_JSON
+        wal = None
+        if wal_path.exists():
+            try:
+                wal = ApplyResult.model_validate_json(wal_path.read_text(encoding="utf-8"))
+            except Exception:
+                _fail("apply.json is corrupt; candidate recovery is fail-closed")
+            if wal.apply_protocol != APPLY_PROTOCOL:
+                _fail("apply.json belongs to a different apply protocol and cannot be resumed")
+            if wal.promotion_state == PROMOTION_PREPARED:
+                candidate = resolve_ref(target, wal.candidate_ref or "")
+                receipt = resolve_ref(target, wal.promotion_receipt_ref or "")
+                if candidate == wal.candidate_commit and receipt == wal.candidate_commit:
+                    _finish(manager, run_id, metadata, wal)
+                    return
+                if candidate is not None or receipt is not None:
+                    _fail(
+                        "candidate promotion is inconsistent; inspect refs manually before retrying"
                     )
-                    raise typer.Exit(code=1) from None
+            elif wal.promotion_state == PROMOTION_APPLIED:
+                _finish(manager, run_id, metadata, wal)
+                return
 
-            console.print(
-                f"[bold red]Error: Patch lifecycle state is CONFLICT. "
-                f"HEAD {current_head(target_path)} has diverged from base commit "
-                f"{run_metadata.base_commit} and the patch cannot be applied cleanly. "
-                "Please rebase the patch or generate a new one.[/bold red]"
-            )
-            raise typer.Exit(code=1) from None
+        # The policy is loaded from an unpatched base worktree, then used in
+        # the candidate worktree with only its execution path substituted.
+        with candidate_worktree(target, metadata.base_commit) as base_tree:
+            base_config = TargetConfig.load(target_path=base_tree, workspace_path=workspace_path)
+        policy = validation_policy_for(base_config)
+        manager.write_artifact(run_id, VALIDATION_POLICY_JSON, policy.model_dump_json(indent=2))
+        repository_identity = str(git_common_dir(target))
 
-        if lifecycle_state is PatchLifecycleState.STALE:
-            console.print(
-                "[bold red]Error: Patch lifecycle state is STALE. "
-                "The patch.diff is missing, empty, or git could not process it "
-                "(git executable not found or invalid patch format). "
-                "Please run the preview command again.[/bold red]"
-            )
-            raise typer.Exit(code=1) from None
-
-        if lifecycle_state is PatchLifecycleState.REBASEABLE:
-            console.print(
-                "[bold red]Error: Patch lifecycle state is REBASEABLE. "
-                f"HEAD {current_head(target_path)} has diverged from base commit "
-                f"{run_metadata.base_commit}. The patch still applies cleanly, but "
-                "rebasing is blocked in V1. Please generate a new patch for the "
-                "current HEAD.[/bold red]"
-            )
-            raise typer.Exit(code=1) from None
-
-        log_event(
-            trace_id=run_id,
-            run_id=run_id,
-            level="info",
-            source="pipeline",
-            stage="apply",
-            event="stage_start",
-            data={
-                "lifecycle_state": lifecycle_state,
-                "base_commit": run_metadata.base_commit,
-                "current_head": current_head(target_path),
-            },
-            logs_dir=logs_dir,
-            run_dir=run_dir,
-        )
-
-        # 5. Verify patch checksum (runs for VALID and ALREADY_APPLIED alike --
-        # the resume path must never trust the WAL without re-checking that
-        # patch.diff still matches what was recorded at preview time).
-        patch_content = patch_path.read_text(encoding="utf-8")
-        actual_checksum = hashlib.sha256(patch_content.encode("utf-8")).hexdigest()
-        if not run_metadata.patch_checksum:
-            console.print(
-                "[bold red]Error: Patch checksum is missing. Run preview first.[/bold red]"
-            )
-            run_metadata.status = "failed"
-            run_metadata.apply_status = "failed"
-            run_metadata.updated_at = datetime.now(timezone.utc)
-            if run_metadata.failure_artifacts is None:
-                run_metadata.failure_artifacts = []
-            if "checksum_mismatch" not in run_metadata.failure_artifacts:
-                run_metadata.failure_artifacts.append("checksum_mismatch")
-            workspace_mgr.write_run_json(run_id, run_metadata)
-            raise typer.Exit(code=1) from None
-        if actual_checksum != run_metadata.patch_checksum:
-            console.print(
-                "[bold red]Error: Patch checksum mismatch. The patch.diff has been modified "
-                "since preview.\n"
-                f"Expected: {run_metadata.patch_checksum}\n"
-                f"Actual:   {actual_checksum}[/bold red]"
-            )
-            run_metadata.status = "failed"
-            run_metadata.apply_status = "failed"
-            run_metadata.updated_at = datetime.now(timezone.utc)
-            if run_metadata.failure_artifacts is None:
-                run_metadata.failure_artifacts = []
-            if "checksum_mismatch" not in run_metadata.failure_artifacts:
-                run_metadata.failure_artifacts.append("checksum_mismatch")
-            workspace_mgr.write_run_json(run_id, run_metadata)
-            raise typer.Exit(code=1) from None
-
-        # 6. Save pre-apply Git state (overwritten by WAL values on resume).
-        pre_apply_head = current_head(target_path)
-        pre_apply_branch = current_branch(target_path)
-
-        # Populated from one of three sources: the happy path's own
-        # --allow-dirty capture (below), wal_result.dirt_stash_sha after a
-        # successful resume hydration, or an orphaned ref reused by
-        # sub-case 0 detection in the happy path.
-        dirt_stash_sha: Optional[str] = None
-
-        if lifecycle_state is PatchLifecycleState.ALREADY_APPLIED:
-            # --- RESUME PATH -----------------------------------------------
-            # A previous apply ran git apply successfully but crashed before
-            # validation completed. Resume: re-verify isolation against the
-            # WAL, reload the pre-apply config snapshot, and fall through to
-            # the shared validation/outcome section below -- no branch
-            # creation, no git apply (the patch is already in the tree).
-            console.print(
-                "[bold yellow]Patch lifecycle state is ALREADY_APPLIED. "
-                "Attempting automatic resume...[/bold yellow]"
-            )
-
-            wal_result = _hydrate_apply_result_for_resume(run_dir, run_id, patch_path)
-            if wal_result is None:
-                dirt_note = ""
-                if run_metadata.dirt_stash_sha:
-                    dirt_note = (
-                        "\n\nThis run also captured working-tree changes with "
-                        "--allow-dirty. Check your working tree first -- if your "
-                        "pre-existing changes are already present, no action is "
-                        "needed for them. Otherwise, as a last resort: "
-                        f"git stash apply --index {run_metadata.dirt_stash_sha}"
-                    )
-                console.print(
-                    "[bold red]Error: ALREADY_APPLIED detected but apply.json is "
-                    "missing, corrupt, not in an 'applying' state, or its backup "
-                    "diff pointer is missing/stale. Cannot safely resume.\n\n"
-                    "To proceed manually:\n"
-                    "  - Review the working tree (git status / git diff), then\n"
-                    "  - Commit the changes yourself, or\n"
-                    "  - Discard them ('git reset --hard "
-                    f"{run_metadata.base_commit}' and 'git clean -fd') and "
-                    f"re-run apply.{dirt_note}[/bold red]"
-                )
-                raise typer.Exit(code=1) from None
-
-            # Propagate the dirt SHA the WAL recorded so the shared restore
-            # blocks below (success and validation-failure-rollback) pick
-            # it up the same way the happy path does.
-            dirt_stash_sha = wal_result.dirt_stash_sha
-
-            # Triple isolation verification: HEAD, live branch, and
-            # residue-free tree (already verified by classify_lifecycle)
-            # must all agree with what the WAL recorded. Compare against
-            # the LIVE current branch, not the locally-derived branch_name
-            # constant -- both branch_name and wal_result.branch are
-            # computed by the same deterministic formula from
-            # run_id/issue_number, so comparing them to each other can
-            # never fail. The real risk is the user switching branches
-            # between the crashed run and this resume attempt.
-            if wal_result.pre_apply_head != current_head_sha:
-                console.print(
-                    "[bold red]Resume aborted: recorded pre-apply HEAD "
-                    f"'{wal_result.pre_apply_head}' does not match current HEAD "
-                    f"'{current_head_sha}'.[/bold red]"
-                )
-                raise typer.Exit(code=1) from None
-
-            live_branch = current_branch(target_path)
-            if live_branch != wal_result.branch:
-                console.print(
-                    f"[bold red]Resume aborted: current branch '{live_branch}' "
-                    f"does not match the branch recorded by the original apply "
-                    f"('{wal_result.branch}'). Switch back to that branch before "
-                    "retrying, or discard the uncommitted patch.[/bold red]"
-                )
-                raise typer.Exit(code=1) from None
-
-            config_snapshot_path = run_dir / TARGET_CONFIG_SNAPSHOT_JSON
-            if not config_snapshot_path.exists():
-                console.print(
-                    "[bold red]Resume aborted: target_config_snapshot.json is "
-                    "missing. Cannot safely determine the validation "
-                    "configuration used at apply time.[/bold red]"
-                )
-                raise typer.Exit(code=1) from None
+        with candidate_worktree(target, metadata.base_commit) as candidate_tree:
+            message = f"patchforge: apply {run_id}"
+            if issue_number is not None:
+                message += f" (issue #{issue_number})"
             try:
-                config = TargetConfig.model_validate_json(
-                    config_snapshot_path.read_text(encoding="utf-8")
-                )
-            except Exception as exc:
-                console.print(
-                    f"[bold red]Resume aborted: failed to load config snapshot: {exc}[/bold red]"
-                )
-                raise typer.Exit(code=1) from None
-
-            branch_name = wal_result.branch
-            pre_apply_head = wal_result.pre_apply_head
-            pre_apply_branch = wal_result.pre_apply_branch
-            backup_path = Path(wal_result.pre_apply_diff_backup)
-            apply_result = wal_result
-
-            log_event(
-                trace_id=run_id,
-                run_id=run_id,
-                level="info",
-                source="pipeline",
-                stage="apply",
-                event="resume_start",
-                data={
-                    "lifecycle_state": "ALREADY_APPLIED",
-                    "wal_branch": wal_result.branch,
-                    "dirt_stash_sha": dirt_stash_sha,
-                },
-                logs_dir=logs_dir,
-                run_dir=run_dir,
-            )
-        else:
-            # --- HAPPY PATH (VALID) -----------------------------------------
-            # Verify valid git repo and cleanliness here, and only here --
-            # ALREADY_APPLIED is expected to have a dirty tree, since the
-            # uncommitted patch IS the dirt, so this must not run for that
-            # branch at all.
-            try:
-                git_state = repository_state(target_path)
-            except ValueError as exc:
-                console.print(f"[bold red]Git Error: {exc}[/bold red]")
-                raise typer.Exit(code=1) from None
-
-            # Sub-case 0: a prior attempt may have captured dirt and reset
-            # the tree to clean (checkpoint 1 of the WAL, before
-            # apply_patch) and then crashed before applying the patch --
-            # classify_lifecycle sees a clean tree at base_commit and
-            # returns VALID, not ALREADY_APPLIED, so this retry lands here
-            # in the happy path rather than the resume path above. Detect
-            # that orphaned capture before deciding whether to capture new
-            # dirt, so it is reused instead of silently abandoned. Must run
-            # before the is_clean gate below: the orphaned-ref-plus-clean-
-            # tree case is exactly the one that gate would otherwise skip
-            # right past.
-            try:
-                existing_dirt_sha = resolve_dirt_ref(target_path, run_id)
+                candidate_commit = commit_candidate(candidate_tree, patch_path, message)
             except RuntimeError as exc:
-                console.print(f"[bold red]Git Error: {exc}[/bold red]")
-                raise typer.Exit(code=1) from None
-            if existing_dirt_sha is not None:
-                if (
-                    run_metadata.dirt_stash_sha is not None
-                    and run_metadata.dirt_stash_sha != existing_dirt_sha
-                ):
-                    console.print(
-                        "[bold red]Error: Found a dirt-capture ref for this run, but "
-                        f"its SHA ({existing_dirt_sha}) does not match the SHA recorded "
-                        f"in this run's metadata ({run_metadata.dirt_stash_sha}). This "
-                        "is an unexpected state -- aborting to avoid data loss.\n"
-                        "To investigate:\n"
-                        f"  git show {existing_dirt_sha}\n"
-                        f"  git show {run_metadata.dirt_stash_sha}[/bold red]"
-                    )
-                    raise typer.Exit(code=1) from None
+                _fail(str(exc))
+            if not worktree_is_clean(candidate_tree, candidate_commit):
+                _fail("candidate worktree changed while it was being prepared")
 
-                if not git_state.is_clean:
-                    console.print(
-                        "[bold red]Error: This run has a dirt capture from a prior "
-                        f"interrupted attempt ({existing_dirt_sha}), but the working "
-                        "tree also has new uncommitted changes.\n\n"
-                        "PatchForge cannot safely merge the old capture with the new "
-                        "changes. Aborting before any mutation. Choose one:\n"
-                        "  1. Recover the old capture first:\n"
-                        f"     git stash apply --index {existing_dirt_sha}\n"
-                        "     Then commit or stash everything and re-run apply.\n"
-                        "  2. Discard the old capture:\n"
-                        f"     git update-ref -d {dirt_ref_name(run_id)} {existing_dirt_sha}\n"
-                        "     Then re-run apply (your current changes will be captured "
-                        "fresh).[/bold red]"
-                    )
-                    raise typer.Exit(code=1) from None
-
-                dirt_stash_sha = existing_dirt_sha
-                if run_metadata.dirt_stash_sha != existing_dirt_sha:
-                    run_metadata.dirt_stash_sha = existing_dirt_sha
-                    workspace_mgr.write_run_json(run_id, run_metadata)
-
-            if not git_state.is_clean:
-                if not allow_dirty:
-                    console.print(
-                        "[bold red]Error: Target repository has uncommitted changes. "
-                        "Please commit, stash them, or run with --allow-dirty.[/bold red]"
-                    )
-                    raise typer.Exit(code=1) from None
-                try:
-                    dirt_stash_sha = stash_create_dirt(target_path)
-                except ValueError as exc:
-                    console.print(f"[bold red]Cannot capture working tree state: {exc}[/bold red]")
-                    raise typer.Exit(code=1) from None
-                if dirt_stash_sha is not None:
-                    if not store_dirt_ref(target_path, run_id, dirt_stash_sha):
-                        console.print(
-                            "[bold red]Cannot capture working tree state: failed to record "
-                            "the dirt capture under a private ref (it may already exist from "
-                            "an incomplete prior run). Aborting before any mutation to avoid "
-                            "leaving your changes unreferenced.[/bold red]"
-                        )
-                        raise typer.Exit(code=1) from None
-                    run_metadata.dirt_stash_sha = dirt_stash_sha
-                    workspace_mgr.write_run_json(run_id, run_metadata)
-                    reset_res = force_reset_apply(target_path, git_state.head)
-                    if reset_res.return_code != 0:
-                        console.print(
-                            "[bold red]Cannot capture working tree state: failed to reset "
-                            f"to a clean tree after capturing dirt: {reset_res.stderr}\n"
-                            f"Your changes are safe in: git stash apply --index "
-                            f"{dirt_stash_sha}[/bold red]"
-                        )
-                        raise typer.Exit(code=1) from None
-
-            try:
-                config = TargetConfig.load(target_path=target_path, workspace_path=workspace_path)
-            except Exception as exc:
-                console.print(f"[bold red]Error loading target config: {exc}[/bold red]")
-                raise typer.Exit(code=1) from None
-
-            # Checkpoint 1: status="applying" before any git operation.
-            apply_result = ApplyResult(
+            result = ApplyResult(
                 run_id=run_id,
                 applied_at=datetime.now(timezone.utc),
-                branch=branch_name,
+                branch=branch,
                 success=False,
-                pre_apply_head=pre_apply_head,
-                pre_apply_branch=pre_apply_branch,
                 status="applying",
-                dirt_stash_sha=dirt_stash_sha,
+                apply_protocol=APPLY_PROTOCOL,
+                promotion_state=PROMOTION_PREPARED,
+                candidate_ref=candidate_ref,
+                candidate_commit=candidate_commit,
+                promotion_receipt_ref=receipt_ref,
+                expected_base_ref=base_ref,
+                expected_base_commit=metadata.base_commit,
+                policy_digest=policy.digest,
+                pre_apply_head=metadata.base_commit,
+                pre_apply_branch=base_branch,
             )
-            # Persist the pre-apply config snapshot BEFORE the WAL
-            # checkpoint (not after): if the process crashes between the
-            # two writes, writing the snapshot first means a crash leaves
-            # either both files present (resumable) or neither triggering
-            # a resume attempt (WAL missing/stale -> abort). Writing the
-            # WAL first would instead risk a hydratable WAL with no
-            # snapshot -- a resumable-looking state the resume path could
-            # never actually complete.
-            config_snapshot_path = run_dir / TARGET_CONFIG_SNAPSHOT_JSON
-            config_snapshot_path.write_text(config.model_dump_json(indent=2), encoding="utf-8")
-            _wal_write(apply_result, run_dir / "apply.json")
+            _wal_write(result, wal_path)
 
-            branch_res = create_controlled_branch(target_path, branch_name)
-            if branch_res.return_code != 0:
-                console.print(
-                    f"[bold red]Error checking out branch {branch_name}: "
-                    f"{branch_res.stderr}[/bold red]"
-                )
-                log_failure(
-                    trace_id=run_id,
-                    run_id=run_id,
-                    stage="apply",
-                    error_type="checkout_failed",
-                    message=branch_res.stderr,
-                    logs_dir=logs_dir,
-                    run_dir=run_dir,
-                )
-                # No code mutation happened yet (branch checkout itself
-                # failed), so there is nothing to code-rollback -- just
-                # restore the captured dirt directly onto the still-clean
-                # tree left by force_reset_apply above.
-                if dirt_stash_sha:
-                    if stash_apply_dirt(target_path, dirt_stash_sha):
-                        _cleanup_dirt_ref_warn(dirt_stash_sha)
-                    else:
-                        conflict_note = _dirt_conflict_suffix()
-                        console.print(
-                            "[bold red]FATAL: Branch checkout failed AND restoring your "
-                            f"pre-existing working-tree changes also failed{conflict_note}. "
-                            "Recover them with:\n  git stash apply --index "
-                            f"{dirt_stash_sha}[/bold red]"
-                        )
-                run_metadata.status = "failed"
-                run_metadata.apply_status = "failed"
-                run_metadata.updated_at = datetime.now(timezone.utc)
-                if run_metadata.failure_artifacts is None:
-                    run_metadata.failure_artifacts = []
-                if "checkout_failure" not in run_metadata.failure_artifacts:
-                    run_metadata.failure_artifacts.append("checkout_failure")
-                workspace_mgr.write_run_json(run_id, run_metadata)
-                raise typer.Exit(code=1) from None
-
-            # 8. Apply patch
-            backup_path = run_dir / "patch.apply-backup.diff"
-            shutil.copy2(patch_path, backup_path)
-            apply_result.pre_apply_diff_backup = str(backup_path)
-            _wal_write(apply_result, run_dir / "apply.json")
-
-            apply_res = apply_patch(target_path, patch_path)
-            if apply_res.return_code != 0:
-                console.print(f"[bold red]Error applying patch: {apply_res.stderr}[/bold red]")
-                log_failure(
-                    trace_id=run_id,
-                    run_id=run_id,
-                    stage="apply",
-                    error_type="apply_failed",
-                    message=apply_res.stderr,
-                    logs_dir=logs_dir,
-                    run_dir=run_dir,
-                )
-                # Revert: force reset to pre-apply state
-                rollback_succeeded = False
-                try:
-                    rollback_to_commit(target_path, pre_apply_head, backup_diff=backup_path)
-                    rollback_succeeded = True
-                except RollbackError as exc:
-                    console.print(
-                        "[bold red]FATAL: Patch application failed AND the automatic revert also "
-                        "failed. Your repository may be in a partially applied state.\n"
-                        f"Revert stderr: {exc.stderr}\n"
-                        "Please run 'git checkout .' and 'git clean -fd' manually "
-                        "to restore a clean state.[/bold red]"
-                    )
-                    log_failure(
-                        trace_id=run_id,
-                        run_id=run_id,
-                        stage="apply",
-                        error_type="revert_failed",
-                        message=exc.stderr,
-                        logs_dir=logs_dir,
-                        run_dir=run_dir,
-                    )
-                # Restore captured dirt now that the code rollback succeeded
-                # -- restoring before the code rollback would apply the
-                # stash onto the wrong tree state. If the code rollback
-                # itself failed, the tree is in an unknown state and must
-                # not be touched -- but the user still needs to know their
-                # dirt is safely captured and how to recover it once the
-                # tree is manually fixed.
-                dirt_restored = False
-                dirt_restore_failed = False
-                dirt_recovery_command = None
-                if dirt_stash_sha:
-                    if rollback_succeeded:
-                        if stash_apply_dirt(target_path, dirt_stash_sha):
-                            _cleanup_dirt_ref_warn(dirt_stash_sha)
-                            dirt_restored = True
-                        else:
-                            rollback_succeeded = False
-                            dirt_restore_failed = True
-                            dirt_recovery_command = f"git stash apply --index {dirt_stash_sha}"
-                            conflict_note = _dirt_conflict_suffix()
-                            console.print(
-                                "[bold red]FATAL: Code rollback succeeded but restoring your "
-                                f"pre-existing working-tree changes failed{conflict_note}. "
-                                f"Recover them with:\n  {dirt_recovery_command}[/bold red]"
-                            )
-                    else:
-                        dirt_restore_failed = True
-                        dirt_recovery_command = f"git stash apply --index {dirt_stash_sha}"
-                        console.print(
-                            "[bold red]Your pre-existing working-tree changes are still "
-                            "safely captured. Once you've manually restored a clean state, "
-                            f"recover them with:\n  {dirt_recovery_command}[/bold red]"
-                        )
-
-                # Write apply.json failure using ApplyResult model
-                apply_result = ApplyResult(
-                    run_id=run_id,
-                    applied_at=datetime.now(timezone.utc),
-                    branch=branch_name,
-                    success=False,
-                    status="apply_failed",
-                    rolled_back=rollback_succeeded,
-                    error=apply_res.stderr,
-                    pre_apply_head=pre_apply_head,
-                    pre_apply_branch=pre_apply_branch,
-                    rollback_head=pre_apply_head if rollback_succeeded else None,
-                    dirt_stash_sha=dirt_stash_sha,
-                    dirt_restored=dirt_restored,
-                    dirt_restore_failed=dirt_restore_failed,
-                    dirt_recovery_command=dirt_recovery_command,
-                )
-                _wal_write(apply_result, run_dir / "apply.json")
-                run_metadata.status = "failed"
-                run_metadata.apply_status = (
-                    "rolled_back" if rollback_succeeded else "rollback_failed"
-                )
-                run_metadata.updated_at = datetime.now(timezone.utc)
-                if run_metadata.failure_artifacts is None:
-                    run_metadata.failure_artifacts = []
-                if "apply.json" not in run_metadata.failure_artifacts:
-                    run_metadata.failure_artifacts.append("apply.json")
-                workspace_mgr.write_run_json(run_id, run_metadata)
-                raise typer.Exit(code=1) from None
-
-        # --- SHARED: post-apply validation + outcome handling (both the
-        # resume path and the happy path fall through to here) -----------
-
-        # 9. Run post-apply validation checks
-        with Progress(
-            SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console
-        ) as progress:
-            task = progress.add_task("[green]Running post-apply validation checks...", total=None)
-            try:
-                post_val_output, _ = run_validator(config=config)
-                progress.update(task, completed=100)
-            except Exception as exc:
-                progress.update(task, completed=100)
-                console.print(
-                    f"[bold red]Error: post-apply validation failed to execute: {exc}[/bold red]"
-                )
-                post_val_output = None
-
-        if post_val_output is not None:
-            expected_subject = None
-            if getattr(post_val_output, "schema_version", None) == 2:
-                expected_subject = expected_validation_subject(
-                    run_id=post_val_output.run_id,
-                    project_root=target_path,
-                    base_commit=pre_apply_head,
-                    patch_checksum=actual_checksum,
-                )
-            post_val_output = bind_validation_subject(
-                post_val_output,
-                base_commit=pre_apply_head,
-                patch_checksum=actual_checksum,
+            candidate_config = base_config.model_copy(update={"target_path": candidate_tree})
+            output, _ = run_validator(config=candidate_config)
+            subject = expected_validation_subject(
+                run_id=output.run_id,
+                project_root=target,
+                base_commit=metadata.base_commit,
+                patch_checksum=patch_checksum,
+                candidate_commit=candidate_commit,
+                repository_identity=repository_identity,
+                policy_digest=policy.digest,
             )
-            workspace_mgr.write_artifact(
-                run_id, "post_apply_validation.json", post_val_output.model_dump_json(indent=2)
+            output = attach_validation_decision(
+                output, candidate_config, policy=policy, subject=subject
             )
+            manager.write_artifact(run_id, "validation.json", output.model_dump_json(indent=2))
+            if not worktree_is_clean(candidate_tree, candidate_commit):
+                _fail("validator modified the candidate worktree; refusing promotion")
+            decision = evaluate_validation(
+                output, fresh=True, expected_subject=subject, expected_policy=policy
+            )
+            if not decision.authorized:
+                _fail("candidate validation was not authorized")
 
-        post_val_decision = (
-            evaluate_validation(post_val_output, fresh=True, expected_subject=expected_subject)
-            if post_val_output is not None
-            else None
+        promoted = promote_candidate(
+            target,
+            base_ref=base_ref,
+            base_commit=metadata.base_commit,
+            candidate_ref=candidate_ref,
+            candidate_commit=result.candidate_commit or "",
+            receipt_ref=receipt_ref,
         )
-
-        # 10. Handle post-apply validation failure or execution error: roll
-        # back automatically. post_val_output is None only when run_validator
-        # raised, which must never be treated as an implicit pass.
-        if post_val_decision is None or not post_val_decision.authorized:
-            console.print(
-                "[bold yellow]Post-apply validation failed. Rolling back...[/bold yellow]"
-            )
-            rollback_succeeded = False
-            try:
-                rollback_to_commit(target_path, pre_apply_head, backup_diff=backup_path)
-                rollback_succeeded = True
-            except RollbackError as exc:
-                console.print(
-                    "[bold red]FATAL: Post-apply validation failed AND automatic rollback "
-                    "also failed. Your repository may be in a partially applied state.\n"
-                    f"Revert stderr: {exc.stderr}\n"
-                    "Please run 'git checkout .' and 'git clean -fd' manually "
-                    "to restore a clean state.[/bold red]"
-                )
-                log_failure(
-                    trace_id=run_id,
-                    run_id=run_id,
-                    stage="apply",
-                    error_type="rollback_failed",
-                    message=exc.stderr,
-                    logs_dir=logs_dir,
-                    run_dir=run_dir,
-                )
-
-            # Write post_apply_failure.json
-            validation_reason = (
-                "validator_errored" if post_val_output is None else "validation_failed"
-            )
-            failure_detail = {
-                "stage": "post_apply_validation",
-                "reason": validation_reason,
-                "validation_output": (
-                    post_val_output.model_dump() if post_val_output is not None else None
-                ),
-                "rollback_succeeded": rollback_succeeded,
-            }
-            workspace_mgr.write_artifact(
-                run_id, "post_apply_failure.json", json.dumps(failure_detail, indent=2)
-            )
-
-            # Restore captured dirt now that the code rollback succeeded. If
-            # the code rollback itself failed, the tree is in an unknown
-            # state and must not be touched -- but the user still needs the
-            # recovery pointer for their safely-captured dirt.
-            dirt_restored = False
-            dirt_restore_failed = False
-            dirt_recovery_command = None
-            if dirt_stash_sha:
-                if rollback_succeeded:
-                    if stash_apply_dirt(target_path, dirt_stash_sha):
-                        _cleanup_dirt_ref_warn(dirt_stash_sha)
-                        dirt_restored = True
-                    else:
-                        rollback_succeeded = False
-                        dirt_restore_failed = True
-                        dirt_recovery_command = f"git stash apply --index {dirt_stash_sha}"
-                        conflict_note = _dirt_conflict_suffix()
-                        console.print(
-                            "[bold red]FATAL: Code rollback succeeded but restoring your "
-                            f"pre-existing working-tree changes failed{conflict_note}. "
-                            f"Recover them with:\n  {dirt_recovery_command}[/bold red]"
-                        )
-                else:
-                    dirt_restore_failed = True
-                    dirt_recovery_command = f"git stash apply --index {dirt_stash_sha}"
-                    console.print(
-                        "[bold red]Your pre-existing working-tree changes are still "
-                        "safely captured. Once you've manually restored a clean state, "
-                        f"recover them with:\n  {dirt_recovery_command}[/bold red]"
-                    )
-
-            base_error_msg = (
-                "Post-apply validation failed to execute"
-                if post_val_output is None
-                else "Post-apply validation failed"
-            )
-            error_msg = (
-                f"{base_error_msg}; rollback also failed"
-                if not rollback_succeeded
-                else base_error_msg
-            )
-            apply_result = ApplyResult(
-                run_id=run_id,
-                applied_at=datetime.now(timezone.utc),
-                branch=branch_name,
-                success=False,
-                status="apply_failed",
-                rolled_back=rollback_succeeded,
-                error=error_msg,
-                pre_apply_head=pre_apply_head,
-                pre_apply_branch=pre_apply_branch,
-                rollback_head=pre_apply_head if rollback_succeeded else None,
-                dirt_stash_sha=dirt_stash_sha,
-                dirt_restored=dirt_restored,
-                dirt_restore_failed=dirt_restore_failed,
-                dirt_recovery_command=dirt_recovery_command,
-            )
-            _wal_write(apply_result, run_dir / "apply.json")
-            run_metadata.status = "failed"
-            run_metadata.apply_status = "rolled_back" if rollback_succeeded else "rollback_failed"
-            run_metadata.updated_at = datetime.now(timezone.utc)
-            if run_metadata.failure_artifacts is None:
-                run_metadata.failure_artifacts = []
-            for artifact in ["apply.json", "post_apply_failure.json"]:
-                if artifact not in run_metadata.failure_artifacts:
-                    run_metadata.failure_artifacts.append(artifact)
-            workspace_mgr.write_run_json(run_id, run_metadata)
-            raise typer.Exit(code=1) from None
-
-        # 10.5. On success, restore any captured dirt on top of the applied
-        # patch -- --allow-dirty must not silently discard the user's
-        # pre-existing changes just because the patch itself succeeded.
-        # This can legitimately conflict with the patch's own changes; if
-        # so, the patch stays applied (it already passed validation) and
-        # the user is pointed at the stash to resolve manually.
-        if dirt_stash_sha:
-            if stash_apply_dirt(target_path, dirt_stash_sha):
-                _cleanup_dirt_ref_warn(dirt_stash_sha)
-                apply_result.dirt_restored = True
-            else:
-                apply_result.dirt_restore_failed = True
-                apply_result.dirt_recovery_command = f"git stash apply --index {dirt_stash_sha}"
-                console.print(
-                    "[bold yellow]Warning: the patch applied and validated successfully, "
-                    "but restoring your pre-existing working-tree changes on top of it "
-                    f"failed{_dirt_conflict_suffix()} (likely a conflict with the patch "
-                    f"itself). Recover them with:\n  "
-                    f"{apply_result.dirt_recovery_command}[/bold yellow]"
-                )
-
-        # 11. Checkpoint 5: status="applied", success=True
-        apply_result.applied_at = datetime.now(timezone.utc)
-        apply_result.success = True
-        apply_result.status = "applied"
-        _wal_write(apply_result, run_dir / "apply.json")
-
-        # 12. Update metadata
-        run_metadata.status = "applied"
-        run_metadata.apply_status = "success"
-        run_metadata.updated_at = datetime.now(timezone.utc)
-        workspace_mgr.write_run_json(run_id, run_metadata)
-
-        log_event(
-            trace_id=run_id,
-            run_id=run_id,
-            level="info",
-            source="pipeline",
-            stage="apply",
-            event="stage_end",
-            data={
-                "success": True,
-                "post_apply_passed": post_val_output.overall_passed if post_val_output else None,
-            },
-            logs_dir=logs_dir,
-            run_dir=run_dir,
-        )
+        if promoted.return_code != 0:
+            _fail(f"candidate promotion failed: {promoted.stderr.strip()}")
+        result.promotion_receipt_commit = result.candidate_commit
+        _finish(manager, run_id, metadata, result)
     finally:
-        if coordination_db_dir is not None and acquired:
-            release_repo_lock(repo_identity, worker_id or "unknown", db_dir=coordination_db_dir)
-
-    eligibility_line = (
-        "[green]✔ Auto-apply eligible[/green]"
-        if run_metadata.auto_apply_eligible
-        else "[yellow]⚠ Manual review recommended[/yellow]"
-    )
-
-    console.print(
-        Panel(
-            "[bold green]Patch applied successfully to branch "
-            f"[yellow]{branch_name}[/yellow]![/bold green]\n\n"
-            f"{eligibility_line}\n\n"
-            "To review and commit the changes, run:\n"
-            "  [cyan]git status[/cyan]\n"
-            "  [cyan]git diff[/cyan]\n"
-            f'  [cyan]git commit -am "Apply patch {run_id}"[/cyan]',
-            expand=False,
-        )
-    )
+        release_repo_lock(metadata.target_path, lock_owner, lock_dir)
