@@ -123,19 +123,14 @@ def _setup_apply_run(tmp_path):
 
 
 def test_apply_rollback_block1(tmp_path, monkeypatch):
-    """Block 1: apply_patch fails, rollback fails -> exit 1, FATAL message."""
-    from orchestrator.schemas.git import GitCommandResult
+    """Candidate preparation failure exits without legacy rollback semantics."""
 
     repo, ws, _ = _setup_apply_run(tmp_path)
 
-    monkeypatch.setattr(
-        "orchestrator.git.apply_patch",
-        lambda *a, **kw: GitCommandResult(return_code=1, stdout="", stderr="apply failed"),
-    )
-    monkeypatch.setattr(
-        "orchestrator.git.force_reset_apply",
-        lambda *a, **kw: GitCommandResult(return_code=1, stdout="", stderr="reset failed"),
-    )
+    def fail_commit(*args, **kwargs):
+        raise RuntimeError("candidate commit failed")
+
+    monkeypatch.setattr("orchestrator.git.commit_candidate", fail_commit)
 
     with patch("orchestrator.commands.apply.bootstrap_environment"):
         result = runner.invoke(
