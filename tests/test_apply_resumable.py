@@ -37,7 +37,7 @@ def _git(repo: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-def _setup_run(tmp_path: Path) -> dict[str, object]:
+def _setup_run(tmp_path: Path, *, v2: bool = False) -> dict[str, object]:
     repo = tmp_path / "repo"
     workspace_path = tmp_path / "workspace"
     repo.mkdir()
@@ -45,7 +45,12 @@ def _setup_run(tmp_path: Path) -> dict[str, object]:
     _git(repo, "config", "user.name", "Test User")
     _git(repo, "config", "user.email", "test@example.com")
     (repo / "README.md").write_text("Hello\n", encoding="utf-8")
-    _git(repo, "add", "README.md")
+    if v2:
+        (repo / "orchestrator.json").write_text(
+            '{"schema_version":"2.0","validators":[{"id":"lint","adapter":"ruff"}]}',
+            encoding="utf-8",
+        )
+    _git(repo, "add", ".")
     _git(repo, "commit", "-m", "initial")
     base = _git(repo, "rev-parse", "HEAD")
     branch = _git(repo, "branch", "--show-current")
@@ -99,6 +104,21 @@ def test_candidate_promotion_leaves_checkout_and_branch_unchanged(tmp_path: Path
     assert _git(repo, "rev-parse", "HEAD") == ctx["base"]
     assert (repo / "README.md").read_text(encoding="utf-8") == "Hello\n"
     assert _git(repo, "show", f"patchforge/{ctx['run_id']}:README.md") == "Hello candidate"
+
+
+@pytest.mark.unit
+def test_v2_candidate_promotion_uses_real_validator_and_writes_authorized_evidence(
+    tmp_path: Path,
+) -> None:
+    ctx = _setup_run(tmp_path, v2=True)
+
+    apply_execute(str(ctx["run_id"]), workspace=Path(ctx["workspace"]))
+
+    artifact = Path(ctx["workspace"]) / "runs" / str(ctx["run_id"]) / VALIDATION_JSON
+    output = ValidatorOutput.model_validate_json(artifact.read_text(encoding="utf-8"))
+    assert output.decision is not None and output.decision.authorized is True
+    assert output.validation_subject is not None
+    assert output.validation_subject.candidate_commit is not None
 
 
 @pytest.mark.unit

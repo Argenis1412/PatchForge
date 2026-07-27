@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for issue #282, phases 1-3.
+Accepted for issue #282, phases 1-5.
 
 ## Decision
 
@@ -40,7 +40,8 @@ their historical `(0, 5)` pass rule remain unchanged.
 
 V2 records terminal states only. A non-approved terminal state stops the
 ordered sequence and records later declarations as `not_run`. Coverage is
-`verified` only for a fixed adapter's standard command; `command`, `tox`, and
+`verified` only for a fixed adapter's standard command whose toolchain is
+resolved from PatchForge's inherited environment. `tsc`, `command`, `tox`, and
 all command overrides are `declared_only`. Unavailable or incomplete execution
 is not approval: it produces an incomplete, non-authorizable global result.
 
@@ -48,6 +49,12 @@ Validator processes are supervised as a managed process tree. A timeout is
 persisted only after cleanup is confirmed; cleanup that cannot be confirmed is
 recorded as `cleanup_failed` and is non-authorizable. This does not provide a
 hermetic sandbox or control intentionally detached processes.
+
+Standard Python adapters launch from a private cwd with Python isolated mode
+and receive the candidate root by absolute path. V2 does not add a target
+checkout's `.venv` to PATH. Each declaration has external scratch storage for
+caches and temporary files; a persistent root change, including ignored or
+untracked paths, uses the existing `failed` state and stops later declarations.
 
 ## Phase 3 artifact and authorization contract
 

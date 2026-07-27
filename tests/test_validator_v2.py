@@ -5,10 +5,10 @@ import pytest
 from orchestrator.agents.validator import adapters
 from orchestrator.agents.validator.adapters import run_v2_validators
 from orchestrator.agents.validator.process import ProcessResult, execute_process, prepare_process
-from orchestrator.schemas.config import ValidatorConfig, ValidatorRole
+from orchestrator.schemas.config import TargetConfig, ValidatorConfig, ValidatorRole
 from orchestrator.schemas.git import ValidationWorkspace
 from orchestrator.schemas.validator_output import CoverageStatus, ExecutionState, OverallStatus
-from orchestrator.validation_workspace import write_validation_json
+from orchestrator.validation_workspace import run_validation_in_copy, write_validation_json
 
 
 def _validator(identifier: str, adapter: str = "ruff", **kwargs) -> ValidatorConfig:
@@ -71,6 +71,17 @@ def test_v2_tsc_override_runs_without_frontend(monkeypatch, tmp_path):
 
     assert output.overall_status is OverallStatus.APPROVED
     assert captured == [("custom-tsc", "--noEmit")]
+    assert output.tools[0].role_coverage == {"typecheck": CoverageStatus.DECLARED_ONLY}
+
+
+@pytest.mark.unit
+def test_v2_standard_tsc_is_declared_only(monkeypatch, tmp_path):
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(adapters, "_raw_result", lambda *_: ProcessResult(return_code=0))
+
+    output = run_v2_validators("run-tsc", tmp_path, [_validator("types", "tsc")], 30)
+
+    assert output.tools[0].role_coverage == {"typecheck": CoverageStatus.DECLARED_ONLY}
 
 
 @pytest.mark.unit
@@ -253,7 +264,65 @@ def test_v2_builtin_adapters_use_standard_commands(
     output = run_v2_validators("run-7", tmp_path, [validator], 30)
 
     assert output.overall_status is OverallStatus.APPROVED
-    assert captured[0][-len(expected_command) :] == expected_command
+    if adapter in {"flake8", "mypy", "pylint"}:
+        assert captured[0] == [adapter, str(tmp_path)]
+    elif adapter == "unittest":
+        assert captured[0][1:5] == ["-I", "-m", "unittest", "discover"]
+        assert captured[0][-2:] == ["-s", str(tmp_path)]
+    else:
+        assert captured[0][-len(expected_command) :] == expected_command
+
+
+@pytest.mark.unit
+def test_v2_python_adapter_uses_private_launcher_and_isolated_mode(monkeypatch, tmp_path):
+    captured = []
+
+    def fake_execute(prepared, timeout):
+        captured.append(prepared)
+        return ProcessResult(return_code=0)
+
+    monkeypatch.setattr(adapters, "execute_process", fake_execute)
+    output = run_v2_validators("run-shadow", tmp_path, [_validator("lint", "ruff")], 30)
+
+    assert output.overall_passed is True
+    assert captured[0].cwd != tmp_path
+    assert captured[0].argv[1:4] == ("-I", "-m", "ruff")
+    assert str(tmp_path) in captured[0].argv
+
+
+@pytest.mark.unit
+def test_v2_workspace_mutation_fails_and_stops_later_validators(monkeypatch, tmp_path):
+    def mutate(_declaration, root, _timeout):
+        (root / "conftest.py").write_text("# injected\n", encoding="utf-8")
+        return ProcessResult(return_code=0)
+
+    monkeypatch.setattr(adapters, "_raw_result", mutate)
+    output = run_v2_validators(
+        "run-mutation", tmp_path, [_validator("lint"), _validator("tests", "pytest")], 30
+    )
+
+    assert [tool.status for tool in output.tools] == [ExecutionState.FAILED, ExecutionState.NOT_RUN]
+    assert "workspace changed" in output.tools[0].stderr.lower()
+
+
+@pytest.mark.unit
+def test_v2_validation_copy_skips_legacy_ruff_format(monkeypatch, tmp_path):
+    calls = []
+    config = TargetConfig(
+        schema_version="2.0",
+        target_path=tmp_path,
+        workspace_path=tmp_path.parent / "workspace",
+        validators=[_validator("lint", "ruff")],
+    )
+    monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: calls.append(args))
+    monkeypatch.setattr(
+        "orchestrator.validation_workspace.run_validator",
+        lambda **_kwargs: (run_v2_validators("run-copy", tmp_path, [], 30), {}),
+    )
+
+    run_validation_in_copy(tmp_path, config)
+
+    assert calls == []
 
 
 @pytest.mark.unit

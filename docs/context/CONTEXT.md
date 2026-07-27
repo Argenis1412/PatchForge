@@ -19,8 +19,10 @@
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3). `SqliteCircuitBreakerStore` is now thread-safe (issue #219).
 
-**Validator plugins:** Issue #282 Phase 4 candidate promotion is implemented
-on `feat/issue-282-candidate-promotion`; Phase 5 integration remains pending.
+**Validator plugins:** Issue #282 Phases 1–5 are complete. Phase 5 added V2
+operational integrity: doctor reports an explicit V1/V2 support profile,
+trusted Python adapters launch isolated from candidate-root shadow modules,
+`tsc` remains declared-only, and persistent validation-root writes fail closed.
 New
 `validation.json` artifacts are schema-versioned and carry explicit policy,
 requirements, subject, and audit decision. Candidate promotion captures its
@@ -34,6 +36,8 @@ deferred.
 **QA status:** CI verifies the full test suite, Ruff lint, and Ruff formatting on
 every change. See the [CI workflow](https://github.com/Argenis1412/PatchForge/actions/workflows/ci.yml)
 for the current result; the historical count in this document is not a live metric.
+
+**Next task:** centralize subprocess timeout configuration after #282/#291.
 
 ---
 

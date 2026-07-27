@@ -7,7 +7,9 @@ declaration at a time.
 
 from __future__ import annotations
 
+import hashlib
 import sys
+import tempfile
 from pathlib import Path
 
 from orchestrator.schemas.config import ValidatorConfig
@@ -19,18 +21,50 @@ from orchestrator.schemas.validator_output import (
     ValidatorOutput,
 )
 
-from .process import ProcessResult, build_venv_environment, execute_process, prepare_process
+from .process import ProcessResult, build_isolated_environment, execute_process, prepare_process
 
 _STANDARD_COMMANDS: dict[str, list[str]] = {
-    "ruff": [sys.executable, "-m", "ruff", "check", "."],
-    "pytest": [sys.executable, "-m", "pytest", ".", "--tb=short", "-q"],
+    "ruff": [sys.executable, "-I", "-m", "ruff", "check"],
+    "pytest": [sys.executable, "-I", "-m", "pytest"],
     "tsc": ["npx", "tsc", "--noEmit"],
     "flake8": ["flake8", "."],
     "mypy": ["mypy", "."],
     "pylint": ["pylint", "."],
-    "unittest": [sys.executable, "-m", "unittest", "discover"],
+    "unittest": [sys.executable, "-I", "-m", "unittest", "discover"],
     "tox": ["tox"],
 }
+
+_PYTHON_STANDARD_ADAPTERS = {"ruff", "pytest", "unittest"}
+
+
+def resolve_validator_command(
+    declaration: ValidatorConfig, project_root: Path, scratch_dir: Path | None = None
+) -> list[str] | None:
+    """Resolve one declaration without executing it.
+
+    Standard Python adapters launch from a private cwd and receive the target
+    as an absolute argument, preventing a candidate-root module from becoming
+    the adapter implementation.
+    """
+    command = declaration.command or _STANDARD_COMMANDS.get(declaration.adapter)
+    if command is None:
+        return None
+    command = list(command)
+    if declaration.command is not None:
+        return command
+    if declaration.adapter == "ruff":
+        command.extend([str(project_root)])
+        if scratch_dir is not None:
+            command.extend(["--cache-dir", str(scratch_dir / "ruff-cache")])
+    elif declaration.adapter == "pytest":
+        command.extend([str(project_root), "--tb=short", "-q"])
+        if scratch_dir is not None:
+            command.extend(["-o", f"cache_dir={scratch_dir / 'pytest-cache'}"])
+    elif declaration.adapter == "unittest":
+        command.extend(["-s", str(project_root)])
+    elif declaration.adapter in {"flake8", "mypy", "pylint"}:
+        command[-1] = str(project_root)
+    return command
 
 
 def _has_frontend(project_root: Path) -> bool:
@@ -44,18 +78,45 @@ def _raw_result(declaration: ValidatorConfig, project_root: Path, timeout: int) 
         and not _has_frontend(project_root)
     ):
         return ProcessResult(return_code=None, unavailable=True)
-    command = declaration.command or _STANDARD_COMMANDS.get(declaration.adapter)
-    if command is None:
-        return ProcessResult(return_code=None, unavailable=True)
-    env = build_venv_environment(project_root) if not Path(command[0]).is_absolute() else None
-    return execute_process(prepare_process(command, project_root, environment=env), timeout)
+    with tempfile.TemporaryDirectory(prefix="patchforge-validator-") as scratch_name:
+        scratch = Path(scratch_name)
+        command = resolve_validator_command(declaration, project_root, scratch)
+        if command is None:
+            return ProcessResult(return_code=None, unavailable=True)
+        private_cwd = (
+            scratch
+            if declaration.adapter in _PYTHON_STANDARD_ADAPTERS and declaration.command is None
+            else project_root
+        )
+        return execute_process(
+            prepare_process(command, private_cwd, environment=build_isolated_environment(scratch)),
+            timeout,
+        )
+
+
+def _tree_manifest(project_root: Path) -> dict[str, str]:
+    """Return a content manifest including ignored and untracked files."""
+    manifest: dict[str, str] = {}
+    for path in project_root.rglob("*"):
+        if ".git" in path.parts:
+            continue
+        relative = path.relative_to(project_root).as_posix()
+        if path.is_symlink():
+            manifest[relative] = f"link:{path.readlink()}"
+        elif path.is_file():
+            manifest[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+        elif path.is_dir():
+            manifest[relative] = "directory"
+    return manifest
 
 
 def _coverage(declaration: ValidatorConfig, state: ExecutionState) -> dict[str, CoverageStatus]:
     roles = [role.value for role in declaration.roles or []]
     if state is not ExecutionState.APPROVED:
         return dict.fromkeys(roles, CoverageStatus.ABSENT)
-    declared_only = declaration.adapter in {"command", "tox"} or declaration.command is not None
+    declared_only = (
+        declaration.adapter in {"command", "tox", "tsc"} or declaration.command is not None
+    )
     status = CoverageStatus.DECLARED_ONLY if declared_only else CoverageStatus.VERIFIED
     return dict.fromkeys(roles, status)
 
@@ -126,8 +187,21 @@ def run_v2_validators(
 
     results: list[ToolResult] = []
     for index, declaration in enumerate(validators):
+        before = _tree_manifest(project_root)
         raw = _raw_result(declaration, project_root, timeout)
         state = _terminal_state(raw, declaration)
+        if before != _tree_manifest(project_root):
+            raw = ProcessResult(
+                return_code=raw.return_code,
+                stdout=raw.stdout,
+                stderr=(
+                    raw.stderr + "\nValidation workspace changed during V2 validation."
+                ).strip(),
+                timed_out=raw.timed_out,
+                unavailable=raw.unavailable,
+                cleanup_failed=raw.cleanup_failed,
+            )
+            state = ExecutionState.FAILED
         results.append(_result_for(declaration, index, state, raw))
         if state is not ExecutionState.APPROVED:
             for later_index, later in enumerate(validators[index + 1 :], start=index + 1):
