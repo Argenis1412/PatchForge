@@ -9,7 +9,7 @@ __all__ = [
 ]
 
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -32,6 +32,7 @@ class CheckResult(BaseModel):
 class DoctorResult(BaseModel):
     target_path: str
     v1_supported: bool
+    support_profile: Literal["v1", "v2", "unsupported"] = "unsupported"
     checks: list[CheckResult]
     workspace_path: Optional[str] = None
     git_branch: Optional[str] = None

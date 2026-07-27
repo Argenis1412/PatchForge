@@ -1,7 +1,7 @@
 # P5 — 1. Validator Plugins
 
 > **GitHub issue:** #282  
-> **Status:** In progress — Phase 4 candidate promotion implementation
+> **Status:** Complete — Phase 5 operational integration
 
 ## Goal
 
@@ -56,6 +56,17 @@ adapters. The system does not discover or load third-party plugins.
 
 - Wire doctor to the shared process contract; document migration and run
   preview/apply/CI regression coverage.
+
+## V1 to V2 migration
+
+Keep a versionless configuration for the legacy V1 `ruff`/`pytest` profile.
+To declare validators, add `"schema_version": "2.0"` and an ordered
+`validators` list. Standard `ruff`, `pytest`, and `unittest` declarations can
+provide verified coverage only when their trusted launcher succeeds. `tsc`,
+`tox`, `command`, and command overrides are declared-only evidence and cannot
+authorize a required role. V2 uses PatchForge's inherited environment, not a
+target-local `.venv`; caches belong outside the validation root and persistent
+root writes fail validation.
 
 ## Fixed boundaries
 

@@ -382,6 +382,44 @@ def check_api_keys() -> list[CheckResult]:
     return results
 
 
+def _check_v2_validator(declaration, target: Path) -> CheckResult:
+    """Check that a declared V2 adapter can be launched without running it."""
+    from orchestrator.agents.validator.adapters import resolve_validator_command
+
+    command = resolve_validator_command(declaration, target)
+    if command is None:
+        return CheckResult(
+            name=f"validator:{declaration.id}",
+            status=CheckStatus.FAIL,
+            message=f"Validator '{declaration.id}' has no executable command",
+        )
+    if declaration.adapter in {"ruff", "pytest", "unittest"} and declaration.command is None:
+        module = {"ruff": "ruff", "pytest": "pytest", "unittest": "unittest"}[declaration.adapter]
+        available, version = check_command_available(module)
+    else:
+        import shutil
+
+        available = shutil.which(command[0]) is not None or Path(command[0]).is_file()
+        version = ""
+    if available:
+        detail = f"argv: {command}"
+        if version:
+            detail += f"\nversion: {version}"
+        return CheckResult(
+            name=f"validator:{declaration.id}",
+            status=CheckStatus.PASS,
+            message=f"Validator '{declaration.id}' is available",
+            detail=detail,
+        )
+    return CheckResult(
+        name=f"validator:{declaration.id}",
+        status=CheckStatus.FAIL,
+        message=f"Validator '{declaration.id}' is unavailable",
+        detail=f"argv: {command}",
+        fix_hint="Install the declared tool in PatchForge's execution environment",
+    )
+
+
 def check(path: str | Path) -> DoctorResult:
     """Run all doctor checks on *path* and return a DoctorResult.
 
@@ -397,6 +435,15 @@ def check(path: str | Path) -> DoctorResult:
     is_dirty: Optional[bool] = None
 
     orchestrator_config = _read_orchestrator_config(target)
+    config_file = target / "orchestrator.json"
+    typed_config = None
+    config_error: Exception | None = None
+    try:
+        from orchestrator.schemas.config import TargetConfig
+
+        typed_config = TargetConfig.load(target_path=target)
+    except ValueError as exc:
+        config_error = exc
 
     git_result, branch, head, dirty = check_git(target)
     checks.append(git_result)
@@ -426,8 +473,25 @@ def check(path: str | Path) -> DoctorResult:
     pyproject_result, pyproject_data = check_pyproject(target)
     checks.append(pyproject_result)
 
-    checks.append(check_ruff(target, config=orchestrator_config))
-    checks.append(check_pytest(target, pyproject_data, config=orchestrator_config))
+    is_v2 = typed_config is not None and typed_config.validators is not None
+    if config_error is not None and config_file.exists():
+        checks.append(
+            CheckResult(
+                name="configuration",
+                status=CheckStatus.FAIL,
+                message="Validator configuration is invalid",
+                detail=str(config_error),
+                fix_hint="Fix orchestrator.json before running PatchForge",
+            )
+        )
+    elif is_v2:
+        checks.extend(
+            _check_v2_validator(declaration, target)
+            for declaration in typed_config.validators or []
+        )
+    else:
+        checks.append(check_ruff(target, config=orchestrator_config))
+        checks.append(check_pytest(target, pyproject_data, config=orchestrator_config))
     checks.extend(check_api_keys())
 
     if _detect_typescript(target):
@@ -441,11 +505,14 @@ def check(path: str | Path) -> DoctorResult:
             )
         )
 
-    v1_supported = all(check.status != CheckStatus.FAIL for check in checks if check.required)
+    required_passed = all(check.status != CheckStatus.FAIL for check in checks if check.required)
+    v1_supported = required_passed and not is_v2
+    support_profile = "v2" if is_v2 and required_passed else "v1" if v1_supported else "unsupported"
 
     return DoctorResult(
         target_path=str(target),
         v1_supported=v1_supported,
+        support_profile=support_profile,
         checks=checks,
         workspace_path=workspace_path,
         git_branch=git_branch,

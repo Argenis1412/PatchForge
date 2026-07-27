@@ -67,10 +67,11 @@ def doctor(
 
         is_dirty_str = "yes" if result.is_dirty else "no"
         console.print()
-        if result.v1_supported:
+        if result.support_profile != "unsupported":
+            label = "V2" if result.support_profile == "v2" else "V1"
             console.print(
                 Panel(
-                    f"[bold green]V1 supported[/bold green]\n"
+                    f"[bold green]{label} supported[/bold green]\n"
                     f"  Target: [yellow]{result.target_path}[/yellow]\n"
                     f"  Branch: [cyan]{result.git_branch or 'N/A'}[/cyan]\n"
                     f"  Dirty:  [cyan]{is_dirty_str}[/cyan]",
@@ -80,14 +81,14 @@ def doctor(
         else:
             console.print(
                 Panel(
-                    f"[bold red]V1 not supported[/bold red]\n"
+                    f"[bold red]Repository not supported[/bold red]\n"
                     f"  Target: [yellow]{result.target_path}[/yellow]\n"
                     f"  Some required checks failed. See above for details.",
                     expand=False,
                 )
             )
 
-    if not result.v1_supported:
+    if result.support_profile == "unsupported":
         raise typer.Exit(code=1)
 
 

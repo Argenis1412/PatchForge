@@ -48,6 +48,17 @@ def build_venv_environment(project_root: Path) -> dict[str, str] | None:
     return None
 
 
+def build_isolated_environment(scratch_dir: Path) -> dict[str, str]:
+    """Return a child environment whose transient files stay outside the target."""
+    env = os.environ.copy()
+    scratch = str(scratch_dir)
+    env["TMP"] = scratch
+    env["TEMP"] = scratch
+    env["TMPDIR"] = scratch
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return env
+
+
 def prepare_process(
     command: list[str],
     cwd: Path,

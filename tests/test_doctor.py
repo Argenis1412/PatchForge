@@ -22,6 +22,49 @@ from orchestrator.schemas.doctor import CheckStatus, DoctorResult
 runner = CliRunner()
 
 
+def test_doctor_result_support_profile_defaults_to_unsupported(tmp_path: Path):
+    result = DoctorResult(target_path=str(tmp_path), v1_supported=False, checks=[])
+
+    assert result.support_profile == "unsupported"
+
+
+def test_doctor_v2_reports_v2_profile_and_declaration_check(tmp_path: Path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    _make_pyproject(repo)
+    _make_orchestrator_json(
+        repo,
+        {"schema_version": "2.0", "validators": [{"id": "lint", "adapter": "ruff"}]},
+    )
+    monkeypatch.setattr("orchestrator.doctor.check_command_available", lambda _cmd: (True, "1.0"))
+
+    result = check(repo)
+
+    assert result.v1_supported is False
+    assert result.support_profile == "v2"
+    assert (
+        next(item for item in result.checks if item.name == "validator:lint").status
+        is CheckStatus.PASS
+    )
+
+
+def test_doctor_invalid_configuration_does_not_fallback_to_v1(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    _make_pyproject(repo)
+    (repo / "orchestrator.json").write_text("{not json", encoding="utf-8")
+
+    result = check(repo)
+
+    assert result.support_profile == "unsupported"
+    assert (
+        next(item for item in result.checks if item.name == "configuration").status
+        is CheckStatus.FAIL
+    )
+
+
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
