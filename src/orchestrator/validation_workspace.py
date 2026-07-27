@@ -39,7 +39,9 @@ def create_temp_copy(source: Path, ignore_dirs: list[str] | None = None) -> Path
     return temp_dir
 
 
-def apply_patch_to_copy(temp_root: Path, patch_path: Path) -> GitCommandResult:
+def apply_patch_to_copy(
+    temp_root: Path, patch_path: Path, *, git_timeout: int = 30, patch_timeout: int = 30
+) -> GitCommandResult:
     import subprocess
 
     if not (temp_root / ".git").exists():
@@ -49,21 +51,21 @@ def apply_patch_to_copy(temp_root: Path, patch_path: Path) -> GitCommandResult:
             capture_output=True,
             text=True,
             check=True,
-            timeout=30,
+            timeout=git_timeout,
         )
         subprocess.run(
             ["git", "config", "user.name", "Validator"],
             cwd=str(temp_root),
             capture_output=True,
             check=True,
-            timeout=30,
+            timeout=git_timeout,
         )
         subprocess.run(
             ["git", "config", "user.email", "val@patchforge.local"],
             cwd=str(temp_root),
             capture_output=True,
             check=True,
-            timeout=30,
+            timeout=git_timeout,
         )
         subprocess.run(
             ["git", "add", "."],
@@ -71,7 +73,7 @@ def apply_patch_to_copy(temp_root: Path, patch_path: Path) -> GitCommandResult:
             capture_output=True,
             text=True,
             check=True,
-            timeout=30,
+            timeout=git_timeout,
         )
         subprocess.run(
             ["git", "commit", "-m", "initial", "--allow-empty", "--no-verify"],
@@ -79,9 +81,9 @@ def apply_patch_to_copy(temp_root: Path, patch_path: Path) -> GitCommandResult:
             capture_output=True,
             text=True,
             check=True,
-            timeout=30,
+            timeout=git_timeout,
         )
-    return apply_patch(temp_root, patch_path)
+    return apply_patch(temp_root, patch_path, timeout=patch_timeout)
 
 
 def run_validation_in_copy(
@@ -97,7 +99,7 @@ def run_validation_in_copy(
             subprocess.run(
                 ["ruff", "format", str(temp_root)],
                 capture_output=True,
-                timeout=60,
+                timeout=config.timeouts.format_run,
                 check=False,
             )
     validator_output, _ = run_validator(config=val_config, progress_callback=progress_callback)

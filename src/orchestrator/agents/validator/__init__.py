@@ -20,7 +20,7 @@ from orchestrator.validation_decision import attach_validation_decision
 from .adapters import run_v2_validators
 from .logging import _get_logger
 from .logging import _logger as _logger
-from .runners import DEFAULT_TIMEOUT, run_pytest, run_ruff, run_tsc
+from .runners import run_pytest, run_ruff, run_tsc
 from .summarizer import _summarize_errors
 
 _cb_validator = circuit_breaker_for("gemini")
@@ -47,7 +47,7 @@ def run(
 
     logs_dir = config.workspace_path / "logs"
     project_root = config.target_path.resolve()
-    timeout = config.validator_timeout or DEFAULT_TIMEOUT
+    timeout = config.timeouts.validator_run
 
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:6]
     _get_logger(logs_dir).info("=== Validator run %s (timeout=%ds) ===", run_id, timeout)

@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from orchestrator.agents.validator import run as validator_run
 from orchestrator.agents.validator.runners import DEFAULT_TIMEOUT
+from orchestrator.main import _parse_timeout_overrides
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.validator_output import ToolResult
 
@@ -32,10 +33,11 @@ def test_default_timeout_covers_large_suites():
 
 
 @pytest.mark.unit
-def test_config_validator_timeout_default_is_none(tmp_path):
+def test_config_validator_timeout_default_is_canonical_default(tmp_path):
     workspace = tmp_path.parent / f"{tmp_path.name}-ws"
     config = TargetConfig(target_path=tmp_path, workspace_path=workspace)
-    assert config.validator_timeout is None
+    assert config.validator_timeout == 450
+    assert config.timeouts.validator_run == 450
 
 
 @pytest.mark.unit
@@ -107,27 +109,81 @@ def test_load_validator_timeout_cli_overrides_env(tmp_path, monkeypatch):
 
 
 @pytest.mark.unit
-def test_load_validator_timeout_env_var_negative_ignored(tmp_path, monkeypatch):
+def test_load_validator_timeout_env_var_negative_rejected(tmp_path, monkeypatch):
     workspace = tmp_path.parent / f"{tmp_path.name}-ws"
     monkeypatch.setenv("PATCHFORGE_VALIDATOR_TIMEOUT", "-5")
-    config = TargetConfig.load(target_path=tmp_path, workspace_path=workspace)
-    assert config.validator_timeout is None
+    with pytest.raises(ValueError, match="environment"):
+        TargetConfig.load(target_path=tmp_path, workspace_path=workspace)
 
 
 @pytest.mark.unit
-def test_load_validator_timeout_env_var_non_integer_ignored(tmp_path, monkeypatch):
+def test_load_validator_timeout_env_var_non_integer_rejected(tmp_path, monkeypatch):
     workspace = tmp_path.parent / f"{tmp_path.name}-ws"
     monkeypatch.setenv("PATCHFORGE_VALIDATOR_TIMEOUT", "abc")
-    config = TargetConfig.load(target_path=tmp_path, workspace_path=workspace)
-    assert config.validator_timeout is None
+    with pytest.raises(ValueError, match="environment"):
+        TargetConfig.load(target_path=tmp_path, workspace_path=workspace)
 
 
 @pytest.mark.unit
-def test_load_validator_timeout_none_when_no_source(tmp_path, monkeypatch):
+def test_load_validator_timeout_default_when_no_source(tmp_path, monkeypatch):
     workspace = tmp_path.parent / f"{tmp_path.name}-ws"
     monkeypatch.delenv("PATCHFORGE_VALIDATOR_TIMEOUT", raising=False)
     config = TargetConfig.load(target_path=tmp_path, workspace_path=workspace)
-    assert config.validator_timeout is None
+    assert config.validator_timeout == 450
+
+
+@pytest.mark.unit
+def test_canonical_timeout_precedence_is_per_field(tmp_path, monkeypatch):
+    workspace = tmp_path.parent / f"{tmp_path.name}-ws"
+    (tmp_path / "orchestrator.json").write_text(
+        '{"timeouts": {"validator_run": 300, "git_op": 40}}', encoding="utf-8"
+    )
+    monkeypatch.setenv("PATCHFORGE_TIMEOUT_GIT_OP", "50")
+    config = TargetConfig.load(
+        target_path=tmp_path,
+        workspace_path=workspace,
+        timeout_overrides={"validator_run": 600},
+    )
+    assert config.timeouts.validator_run == 600
+    assert config.timeouts.git_op == 50
+    assert config.timeouts.patch_apply == 30
+
+
+@pytest.mark.unit
+def test_conflicting_legacy_and_canonical_config_is_rejected(tmp_path):
+    workspace = tmp_path.parent / f"{tmp_path.name}-ws"
+    (tmp_path / "orchestrator.json").write_text(
+        '{"validator_timeout": 300, "timeouts": {"validator_run": 450}}', encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="conflicts"):
+        TargetConfig.load(target_path=tmp_path, workspace_path=workspace)
+
+
+@pytest.mark.unit
+def test_legacy_environment_overrides_canonical_file(tmp_path, monkeypatch):
+    workspace = tmp_path.parent / f"{tmp_path.name}-ws"
+    (tmp_path / "orchestrator.json").write_text(
+        '{"timeouts": {"validator_run": 450}}', encoding="utf-8"
+    )
+    monkeypatch.setenv("PATCHFORGE_VALIDATOR_TIMEOUT", "900")
+    config = TargetConfig.load(target_path=tmp_path, workspace_path=workspace)
+    assert config.validator_timeout == 900
+
+
+@pytest.mark.unit
+def test_timeout_policy_is_immutable(tmp_path):
+    workspace = tmp_path.parent / f"{tmp_path.name}-ws"
+    config = TargetConfig.load(target_path=tmp_path, workspace_path=workspace)
+    with pytest.raises(ValidationError):
+        config.timeouts.validator_run = 1
+
+
+@pytest.mark.unit
+def test_cli_timeout_overrides_parse_each_named_value():
+    assert _parse_timeout_overrides(["git_op=45", "patch_apply=90"]) == {
+        "git_op": 45,
+        "patch_apply": 90,
+    }
 
 
 # ---------------------------------------------------------------------------
