@@ -264,8 +264,13 @@ def test_v2_builtin_adapters_use_standard_commands(
     output = run_v2_validators("run-7", tmp_path, [validator], 30)
 
     assert output.overall_status is OverallStatus.APPROVED
-    if adapter in {"flake8", "mypy", "pylint"}:
+    if adapter in {"flake8", "pylint"}:
         assert captured[0] == [adapter, str(tmp_path)]
+    elif adapter == "mypy":
+        assert captured[0][:2] == ["mypy", str(tmp_path)]
+        assert captured[0][2] == "--cache-dir"
+        assert Path(captured[0][3]).name == "mypy-cache"
+        assert Path(captured[0][3]).parent != tmp_path
     elif adapter == "unittest":
         assert captured[0][1:5] == ["-I", "-m", "unittest", "discover"]
         assert captured[0][-2:] == ["-s", str(tmp_path)]
@@ -288,6 +293,30 @@ def test_v2_python_adapter_uses_private_launcher_and_isolated_mode(monkeypatch, 
     assert captured[0].cwd != tmp_path
     assert captured[0].argv[1:4] == ("-I", "-m", "ruff")
     assert str(tmp_path) in captured[0].argv
+
+
+@pytest.mark.unit
+def test_v2_validator_scratch_cleanup_failure_is_reported(monkeypatch, tmp_path):
+    class BrokenTemporaryDirectory:
+        def __init__(self, **kwargs):
+            assert kwargs["ignore_cleanup_errors"] is True
+
+        def __enter__(self):
+            return str(tmp_path / "scratch")
+
+        def __exit__(self, *_args):
+            raise ProcessLookupError
+
+    monkeypatch.setattr(adapters.tempfile, "TemporaryDirectory", BrokenTemporaryDirectory)
+    monkeypatch.setattr(
+        adapters,
+        "execute_process",
+        lambda *_args: ProcessResult(return_code=0),
+    )
+
+    output = run_v2_validators("run-cleanup", tmp_path, [_validator("lint", "ruff")], 30)
+
+    assert output.tools[0].status is ExecutionState.CLEANUP_FAILED
 
 
 @pytest.mark.unit

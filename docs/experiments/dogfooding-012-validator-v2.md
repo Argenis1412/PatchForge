@@ -19,5 +19,9 @@
 
 ## Result
 
-Automated regressions cover the deterministic path. Full LLM dogfooding is
+The integration regression
+`tests/test_apply_resumable.py::test_v2_candidate_promotion_uses_real_validator_and_writes_authorized_evidence`
+runs the real `ruff` adapter and verifies that the candidate and promotion
+receipt resolve to the authorized candidate commit while the original checkout
+remains on its base commit with its original content. Full LLM dogfooding is
 deferred because provider credits are unavailable.

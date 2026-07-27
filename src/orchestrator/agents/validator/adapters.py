@@ -62,7 +62,11 @@ def resolve_validator_command(
             command.extend(["-o", f"cache_dir={scratch_dir / 'pytest-cache'}"])
     elif declaration.adapter == "unittest":
         command.extend(["-s", str(project_root)])
-    elif declaration.adapter in {"flake8", "mypy", "pylint"}:
+    elif declaration.adapter == "mypy":
+        command[-1] = str(project_root)
+        if scratch_dir is not None:
+            command.extend(["--cache-dir", str(scratch_dir / "mypy-cache")])
+    elif declaration.adapter in {"flake8", "pylint"}:
         command[-1] = str(project_root)
     return command
 
@@ -78,20 +82,27 @@ def _raw_result(declaration: ValidatorConfig, project_root: Path, timeout: int) 
         and not _has_frontend(project_root)
     ):
         return ProcessResult(return_code=None, unavailable=True)
-    with tempfile.TemporaryDirectory(prefix="patchforge-validator-") as scratch_name:
-        scratch = Path(scratch_name)
-        command = resolve_validator_command(declaration, project_root, scratch)
-        if command is None:
-            return ProcessResult(return_code=None, unavailable=True)
-        private_cwd = (
-            scratch
-            if declaration.adapter in _PYTHON_STANDARD_ADAPTERS and declaration.command is None
-            else project_root
-        )
-        return execute_process(
-            prepare_process(command, private_cwd, environment=build_isolated_environment(scratch)),
-            timeout,
-        )
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="patchforge-validator-", ignore_cleanup_errors=True
+        ) as scratch_name:
+            scratch = Path(scratch_name)
+            command = resolve_validator_command(declaration, project_root, scratch)
+            if command is None:
+                return ProcessResult(return_code=None, unavailable=True)
+            private_cwd = (
+                scratch
+                if declaration.adapter in _PYTHON_STANDARD_ADAPTERS and declaration.command is None
+                else project_root
+            )
+            return execute_process(
+                prepare_process(
+                    command, private_cwd, environment=build_isolated_environment(scratch)
+                ),
+                timeout,
+            )
+    except ProcessLookupError:
+        return ProcessResult(return_code=None, cleanup_failed=True)
 
 
 def _tree_manifest(project_root: Path) -> dict[str, str]:

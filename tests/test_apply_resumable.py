@@ -106,7 +106,7 @@ def test_candidate_promotion_leaves_checkout_and_branch_unchanged(tmp_path: Path
     assert _git(repo, "show", f"patchforge/{ctx['run_id']}:README.md") == "Hello candidate"
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_v2_candidate_promotion_uses_real_validator_and_writes_authorized_evidence(
     tmp_path: Path,
 ) -> None:
@@ -118,7 +118,17 @@ def test_v2_candidate_promotion_uses_real_validator_and_writes_authorized_eviden
     output = ValidatorOutput.model_validate_json(artifact.read_text(encoding="utf-8"))
     assert output.decision is not None and output.decision.authorized is True
     assert output.validation_subject is not None
-    assert output.validation_subject.candidate_commit is not None
+    candidate_commit = output.validation_subject.candidate_commit
+    assert candidate_commit is not None
+    repo = Path(ctx["repo"])
+    candidate_ref = f"refs/heads/patchforge/{ctx['run_id']}"
+    receipt_ref = promotion_receipt_ref(str(ctx["run_id"]))
+    assert _git(repo, "rev-parse", candidate_ref) == candidate_commit
+    assert _git(repo, "rev-parse", receipt_ref) == candidate_commit
+    assert _git(repo, "branch", "--show-current") == ctx["branch"]
+    assert _git(repo, "rev-parse", "HEAD") == ctx["base"]
+    assert (repo / "README.md").read_text(encoding="utf-8") == "Hello\n"
+    assert _git(repo, "show", f"patchforge/{ctx['run_id']}:README.md") == "Hello candidate"
 
 
 @pytest.mark.unit

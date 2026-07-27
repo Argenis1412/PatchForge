@@ -20,7 +20,8 @@
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3). `SqliteCircuitBreakerStore` is now thread-safe (issue #219).
 
 **Validator plugins:** Issue #282 Phases 1–5 are complete. Phase 5 added V2
-operational integrity: doctor reports an explicit V1/V2 support profile,
+operational integrity: doctor reports an explicit V1/V2/unsupported support profile
+while retaining `v1_supported` as the V1 compatibility signal,
 trusted Python adapters launch isolated from candidate-root shadow modules,
 `tsc` remains declared-only, and persistent validation-root writes fail closed.
 New
