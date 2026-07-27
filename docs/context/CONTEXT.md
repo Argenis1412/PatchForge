@@ -38,7 +38,7 @@ deferred.
 every change. See the [CI workflow](https://github.com/Argenis1412/PatchForge/actions/workflows/ci.yml)
 for the current result; the historical count in this document is not a live metric.
 
-**Next task:** centralize subprocess timeout configuration after #282/#291.
+**Next task:** Issue #293 — centralize subprocess timeout configuration. Implementation complete on `feat/issue-293-centralize-validator-timeouts`; QA: `ruff check .` and `ruff format --check .` pass, `pytest -v` reports 1026 passed and 5 skipped. Pending commit, PR, and CI verification.
 
 ---
 

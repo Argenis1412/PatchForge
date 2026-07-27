@@ -7,6 +7,7 @@ __all__ = [
     "ProvidersConfig",
     "TargetCapabilities",
     "TargetConfig",
+    "TimeoutPolicy",
     "ValidatorConfig",
     "ValidatorRole",
     "default_workspace_path",
@@ -20,7 +21,7 @@ import logging
 import os
 from enum import Enum
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Any, List, Literal, Mapping, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -30,6 +31,27 @@ logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = "2.0"
 LEGACY_SCHEMA_VERSION = "1.0"
+
+_TIMEOUT_FIELDS = {
+    "validator_run",
+    "git_op",
+    "patch_apply",
+    "format_run",
+    "doctor_probe",
+}
+_TIMEOUT_ENV_PREFIX = "PATCHFORGE_TIMEOUT_"
+
+
+class TimeoutPolicy(BaseModel):
+    """Immutable subprocess budgets captured for one target execution."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    validator_run: int = Field(default=450, gt=0)
+    git_op: int = Field(default=30, gt=0)
+    patch_apply: int = Field(default=30, gt=0)
+    format_run: int = Field(default=60, gt=0)
+    doctor_probe: int = Field(default=30, gt=0)
 
 
 class ValidatorRole(str, Enum):
@@ -186,12 +208,39 @@ class TargetConfig(BaseModel):
     lint_command: Optional[List[str]] = None
     test_command: Optional[List[str]] = None
     typecheck_command: Optional[List[str]] = None
-    validator_timeout: Optional[int] = Field(default=None, gt=0)
+    timeouts: TimeoutPolicy = Field(default_factory=TimeoutPolicy)
     validators: Optional[List[ValidatorConfig]] = None
 
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
 
     capabilities: TargetCapabilities = Field(default_factory=TargetCapabilities)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_legacy_validator_timeout(cls, value: Any) -> Any:
+        """Map the V1 validator timeout into the canonical policy."""
+        if not isinstance(value, Mapping) or "validator_timeout" not in value:
+            return value
+        data = dict(value)
+        legacy = data.pop("validator_timeout")
+        raw_timeouts = data.get("timeouts") or {}
+        canonical = (
+            raw_timeouts.get("validator_run")
+            if isinstance(raw_timeouts, Mapping)
+            else getattr(raw_timeouts, "validator_run", None)
+        )
+        if canonical is not None and legacy is not None and canonical != legacy:
+            raise ValueError("validator_timeout conflicts with timeouts.validator_run")
+        if legacy is not None and canonical is None:
+            merged = dict(raw_timeouts) if isinstance(raw_timeouts, Mapping) else {}
+            merged["validator_run"] = legacy
+            data["timeouts"] = merged
+        return data
+
+    @property
+    def validator_timeout(self) -> int:
+        """V1 read compatibility for the effective validator timeout."""
+        return self.timeouts.validator_run
 
     @model_validator(mode="after")
     def _validate_workspace_is_external(self) -> "TargetConfig":
@@ -218,6 +267,7 @@ class TargetConfig(BaseModel):
         typecheck_command: Optional[List[str]] = None,
         capabilities_overrides: Optional[dict] = None,
         validator_timeout: Optional[int] = None,
+        timeout_overrides: Optional[Mapping[str, int]] = None,
     ) -> "TargetConfig":
         """
         Loads configuration by merging priority levels:
@@ -278,6 +328,7 @@ class TargetConfig(BaseModel):
                 "test_command",
                 "typecheck_command",
                 "validator_timeout",
+                "timeouts",
                 "providers",
                 "capabilities",
             }
@@ -321,21 +372,23 @@ class TargetConfig(BaseModel):
             config_data["test_command"] = test_command
         if typecheck_command is not None:
             config_data["typecheck_command"] = typecheck_command
-        if validator_timeout is not None:
-            config_data["validator_timeout"] = validator_timeout
-
-        # Env var fallback: PATCHFORGE_VALIDATOR_TIMEOUT (only if not already set)
-        if config_data.get("validator_timeout") is None:
-            env_val = os.environ.get("PATCHFORGE_VALIDATOR_TIMEOUT")
-            if env_val is not None:
-                try:
-                    parsed = int(env_val)
-                    if parsed > 0:
-                        config_data["validator_timeout"] = parsed
-                    else:
-                        logger.warning("PATCHFORGE_VALIDATOR_TIMEOUT must be > 0, ignoring")
-                except ValueError:
-                    logger.warning("PATCHFORGE_VALIDATOR_TIMEOUT is not a valid integer, ignoring")
+        file_timeouts = config_data.pop("timeouts", {})
+        legacy_file_timeout = config_data.pop("validator_timeout", None)
+        config_timeouts = _timeout_layer(
+            file_timeouts,
+            legacy_validator_timeout=legacy_file_timeout,
+            source="orchestrator.json",
+        )
+        env_timeouts = _timeout_layer_from_environment()
+        cli_timeouts = _timeout_layer(
+            timeout_overrides or {},
+            legacy_validator_timeout=validator_timeout,
+            source="CLI",
+        )
+        resolved_timeouts = TimeoutPolicy().model_dump()
+        for layer in (config_timeouts, env_timeouts, cli_timeouts):
+            resolved_timeouts.update(layer)
+        config_data["timeouts"] = TimeoutPolicy(**resolved_timeouts)
 
         # Apply CLI capabilities overrides
         if capabilities_overrides:
@@ -346,6 +399,43 @@ class TargetConfig(BaseModel):
 
         config_data["capabilities"] = detected_caps
         return cls(**config_data)
+
+
+def _timeout_layer(
+    values: Mapping[str, Any] | None,
+    *,
+    legacy_validator_timeout: Any = None,
+    source: str,
+) -> dict[str, Any]:
+    """Validate one source layer without losing legacy/canonical conflicts."""
+    layer = dict(values or {})
+    unknown = set(layer) - _TIMEOUT_FIELDS
+    if unknown:
+        names = ", ".join(sorted(unknown))
+        raise ValueError(f"Invalid {source} timeout fields: {names}")
+    canonical = layer.get("validator_run")
+    if legacy_validator_timeout is not None:
+        if canonical is not None and canonical != legacy_validator_timeout:
+            raise ValueError(f"{source} validator_timeout conflicts with timeouts.validator_run")
+        layer["validator_run"] = legacy_validator_timeout
+    try:
+        parsed = TimeoutPolicy(**layer)
+        return {field: getattr(parsed, field) for field in layer}
+    except Exception as exc:
+        raise ValueError(f"Invalid {source} timeout configuration: {exc}") from exc
+
+
+def _timeout_layer_from_environment() -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for field in _TIMEOUT_FIELDS:
+        raw = os.environ.get(f"{_TIMEOUT_ENV_PREFIX}{field.upper()}")
+        if raw is not None:
+            values[field] = raw
+    return _timeout_layer(
+        values,
+        legacy_validator_timeout=os.environ.get("PATCHFORGE_VALIDATOR_TIMEOUT"),
+        source="environment",
+    )
 
 
 def detect_capabilities(target_path: Path, ignore_dirs: List[str]) -> TargetCapabilities:

@@ -62,6 +62,7 @@ def execute(
     issue_number: Optional[int] = None,
     worker_id: Optional[str] = None,
     coordination_db_dir: Optional[Path] = None,
+    timeout_overrides: dict[str, int] | None = None,
 ) -> None:
     """Build, validate, and atomically promote an isolated candidate commit.
 
@@ -228,7 +229,9 @@ def execute(
             # The candidate worktree begins at base_commit, so configuration
             # loaded before the patch is committed is the authorization root.
             base_config = TargetConfig.load(
-                target_path=candidate_tree, workspace_path=workspace_path
+                target_path=candidate_tree,
+                workspace_path=workspace_path,
+                timeout_overrides=timeout_overrides,
             )
             policy = validation_policy_for(base_config)
             manager.write_artifact(run_id, VALIDATION_POLICY_JSON, policy.model_dump_json(indent=2))

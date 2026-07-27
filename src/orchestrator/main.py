@@ -7,7 +7,7 @@ __all__ = [
 import json
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import typer
 from rich.console import Console
@@ -42,12 +42,13 @@ def _load_target_config(
 def doctor(
     path: Path = typer.Argument(..., help="Target project path"),
     json_output: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+    timeout: List[str] = typer.Option([], "--timeout", help="Override NAME=SECONDS"),
 ) -> None:
     """Validate V1 repository readiness without modifying the target."""
     from orchestrator.doctor import check as doctor_check
     from orchestrator.schemas.doctor import CheckStatus
 
-    result = doctor_check(path)
+    result = doctor_check(path, timeout_overrides=_parse_timeout_overrides(timeout))
 
     if json_output:
         print(result.model_dump_json(indent=2))
@@ -181,6 +182,24 @@ def _validate_force_provider(force_provider: Optional[str]) -> None:
         raise typer.Exit(1)
 
 
+def _parse_timeout_overrides(values: List[str]) -> dict[str, int]:
+    overrides: dict[str, int] = {}
+    for value in values:
+        name, separator, raw_seconds = value.partition("=")
+        if not separator or not name or not raw_seconds:
+            raise typer.BadParameter("--timeout must use NAME=SECONDS")
+        try:
+            seconds = int(raw_seconds)
+        except ValueError as exc:
+            raise typer.BadParameter("--timeout seconds must be an integer") from exc
+        if seconds <= 0:
+            raise typer.BadParameter("--timeout seconds must be greater than 0")
+        if name in overrides:
+            raise typer.BadParameter(f"--timeout specified more than once for {name}")
+        overrides[name] = seconds
+    return overrides
+
+
 @app.command()
 def preview(
     run_id: str = typer.Argument(..., help="Run ID of an existing run"),
@@ -197,8 +216,9 @@ def preview(
     validator_timeout: Optional[int] = typer.Option(
         None,
         "--validator-timeout",
-        help="Timeout in seconds for each validation tool (default: 120). Must be > 0.",
+        help="Timeout in seconds for each validation tool (default: 450). Must be > 0.",
     ),
+    timeout: List[str] = typer.Option([], "--timeout", help="Override NAME=SECONDS"),
 ) -> None:
     """Generate and validate a unified patch without modifying the target repository."""
     from orchestrator.commands.preview import execute as execute_preview
@@ -209,12 +229,14 @@ def preview(
         console.print("[bold red]Error: --validator-timeout must be greater than 0.[/bold red]")
         raise typer.Exit(1)
 
+    timeout_overrides = _parse_timeout_overrides(timeout)
     execute_preview(
         run_id=run_id,
         workspace=workspace,
         env_file=env_file,
         force_provider=force_provider,
         validator_timeout=validator_timeout,
+        timeout_overrides=timeout_overrides,
     )
 
 
@@ -257,6 +279,7 @@ def ci(
         help="Force a specific LLM ('gemini'|'openrouter'|'claude') for all tasks, "
         "ignoring risk_level routing. Does not affect high-risk gating.",
     ),
+    timeout: List[str] = typer.Option([], "--timeout", help="Override NAME=SECONDS"),
 ) -> None:
     """Run the full CI pipeline: scan, plan, preview, apply. No push."""
     if risk_budget not in ("low", "medium"):
@@ -271,6 +294,7 @@ def ci(
 
     from orchestrator.commands.ci import execute as execute_ci
 
+    timeout_overrides = _parse_timeout_overrides(timeout)
     result = execute_ci(
         target_path=path.resolve(),
         workspace_path=workspace.resolve(),
@@ -280,6 +304,7 @@ def ci(
         allow_dirty=allow_dirty,
         result_path=result_file,
         force_provider=force_provider,
+        timeout_overrides=timeout_overrides,
     )
 
     if result.status != "applied":
@@ -301,6 +326,7 @@ def apply(
     issue_number: Optional[int] = typer.Option(
         None, "--issue-number", help="GitHub issue number for branch naming"
     ),
+    timeout: List[str] = typer.Option([], "--timeout", help="Override NAME=SECONDS"),
 ) -> None:
     """Apply the validated patch to the target repository."""
     if issue_number is not None and issue_number < 1:
@@ -315,6 +341,7 @@ def apply(
         env_file=env_file,
         workspace=workspace,
         issue_number=issue_number,
+        timeout_overrides=_parse_timeout_overrides(timeout),
     )
 
 

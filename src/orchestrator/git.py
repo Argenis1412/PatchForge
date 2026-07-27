@@ -352,13 +352,13 @@ def resolve_ref(repo_root: Path, ref: str) -> Optional[str]:
     return res.stdout.strip() if res.returncode == 0 else None
 
 
-def apply_patch(repo_root: Path, patch_path: Path) -> GitCommandResult:
+def apply_patch(repo_root: Path, patch_path: Path, *, timeout: int = 30) -> GitCommandResult:
     try:
         res = subprocess.run(
             ["git", "-C", str(repo_root), "apply", str(patch_path)],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=timeout,
         )
         return GitCommandResult(return_code=res.returncode, stdout=res.stdout, stderr=res.stderr)
     except FileNotFoundError as e:

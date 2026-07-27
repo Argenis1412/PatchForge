@@ -18,7 +18,6 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from orchestrator.agents import executor as executor_agent
 from orchestrator.agents.executor import collect_fallback_changes, log_fallback_events
-from orchestrator.agents.validator.runners import DEFAULT_TIMEOUT
 from orchestrator.clients.bootstrap import bootstrap_environment
 from orchestrator.observability.events import log_event, log_failure
 from orchestrator.risk import check_patch_gate
@@ -44,6 +43,7 @@ def execute(
     env_file: Optional[Path] = None,
     force_provider: Optional[str] = None,
     validator_timeout: Optional[int] = None,
+    timeout_overrides: dict[str, int] | None = None,
 ) -> None:
     console.print(
         Panel(
@@ -105,6 +105,7 @@ def execute(
             target_path=target_path,
             workspace_path=workspace_path,
             validator_timeout=validator_timeout,
+            timeout_overrides=timeout_overrides,
         )
     except Exception as exc:
         console.print(f"[bold red]Error loading target config: {exc}[/bold red]")
@@ -357,7 +358,12 @@ def execute(
             with create_validation_workspace(
                 original_root=target_path, patch_path=patch_path
             ) as val_ws:
-                apply_res = apply_patch_to_copy(val_ws.temporary_root, val_ws.patch_path)
+                apply_res = apply_patch_to_copy(
+                    val_ws.temporary_root,
+                    val_ws.patch_path,
+                    git_timeout=config.timeouts.git_op,
+                    patch_timeout=config.timeouts.patch_apply,
+                )
                 if apply_res.return_code != 0:
                     validator_output = ValidatorOutput(
                         overall_passed=False,
@@ -419,7 +425,7 @@ def execute(
         )
     if timeout_tools:
         tool_names = ", ".join(t.tool for t in timeout_tools)
-        effective_timeout = config.validator_timeout or DEFAULT_TIMEOUT
+        effective_timeout = config.timeouts.validator_run
         prefix_parts.append(
             f"Timeout: {tool_names} exceeded {effective_timeout}s limit. "
             f"Increase with --validator-timeout <seconds>. "
@@ -461,7 +467,7 @@ def execute(
     timeout_hint = ""
     if timeout_tools:
         tool_names = ", ".join(t.tool for t in timeout_tools)
-        effective_timeout = config.validator_timeout or DEFAULT_TIMEOUT
+        effective_timeout = config.timeouts.validator_run
         timeout_hint = (
             f"\n[yellow]Timeout:[/yellow] {tool_names} exceeded {effective_timeout}s limit."
             f"\n         Increase with --validator-timeout <seconds>"

@@ -42,6 +42,29 @@ Most AI coding tools optimize for speed. PatchForge optimizes for trust — chan
 - **QA:** CI verifies the full test suite, Ruff lint, and Ruff formatting on every change. See the [CI workflow](https://github.com/Argenis1412/PatchForge/actions/workflows/ci.yml) for the current result.
 - [Roadmap](./docs/planning/roadmap.md) | [Full project context](./docs/context/CONTEXT.md)
 
+## Subprocess timeouts
+
+`orchestrator.json` can set an immutable, per-run timeout policy:
+
+```json
+{
+  "timeouts": {
+    "validator_run": 450,
+    "git_op": 30,
+    "patch_apply": 30,
+    "format_run": 60,
+    "doctor_probe": 30
+  }
+}
+```
+
+For each field, precedence is defaults, configuration file, environment, then
+CLI. Environment overrides use `PATCHFORGE_TIMEOUT_<FIELD>` (for example,
+`PATCHFORGE_TIMEOUT_PATCH_APPLY=120`). Commands accept repeatable
+`--timeout NAME=SECONDS` overrides, such as `patchforge ci ... --timeout
+patch_apply=120`. `validator_timeout`, `PATCHFORGE_VALIDATOR_TIMEOUT`, and
+`preview --validator-timeout` remain compatible aliases for `validator_run`.
+
 ## Quickstart
 
 ```bash

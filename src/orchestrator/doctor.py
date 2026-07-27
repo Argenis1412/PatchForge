@@ -9,7 +9,7 @@ from typing import Optional
 from orchestrator.schemas.doctor import CheckResult, CheckStatus, DoctorResult
 
 
-def check_command_available(cmd: str) -> tuple[bool, str]:
+def check_command_available(cmd: str, timeout: int = 30) -> tuple[bool, str]:
     """Return (available, version_str) for *cmd*.
 
     Probes ``sys.executable -m cmd --version`` first, falling back to a
@@ -26,12 +26,19 @@ def check_command_available(cmd: str) -> tuple[bool, str]:
     """
     from orchestrator.tool_probe import _probe_module, _probe_path
 
-    info = _probe_module(cmd, timeout=30)
+    info = _probe_module(cmd, timeout=timeout)
     if info is None:
-        info = _probe_path(cmd, timeout=30)
+        info = _probe_path(cmd, timeout=timeout)
     if info.available:
         return True, info.version or ""
     return False, ""
+
+
+def _check_available_with_timeout(cmd: str, timeout: int) -> tuple[bool, str]:
+    """Keep the historical one-argument seam for default-timeout callers."""
+    if timeout == 30:
+        return check_command_available(cmd)
+    return check_command_available(cmd, timeout=timeout)
 
 
 def detect_test_suite(path: Path, pyproject: Optional[dict] = None) -> bool:
@@ -264,7 +271,7 @@ def check_pyproject(path: Path) -> tuple[CheckResult, Optional[dict]]:
     )
 
 
-def check_ruff(path: Path, config: Optional[dict] = None) -> CheckResult:
+def check_ruff(path: Path, config: Optional[dict] = None, timeout: int = 30) -> CheckResult:
     """Check Ruff is available or explicitly configured."""
     cfg = config if config is not None else _read_orchestrator_config(path)
     lint_command = cfg.get("lint_command")
@@ -277,7 +284,7 @@ def check_ruff(path: Path, config: Optional[dict] = None) -> CheckResult:
             detail=f"lint_command: {lint_command}",
         )
 
-    found, version_str = check_command_available("ruff")
+    found, version_str = _check_available_with_timeout("ruff", timeout)
     if found:
         return CheckResult(
             name="ruff",
@@ -295,7 +302,7 @@ def check_ruff(path: Path, config: Optional[dict] = None) -> CheckResult:
 
 
 def check_pytest(
-    path: Path, pyproject: Optional[dict] = None, config: Optional[dict] = None
+    path: Path, pyproject: Optional[dict] = None, config: Optional[dict] = None, timeout: int = 30
 ) -> CheckResult:
     """Check Pytest is available and a test suite is detectable."""
     cfg = config if config is not None else _read_orchestrator_config(path)
@@ -323,7 +330,7 @@ def check_pytest(
             fix_hint="Create a tests/ directory or a conftest.py to define your test suite",
         )
 
-    found, version_str = check_command_available("pytest")
+    found, version_str = _check_available_with_timeout("pytest", timeout)
     if not found:
         return CheckResult(
             name="pytest",
@@ -382,7 +389,7 @@ def check_api_keys() -> list[CheckResult]:
     return results
 
 
-def _check_v2_validator(declaration, target: Path) -> CheckResult:
+def _check_v2_validator(declaration, target: Path, timeout: int = 30) -> CheckResult:
     """Check that a declared V2 adapter can be launched without running it."""
     from orchestrator.agents.validator.adapters import resolve_validator_command
 
@@ -395,7 +402,7 @@ def _check_v2_validator(declaration, target: Path) -> CheckResult:
         )
     if declaration.adapter in {"ruff", "pytest", "unittest"} and declaration.command is None:
         module = {"ruff": "ruff", "pytest": "pytest", "unittest": "unittest"}[declaration.adapter]
-        available, version = check_command_available(module)
+        available, version = _check_available_with_timeout(module, timeout)
     else:
         import shutil
 
@@ -420,7 +427,7 @@ def _check_v2_validator(declaration, target: Path) -> CheckResult:
     )
 
 
-def check(path: str | Path) -> DoctorResult:
+def check(path: str | Path, *, timeout_overrides: dict[str, int] | None = None) -> DoctorResult:
     """Run all doctor checks on *path* and return a DoctorResult.
 
     Sub-checks executed: git_repository, workspace, pyproject_toml, ruff, pytest, api_keys,
@@ -441,7 +448,7 @@ def check(path: str | Path) -> DoctorResult:
     try:
         from orchestrator.schemas.config import TargetConfig
 
-        typed_config = TargetConfig.load(target_path=target)
+        typed_config = TargetConfig.load(target_path=target, timeout_overrides=timeout_overrides)
     except ValueError as exc:
         config_error = exc
 
@@ -486,12 +493,15 @@ def check(path: str | Path) -> DoctorResult:
         )
     elif is_v2:
         checks.extend(
-            _check_v2_validator(declaration, target)
+            _check_v2_validator(declaration, target, typed_config.timeouts.doctor_probe)
             for declaration in typed_config.validators or []
         )
     else:
-        checks.append(check_ruff(target, config=orchestrator_config))
-        checks.append(check_pytest(target, pyproject_data, config=orchestrator_config))
+        doctor_timeout = typed_config.timeouts.doctor_probe if typed_config is not None else 30
+        checks.append(check_ruff(target, config=orchestrator_config, timeout=doctor_timeout))
+        checks.append(
+            check_pytest(target, pyproject_data, config=orchestrator_config, timeout=doctor_timeout)
+        )
     checks.extend(check_api_keys())
 
     if _detect_typescript(target):

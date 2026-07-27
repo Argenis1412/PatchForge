@@ -7,12 +7,13 @@ import tempfile
 import time
 from pathlib import Path
 
+from orchestrator.schemas.config import TimeoutPolicy
 from orchestrator.schemas.validator_output import ToolResult
 
 from .logging import _get_logger
 from .process import build_venv_environment, prepare_process
 
-DEFAULT_TIMEOUT = 450
+DEFAULT_TIMEOUT = TimeoutPolicy().validator_run
 assert DEFAULT_TIMEOUT > 0
 
 IGNORE_DIRS = [

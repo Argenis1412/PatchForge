@@ -45,6 +45,7 @@ def execute(
     allow_dirty: bool = False,
     result_path: Optional[Path] = None,
     force_provider: Optional[str] = None,
+    timeout_overrides: dict[str, int] | None = None,
 ) -> CiResult:
     """Run the full CI pipeline and return a :class:`CiResult`.
 
@@ -141,7 +142,11 @@ def execute(
     logs_dir = workspace_path / "logs"
 
     try:
-        config = TargetConfig.load(target_path=target_path, workspace_path=workspace_path)
+        config = TargetConfig.load(
+            target_path=target_path,
+            workspace_path=workspace_path,
+            timeout_overrides=timeout_overrides,
+        )
     except Exception as exc:
         return _fail("scan_failed", f"Config load failed: {exc}")
 
@@ -469,7 +474,12 @@ def execute(
             original_root=target_path, patch_path=patch_path
         ) as val_ws:
             validation_target_path = val_ws.temporary_root
-            apply_res = apply_patch_to_copy(val_ws.temporary_root, val_ws.patch_path)
+            apply_res = apply_patch_to_copy(
+                val_ws.temporary_root,
+                val_ws.patch_path,
+                git_timeout=config.timeouts.git_op,
+                patch_timeout=config.timeouts.patch_apply,
+            )
             if apply_res.return_code != 0:
                 from orchestrator.schemas.validator_output import ValidatorOutput
 
