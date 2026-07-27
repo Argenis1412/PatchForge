@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from orchestrator.git import GitCommandResult, current_head, resolve_git_root
+from orchestrator.git import current_head, resolve_git_root
 from orchestrator.main import app
 from orchestrator.schemas.architect_output import ArchitectOutput, Task
 from orchestrator.schemas.artifacts import PatchLifecycleState
@@ -354,7 +354,7 @@ def _prepare_run(target_repo: Path, workspace_dir: Path, runner: CliRunner) -> s
     return run_id
 
 
-def test_apply_failure_triggers_force_reset(target_repo: Path, workspace_dir: Path):
+def test_candidate_commit_failure_leaves_no_wal(target_repo: Path, workspace_dir: Path):
     run_id = _prepare_run(target_repo, workspace_dir, runner)
 
     with patch(
@@ -368,22 +368,16 @@ def test_apply_failure_triggers_force_reset(target_repo: Path, workspace_dir: Pa
     apply_json_path = workspace_dir / "runs" / run_id / "apply.json"
     assert not apply_json_path.exists()
 
-    # Verify working tree is clean (rollback succeeded)
+    # Candidate promotion leaves the caller's working tree unchanged.
     assert (target_repo / "README.md").read_text() == "Hello\n"
 
 
-def test_apply_failure_reset_failure_fatal(target_repo: Path, workspace_dir: Path):
+def test_candidate_commit_failure_reports_error(target_repo: Path, workspace_dir: Path):
     run_id = _prepare_run(target_repo, workspace_dir, runner)
 
-    with (
-        patch(
-            "orchestrator.git.commit_candidate",
-            side_effect=RuntimeError("apply failed"),
-        ),
-        patch(
-            "orchestrator.git.force_reset_apply",
-            return_value=GitCommandResult(return_code=1, stdout="", stderr="reset failed"),
-        ),
+    with patch(
+        "orchestrator.git.commit_candidate",
+        side_effect=RuntimeError("apply failed"),
     ):
         apply_res = runner.invoke(app, ["apply", run_id, "--workspace", str(workspace_dir)])
 

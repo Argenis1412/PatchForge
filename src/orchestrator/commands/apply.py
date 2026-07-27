@@ -7,7 +7,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import NoReturn, Optional
 
 import typer
 from rich.console import Console
@@ -15,6 +15,7 @@ from rich.panel import Panel
 
 from orchestrator.clients.bootstrap import bootstrap_environment
 from orchestrator.provenance import resolve_approved_by
+from orchestrator.schemas.artifacts import APPLY_JSON
 from orchestrator.schemas.config import TargetConfig, default_workspace_path
 from orchestrator.storage import _wal_write
 from orchestrator.storage.lock import acquire_repo_lock, release_repo_lock
@@ -32,7 +33,7 @@ def _candidate_branch(run_id: str, issue_number: int | None) -> str:
     return f"patchforge/{run_id}{suffix}"
 
 
-def _fail(message: str) -> None:
+def _fail(message: str) -> NoReturn:
     console.print(f"[bold red]Error: {message}[/bold red]")
     raise typer.Exit(code=1)
 
@@ -42,7 +43,7 @@ def _finish(workspace: WorkspaceManager, run_id: str, metadata, result) -> None:
     result.status = "applied"
     result.promotion_state = PROMOTION_APPLIED
     result.applied_at = datetime.now(timezone.utc)
-    _wal_write(result, workspace.run_dir(run_id) / "apply.json")
+    _wal_write(result, workspace.run_dir(run_id) / APPLY_JSON)
     metadata.status = "applied"
     metadata.apply_status = "success"
     metadata.updated_at = datetime.now(timezone.utc)
@@ -89,10 +90,11 @@ def execute(
         worktree_is_clean,
     )
     from orchestrator.schemas.artifacts import (
-        APPLY_JSON,
+        VALIDATION_JSON,
         VALIDATION_POLICY_JSON,
         ApplyResult,
     )
+    from orchestrator.schemas.validator_output import ValidationPolicy, ValidatorOutput
     from orchestrator.validation_decision import (
         attach_validation_decision,
         evaluate_validation,
@@ -157,6 +159,45 @@ def execute(
             _fail("base branch no longer matches this run's base_commit; run preview again")
 
         wal_path = run_dir / APPLY_JSON
+        repository_identity = str(git_common_dir(target))
+
+        def recovery_is_authorized(wal: ApplyResult) -> bool:
+            if (
+                wal.run_id != run_id
+                or wal.workspace_path != str(workspace_path)
+                or wal.candidate_ref != candidate_ref
+                or wal.promotion_receipt_ref != receipt_ref
+                or wal.expected_base_ref != base_ref
+                or wal.expected_base_commit != metadata.base_commit
+                or not wal.candidate_commit
+                or not wal.policy_digest
+            ):
+                return False
+            try:
+                policy = ValidationPolicy.model_validate_json(
+                    (run_dir / VALIDATION_POLICY_JSON).read_text(encoding="utf-8")
+                )
+                output = ValidatorOutput.model_validate_json(
+                    (run_dir / VALIDATION_JSON).read_text(encoding="utf-8")
+                )
+            except Exception:
+                return False
+            subject = expected_validation_subject(
+                run_id=run_id,
+                project_root=target,
+                base_commit=metadata.base_commit,
+                patch_checksum=patch_checksum,
+                candidate_commit=wal.candidate_commit,
+                repository_identity=repository_identity,
+                policy_digest=wal.policy_digest,
+            )
+            return (
+                policy.digest == wal.policy_digest
+                and evaluate_validation(
+                    output, fresh=False, expected_subject=subject, expected_policy=policy
+                ).authorized
+            )
+
         wal = None
         if wal_path.exists():
             try:
@@ -169,6 +210,8 @@ def execute(
                 candidate = resolve_ref(target, wal.candidate_ref or "")
                 receipt = resolve_ref(target, wal.promotion_receipt_ref or "")
                 if candidate == wal.candidate_commit and receipt == wal.candidate_commit:
+                    if not recovery_is_authorized(wal):
+                        _fail("candidate recovery evidence is incomplete or unauthorized")
                     _finish(manager, run_id, metadata, wal)
                     return
                 if candidate is not None or receipt is not None:
@@ -176,18 +219,19 @@ def execute(
                         "candidate promotion is inconsistent; inspect refs manually before retrying"
                     )
             elif wal.promotion_state == PROMOTION_APPLIED:
+                if not recovery_is_authorized(wal):
+                    _fail("candidate recovery evidence is incomplete or unauthorized")
                 _finish(manager, run_id, metadata, wal)
                 return
 
-        # The policy is loaded from an unpatched base worktree, then used in
-        # the candidate worktree with only its execution path substituted.
-        with candidate_worktree(target, metadata.base_commit) as base_tree:
-            base_config = TargetConfig.load(target_path=base_tree, workspace_path=workspace_path)
-        policy = validation_policy_for(base_config)
-        manager.write_artifact(run_id, VALIDATION_POLICY_JSON, policy.model_dump_json(indent=2))
-        repository_identity = str(git_common_dir(target))
-
         with candidate_worktree(target, metadata.base_commit) as candidate_tree:
+            # The candidate worktree begins at base_commit, so configuration
+            # loaded before the patch is committed is the authorization root.
+            base_config = TargetConfig.load(
+                target_path=candidate_tree, workspace_path=workspace_path
+            )
+            policy = validation_policy_for(base_config)
+            manager.write_artifact(run_id, VALIDATION_POLICY_JSON, policy.model_dump_json(indent=2))
             message = f"patchforge: apply {run_id}"
             if issue_number is not None:
                 message += f" (issue #{issue_number})"
@@ -212,6 +256,7 @@ def execute(
                 expected_base_ref=base_ref,
                 expected_base_commit=metadata.base_commit,
                 policy_digest=policy.digest,
+                workspace_path=str(workspace_path),
                 pre_apply_head=metadata.base_commit,
                 pre_apply_branch=base_branch,
             )
@@ -232,24 +277,25 @@ def execute(
                 output, candidate_config, policy=policy, subject=subject
             )
             manager.write_artifact(run_id, "validation.json", output.model_dump_json(indent=2))
-            if not worktree_is_clean(candidate_tree, candidate_commit):
+            if not worktree_is_clean(candidate_tree, candidate_commit, include_untracked=False):
                 _fail("validator modified the candidate worktree; refusing promotion")
             decision = evaluate_validation(
                 output, fresh=True, expected_subject=subject, expected_policy=policy
             )
             if not decision.authorized:
                 _fail("candidate validation was not authorized")
-
-        promoted = promote_candidate(
-            target,
-            base_ref=base_ref,
-            base_commit=metadata.base_commit,
-            candidate_ref=candidate_ref,
-            candidate_commit=result.candidate_commit or "",
-            receipt_ref=receipt_ref,
-        )
-        if promoted.return_code != 0:
-            _fail(f"candidate promotion failed: {promoted.stderr.strip()}")
+            # The detached worktree keeps the candidate commit reachable until
+            # the atomic ref transaction makes the durable promotion refs.
+            promoted = promote_candidate(
+                target,
+                base_ref=base_ref,
+                base_commit=metadata.base_commit,
+                candidate_ref=candidate_ref,
+                candidate_commit=result.candidate_commit or "",
+                receipt_ref=receipt_ref,
+            )
+            if promoted.return_code != 0:
+                _fail(f"candidate promotion failed: {promoted.stderr.strip()}")
         result.promotion_receipt_commit = result.candidate_commit
         _finish(manager, run_id, metadata, result)
     finally:

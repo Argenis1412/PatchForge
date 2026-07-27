@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 1010 passed, 5 skipped | `ruff check .` → 0 errors | `ruff format --check` → 147 files clean
+**QA:** `pytest` → 1012 passed, 5 skipped | `ruff check .` → 0 errors | `ruff format --check` → 147 files clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3). `SqliteCircuitBreakerStore` is now thread-safe (issue #219).
 

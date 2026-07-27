@@ -159,13 +159,20 @@ def test_binding_does_not_replace_existing_subject_identity(monkeypatch, tmp_pat
 
 
 @pytest.mark.unit
-def test_expected_policy_rejects_a_decision_from_different_validator_policy(tmp_path):
+def test_expected_policy_rejects_a_decision_from_different_validator_policy(monkeypatch, tmp_path):
+    monkeypatch.setattr(adapters, "_raw_result", lambda *_: ProcessResult(return_code=0))
     config = _config(tmp_path, [ValidatorConfig(id="lint", adapter="ruff")])
-    output = attach_validation_decision(ValidatorOutput(overall_passed=True), config)
+    output = attach_validation_decision(
+        run_v2_validators("run-v2", tmp_path, config.validators or [], 30), config
+    )
     different = _config(
         tmp_path,
         [ValidatorConfig(id="tests", adapter="pytest")],
     )
+
+    assert evaluate_validation(
+        output, fresh=True, expected_policy=validation_policy_for(config)
+    ).authorized
 
     assert (
         evaluate_validation(

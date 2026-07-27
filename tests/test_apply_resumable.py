@@ -13,10 +13,21 @@ import typer
 
 from orchestrator.commands.apply import APPLY_PROTOCOL
 from orchestrator.commands.apply import execute as apply_execute
-from orchestrator.git import promotion_receipt_ref
-from orchestrator.schemas.artifacts import ApplyResult, RunMetadata
+from orchestrator.git import git_common_dir, promotion_receipt_ref
+from orchestrator.schemas.artifacts import (
+    VALIDATION_JSON,
+    VALIDATION_POLICY_JSON,
+    ApplyResult,
+    RunMetadata,
+)
+from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.validator_output import ValidatorOutput
 from orchestrator.storage import _wal_write
+from orchestrator.validation_decision import (
+    attach_validation_decision,
+    expected_validation_subject,
+    validation_policy_for,
+)
 from orchestrator.workspace import WorkspaceManager
 
 
@@ -103,6 +114,21 @@ def test_candidate_promotion_preserves_unrelated_dirty_tree(tmp_path: Path) -> N
 
 
 @pytest.mark.unit
+def test_validator_untracked_artifact_does_not_block_promotion(tmp_path: Path) -> None:
+    ctx = _setup_run(tmp_path)
+
+    def validator(*, config):
+        (config.target_path / "validator.log").write_text("artifact\n", encoding="utf-8")
+        return ValidatorOutput(overall_passed=True, run_id=str(ctx["run_id"])), {}
+
+    with patch("orchestrator.agents.validator.run", side_effect=validator):
+        apply_execute(str(ctx["run_id"]), workspace=Path(ctx["workspace"]))
+
+    repo = Path(ctx["repo"])
+    assert _git(repo, "show", f"patchforge/{ctx['run_id']}:README.md") == "Hello candidate"
+
+
+@pytest.mark.unit
 def test_recovery_finishes_only_matching_candidate_and_receipt(tmp_path: Path) -> None:
     ctx = _setup_run(tmp_path)
     repo = Path(ctx["repo"])
@@ -113,6 +139,27 @@ def test_recovery_finishes_only_matching_candidate_and_receipt(tmp_path: Path) -
     receipt_ref = promotion_receipt_ref(str(ctx["run_id"]))
     _git(repo, "update-ref", candidate_ref, candidate)
     _git(repo, "update-ref", receipt_ref, candidate)
+    config = TargetConfig.load(target_path=repo, workspace_path=Path(ctx["workspace"]))
+    policy = validation_policy_for(config)
+    subject = expected_validation_subject(
+        run_id=str(ctx["run_id"]),
+        project_root=repo,
+        base_commit=str(ctx["base"]),
+        patch_checksum=hashlib.sha256(
+            (manager.run_dir(str(ctx["run_id"])) / "patch.diff").read_bytes()
+        ).hexdigest(),
+        candidate_commit=candidate,
+        repository_identity=str(git_common_dir(repo)),
+        policy_digest=policy.digest,
+    )
+    output = attach_validation_decision(
+        ValidatorOutput(overall_passed=True, run_id=str(ctx["run_id"])),
+        config,
+        policy=policy,
+        subject=subject,
+    )
+    manager.write_artifact(str(ctx["run_id"]), VALIDATION_POLICY_JSON, policy.model_dump_json())
+    manager.write_artifact(str(ctx["run_id"]), VALIDATION_JSON, output.model_dump_json())
     wal = ApplyResult(
         run_id=str(ctx["run_id"]),
         applied_at=datetime.now(timezone.utc),
@@ -123,6 +170,10 @@ def test_recovery_finishes_only_matching_candidate_and_receipt(tmp_path: Path) -
         candidate_ref=candidate_ref,
         candidate_commit=candidate,
         promotion_receipt_ref=receipt_ref,
+        expected_base_ref=f"refs/heads/{ctx['branch']}",
+        expected_base_commit=str(ctx["base"]),
+        policy_digest=policy.digest,
+        workspace_path=str(Path(ctx["workspace"])),
     )
     _wal_write(wal, manager.run_dir(str(ctx["run_id"])) / "apply.json")
 

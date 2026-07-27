@@ -573,7 +573,7 @@ def execute(
                 existing_apply.read_text(encoding="utf-8")
             ).apply_protocol
         except Exception:
-            existing_protocol = None
+            return _fail("apply_failed", "apply.json is corrupt; recovery is fail-closed")
         if existing_protocol not in (None, "ci_legacy@1"):
             return _fail("apply_failed", "apply.json belongs to a different apply protocol")
 

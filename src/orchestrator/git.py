@@ -17,6 +17,8 @@ from orchestrator.schemas.git import (
     WorkingTreeStatus,
 )
 
+_CANDIDATE_HOOK_PATHS: dict[Path, Path] = {}
+
 
 def is_git_repo(path: Path) -> bool:
     try:
@@ -215,10 +217,11 @@ def git_common_dir(repo_root: Path) -> Path:
 def candidate_worktree(repo_root: Path, base_commit: str) -> Generator[Path, None, None]:
     """Create a detached, hook-free temporary worktree rooted at *base_commit*."""
     worktree_dir = Path(tempfile.mkdtemp(prefix="pf_candidate_"))
+    hooks_dir = Path(tempfile.mkdtemp(prefix="pf_candidate_hooks_"))
     cmd = [
         "git",
         "-c",
-        f"core.hooksPath={Path(tempfile.gettempdir()) / 'patchforge-empty-hooks'}",
+        f"core.hooksPath={hooks_dir}",
         "-C",
         str(repo_root),
         "worktree",
@@ -228,41 +231,44 @@ def candidate_worktree(repo_root: Path, base_commit: str) -> Generator[Path, Non
         str(worktree_dir),
         base_commit,
     ]
-    res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    res = _run_git_safe(cmd)
     if res.returncode != 0:
         shutil.rmtree(worktree_dir, ignore_errors=True)
+        shutil.rmtree(hooks_dir, ignore_errors=True)
         raise RuntimeError(res.stderr or "failed to create candidate worktree")
+    worktree_key = worktree_dir.resolve()
+    _CANDIDATE_HOOK_PATHS[worktree_key] = hooks_dir
     try:
         yield worktree_dir
     finally:
-        subprocess.run(
-            ["git", "-C", str(repo_root), "worktree", "remove", "--force", str(worktree_dir)],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
+        _CANDIDATE_HOOK_PATHS.pop(worktree_key, None)
+        _run_git_safe(
+            ["git", "-C", str(repo_root), "worktree", "remove", "--force", str(worktree_dir)]
         )
         shutil.rmtree(worktree_dir, ignore_errors=True)
+        shutil.rmtree(hooks_dir, ignore_errors=True)
 
 
 def commit_candidate(repo_root: Path, patch_path: Path, message: str) -> str:
     """Apply *patch_path* in an isolated worktree and return its commit SHA."""
-    checked = _run_git_safe(["git", "-C", str(repo_root), "apply", "--check", str(patch_path)])
+    hooks_path = _CANDIDATE_HOOK_PATHS.get(repo_root.resolve())
+    hooks_config = ["-c", f"core.hooksPath={hooks_path}"] if hooks_path else []
+    git_prefix = ["git", *hooks_config, "-C", str(repo_root)]
+    checked = _run_git_safe([*git_prefix, "apply", "--check", str(patch_path)])
     if checked.returncode != 0:
         raise RuntimeError(checked.stderr or "candidate patch does not apply")
-    applied = _run_git_safe(["git", "-C", str(repo_root), "apply", str(patch_path)])
+    applied = _run_git_safe([*git_prefix, "apply", str(patch_path)])
     if applied.returncode != 0:
         raise RuntimeError(applied.stderr or "failed to apply candidate patch")
-    staged = _run_git_safe(["git", "-C", str(repo_root), "add", "-A"])
+    staged = _run_git_safe([*git_prefix, "add", "-A"])
     if staged.returncode != 0:
         raise RuntimeError(staged.stderr or "failed to stage candidate")
     committed = _run_git_safe(
         [
-            "git",
-            "-C",
-            str(repo_root),
+            *git_prefix,
             "commit",
             "--no-verify",
+            "--no-gpg-sign",
             "-m",
             message,
         ]
@@ -272,11 +278,16 @@ def commit_candidate(repo_root: Path, patch_path: Path, message: str) -> str:
     return current_head(repo_root)
 
 
-def worktree_is_clean(repo_root: Path, expected_head: str) -> bool:
+def worktree_is_clean(
+    repo_root: Path, expected_head: str, *, include_untracked: bool = True
+) -> bool:
     """Return whether a candidate worktree remained at its committed revision."""
     if current_head(repo_root) != expected_head:
         return False
-    res = _run_git_safe(["git", "-C", str(repo_root), "status", "--porcelain"])
+    args = ["git", "-C", str(repo_root), "status", "--porcelain"]
+    if not include_untracked:
+        args.append("--untracked-files=no")
+    res = _run_git_safe(args)
     return res.returncode == 0 and not res.stdout.strip()
 
 
@@ -294,6 +305,19 @@ def promote_candidate(
     receipt_ref: str,
 ) -> GitCommandResult:
     """Atomically verify the base and create candidate plus receipt refs."""
+    for ref in (base_ref, candidate_ref, receipt_ref):
+        if "\x00" in ref or "\n" in ref or "\r" in ref:
+            return GitCommandResult(return_code=1, stdout="", stderr=f"invalid ref: {ref!r}")
+        checked = _run_git_safe(["git", "check-ref-format", ref])
+        if checked.returncode != 0:
+            return GitCommandResult(
+                return_code=1,
+                stdout="",
+                stderr=checked.stderr or f"invalid ref: {ref}",
+            )
+    for name, commit in (("base_commit", base_commit), ("candidate_commit", candidate_commit)):
+        if not re.fullmatch(r"[0-9a-fA-F]{40,64}", commit):
+            return GitCommandResult(return_code=1, stdout="", stderr=f"invalid {name}")
     transaction = "\n".join(
         [
             "start",
@@ -319,6 +343,8 @@ def promote_candidate(
         )
     except FileNotFoundError as exc:
         return GitCommandResult(return_code=127, stdout="", stderr=str(exc))
+    except subprocess.TimeoutExpired as exc:
+        return GitCommandResult(return_code=124, stdout="", stderr=f"git command timed out: {exc}")
 
 
 def resolve_ref(repo_root: Path, ref: str) -> Optional[str]:
