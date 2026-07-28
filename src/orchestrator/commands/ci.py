@@ -624,11 +624,11 @@ def execute(
         except Exception:
             return False
 
-    branch_res = create_controlled_branch(target_path, branch_name)
+    branch_res = create_controlled_branch(target_path, branch_name, timeout=config.timeouts.git_op)
     if branch_res.return_code != 0:
         return _apply_fail(f"Branch creation failed: {branch_res.stderr}")
 
-    apply_res = apply_patch(target_path, patch_path)
+    apply_res = apply_patch(target_path, patch_path, timeout=config.timeouts.patch_apply)
     if apply_res.return_code != 0:
         rolled = _rollback()
         return _apply_fail(f"Patch apply failed: {apply_res.stderr}", rolled_back=rolled)
@@ -646,7 +646,7 @@ def execute(
         ["git", "-C", str(target_path), "add", "--", *staged_files],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=config.timeouts.git_op,
     )
     if ar.returncode != 0:
         rolled = _rollback()
@@ -656,7 +656,7 @@ def execute(
         ["git", "-C", str(target_path), "commit", "-m", commit_msg],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=config.timeouts.git_op,
     )
     if cr.returncode != 0:
         rolled = _rollback()

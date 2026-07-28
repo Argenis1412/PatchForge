@@ -8,7 +8,12 @@ from unittest.mock import patch
 
 import pytest
 
-from orchestrator.git import git_config_user_email, git_config_user_name, promote_candidate
+from orchestrator.git import (
+    commit_candidate,
+    git_config_user_email,
+    git_config_user_name,
+    promote_candidate,
+)
 
 
 def _init_git_repo(
@@ -116,3 +121,22 @@ def test_promote_candidate_rejects_invalid_ref_before_update_ref(git_repo: Path)
 
     assert result.return_code != 0
     assert "invalid ref" in result.stderr
+
+
+def test_commit_candidate_uses_explicit_patch_and_git_timeouts(git_repo: Path):
+    completed = subprocess.CompletedProcess(args=["git"], returncode=0, stdout="", stderr="")
+    with (
+        patch("orchestrator.git._run_git_safe", return_value=completed) as run_git,
+        patch("orchestrator.git.current_head", return_value="a" * 40) as head,
+    ):
+        result = commit_candidate(
+            git_repo,
+            git_repo / "patch.diff",
+            "message",
+            git_timeout=41,
+            patch_timeout=42,
+        )
+
+    assert result == "a" * 40
+    assert [call.kwargs["timeout"] for call in run_git.call_args_list] == [42, 42, 41, 41]
+    assert head.call_args.kwargs["timeout"] == 41

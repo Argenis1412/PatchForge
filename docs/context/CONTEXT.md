@@ -1,6 +1,6 @@
 # PatchForge — Project Context
 
-> Last updated: 2026-07-26
+> Last updated: 2026-07-27
 > This document is the single source of truth for AI sessions. Read before any implementation work.
 
 ---
@@ -9,13 +9,13 @@
 
 **What:** PatchForge — AI-powered, safety-first code modification tool. Generates, validates, and applies patches through a deterministic Plan → Preview → Validate → Apply pipeline.
 
-**Phase:** P4 — Trust & Configuration (complete; P0/P1/P2/P3 also complete)
+**Phase:** P4 — Trust & Configuration complete; P5 planning is the active roadmap.
 
 **Stack:** Python 3.12+ | Pydantic schemas | Typer CLI | ruff + pytest QA
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA:** `pytest` → 1012 passed, 5 skipped | `ruff check .` → 0 errors | `ruff format --check` → 147 files clean
+**QA baseline:** `pytest -v` → 1027 passed, 5 skipped | `ruff check .` → 0 errors | `ruff format --check .` → 147 files clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3). `SqliteCircuitBreakerStore` is now thread-safe (issue #219).
 
@@ -38,7 +38,9 @@ deferred.
 every change. See the [CI workflow](https://github.com/Argenis1412/PatchForge/actions/workflows/ci.yml)
 for the current result; the historical count in this document is not a live metric.
 
-**Next task:** Issue #293 — centralize subprocess timeout configuration. Implementation complete on `feat/issue-293-centralize-validator-timeouts`; QA: `ruff check .` and `ruff format --check .` pass, `pytest -v` reports 1026 passed and 5 skipped. Pending commit, PR, and CI verification.
+**Latest delivery:** Issue #293 / PR #294 centralized the immutable timeout policy, preserved V1 validator aliases, and passed CI before merge.
+
+**Next task:** Issue #295 — timeout-policy propagation and context refresh. Implementation and QA are complete; pending commit, PR, and CI verification.
 
 ---
 
