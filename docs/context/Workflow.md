@@ -51,6 +51,9 @@ Rules:
 
 ## Steps
 
+> **Planning docs:** Before opening a new issue, consult the issue registry,
+> roadmap, relevant ADRs, and any task-specific planning document that exists.
+
 1. Read and understand the issue
 2. Run **AI: Issue Clarifier**
 3. Update the issue if gaps are found
@@ -60,10 +63,6 @@ Rules:
 7. Run **AI: Adversarial Reviewer**
 8. Wait for approval
 9. Create branch: `git checkout -b <type>/issue-<N>-<slug>`
-
-> **Planning docs:** Before opening a new issue, consult the issue registry,
-> roadmap, relevant ADRs, and any task-specific planning document that exists.
-
 10. Implement
 11. Run **AI: Diff Reviewer**
 12. Add/update tests if needed
