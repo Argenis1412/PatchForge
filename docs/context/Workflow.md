@@ -1,5 +1,9 @@
 # Development Workflow — PatchForge
 
+> Read [AGENTS.md](../../AGENTS.md) before following this workflow. The
+> session contract is canonical there; this document defines the development
+> process only.
+
 ## Quick Reference (daily)
 
 ```bash
@@ -57,7 +61,8 @@ Rules:
 8. Wait for approval
 9. Create branch: `git checkout -b <type>/issue-<N>-<slug>`
 
-> **Phase docs:** Before opening a GitHub issue for a P4/P5 item, start from the per-item doc under `docs/planning/p4/` (or `p5/` when available).
+> **Planning docs:** Before opening a new issue, consult the issue registry,
+> roadmap, relevant ADRs, and any task-specific planning document that exists.
 
 10. Implement
 11. Run **AI: Diff Reviewer**
@@ -417,42 +422,6 @@ This is my implementation diff.
 3. Are there any obvious logical errors or unhandled cases?
 
 Do not evaluate style or formatting — ruff handles that.
-```
-
----
-
-## Continuation Context Document
-
-Maintain a context document for each AI session.
-Update it after each merged PR.
-
-Required sections:
-
-```markdown
-## Working Style
-[Summary of the 10-step flow and rules]
-
-## Current State
-[Status of each completed issue]
-
-## Known Technical Debt
-- Item description and why it was deferred
-
-## Failed Approaches
-- [date] Tried X to solve Y. Did not work because Z.
-
-## Architecture Invariants
-Things that must not change without an ADR:
-- pipeline.py only orchestrates, no business logic execution
-- Agents receive and produce typed Pydantic schemas
-- Every stage output is persisted before the next
-- main.py is CLI surface only — no business logic
-
-## Open Design Questions
-- Question and current thinking
-
-## Next Task
-[Issue number, title, and current step]
 ```
 
 ---

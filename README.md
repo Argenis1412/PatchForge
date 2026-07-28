@@ -38,9 +38,13 @@ Most AI coding tools optimize for speed. PatchForge optimizes for trust — chan
 
 ## Current Status
 
-- **Phase:** P4 — Trust & Configuration (P0/P1/P2/P3 complete)
+- **Delivery:** V1 and P0–P4 are complete, including Validator Plugins
+  (#282) and its V2 operational integration.
+- **Priority:** Observe external users solving real problems before selecting
+  the next product development priority. Scoped P5 items are backlog, not
+  active work.
 - **QA:** CI verifies the full test suite, Ruff lint, and Ruff formatting on every change. See the [CI workflow](https://github.com/Argenis1412/PatchForge/actions/workflows/ci.yml) for the current result.
-- [Roadmap](./docs/planning/roadmap.md) | [Full project context](./docs/context/CONTEXT.md)
+- [Project context](./docs/context/CONTEXT.md) | [Development workflow](./docs/context/Workflow.md) | [Roadmap](./docs/planning/roadmap.md)
 
 ## Subprocess timeouts
 
