@@ -1,7 +1,7 @@
 # PatchForge — Roadmap
 
 > **Date:** 2026-07-11
-> **Status:** Live. Supersedes `roadmap-phase2.md` and the V1 `ROADMAP.md`.
+> **Status:** Scoped backlog. Supersedes `roadmap-phase2.md` and the V1 `ROADMAP.md`.
 > **Scope:** PatchForge Core only. Scout is a separate product line — see `scout-vision.md`.
 
 ---
@@ -45,11 +45,16 @@ This is not a preference — it's how PatchForge stays auditable at enterprise s
 - **P2** — Complete. Schema versioning (ADR-0004), dogfooding experiments 001–008, hardening sprint, DAG scheduler, WAL persistence.
 - **P3** — Complete. Async workers, CI/CD, Docker, GitHub Client, Work Queue, Artifact Store, externalized Circuit Breaker, worker loop, thread-safety hardening (#219).
 
-Full issue inventory in `docs/planning/issue-registry.md`. Full timeline in `docs/context/CONTEXT.md`.
+**Current priority:** Observe external users solving real problems before
+starting another product initiative. The P5 items below are scoped backlog;
+they are not an automatic next phase.
+
+Full issue inventory in `docs/planning/issue-registry.md`. Current project
+state lives in `docs/context/CONTEXT.md`.
 
 ---
 
-## P4 — Trust & Configuration
+## P4 — Trust & Configuration (Complete)
 
 **Theme:** Make the pipeline configurable and auditable enough for enterprise B2B (banking, healthcare, government). This is where the "trust layer" thesis becomes commercial.
 
@@ -92,7 +97,7 @@ Full issue inventory in `docs/planning/issue-registry.md`. Full timeline in `doc
 
 ---
 
-## P5 — Learning Pipeline
+## P5 — Learning Pipeline (Scoped, not active)
 
 **Theme:** Turn the pipeline into a system that accumulates knowledge across runs. Every run becomes a data point; every failure becomes a classified signal. Faster feedback, less friction, richer diagnosis.
 

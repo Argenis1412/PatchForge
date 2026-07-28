@@ -14,10 +14,9 @@ Repository → Scan → Plan → Patch → Validation → Apply
 
 - [README](../README.md) - Project overview and quickstart
 - [Product Thesis](./product-thesis-v2.md) - Product definition, artifact contract, and non-goals (post-adversarial)
-- [Roadmap](./planning/roadmap.md) - Live PatchForge Core roadmap (P4–P5)
+- [Roadmap](./planning/roadmap.md) - Scoped PatchForge Core backlog and deferred initiatives
 - [Scout Vision](./planning/scout-vision.md) - Long-term vision for Scout as a separate future product line (frozen) — not the internal Scout pipeline stage below
 - [Issue Registry](./planning/issue-registry.md) - Tracked issues with ACs, priorities, and dependencies
-- [P4 Planning Docs](./planning/p4/README.md) - Per-item scope, difficulty, steps for P4 items
 - [ADR-0003: Product Contract](./adr/ADR-0003-product-contract.md) - Binding repository safety contract and patch lifecycle
 - [Quality Gate](./QUALITY_GATE.md) - Pre-merge checklist
 
@@ -73,8 +72,10 @@ Design and architecture decisions are documented in Architecture Decision Record
 
 ## Current Status
 
-- V1, P0, P1, P2, P3 complete.
-- Current phase: P4 — Trust & Configuration.
+- V1 and P0–P4 complete, including Validator Plugins (#282).
+- Current priority: observe external users solving real problems before
+  selecting the next product development priority.
+- P5 Learning Pipeline items remain scoped backlog, not active work.
 - QA: CI verifies the full test suite, Ruff lint, and Ruff formatting on every change. See the [CI workflow](https://github.com/Argenis1412/PatchForge/actions/workflows/ci.yml) for the current result.
 
 See the [Roadmap](./planning/roadmap.md) for current priorities and

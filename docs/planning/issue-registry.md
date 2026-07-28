@@ -576,7 +576,7 @@ ADR-0004 must answer exactly five questions:
 - **Goal:** `patchforge export-audit <run_id>` produces `audit-<run_id>.tar.gz` + `manifest.json` with SHA-256 of every artifact, PatchForge version, `commit_anchor`, timestamp, and a full structural mirror of `RunMetadata` (providers used included via `provider_config`). Optional GPG signing via `--sign`. `patchforge verify-audit <bundle>` recomputes hashes entirely in memory (no disk extraction) and detects tampering, missing artifacts, and injected/undeclared artifacts. `--require-signature` makes signature absence a verifier-side policy failure.
 - **Source:** `docs/planning/roadmap.md`
 - **Precondition:** Provider Registry complete (audit manifest must record the exact model used) — satisfied by #230.
-- **Non-goals:** No upload to external services (S3, artifact registries); no multi-run chain of custody; no RFC 3161 timestamping; no redaction by default (full mirror is architecturally mandated, see `docs/planning/p4/04-audit-bundle-export.md`) — opt-in `--redact` added by #234.
+- **Non-goals:** No upload to external services (S3, artifact registries); no multi-run chain of custody; no RFC 3161 timestamping; no redaction by default (the manifest is a structural mirror of `RunMetadata`) — opt-in `--redact` added by #234.
 
 ### ✅ Issue #234: Redact sensitive fields from audit bundle export
 - **Priority:** Tech debt closure (follow-up to #232) | **Status:** ✅ **Completed**
@@ -589,7 +589,7 @@ ADR-0004 must answer exactly five questions:
 ### ✅ Issue #235: Repo lock around export-audit's read window
 - **Priority:** Tech debt closure (follow-up to #232) | **Status:** ✅ **Completed**
 - **PR:** (this branch)
-- **Goal:** Opt-in `worker_id`/`coordination_db_dir` params on `export_audit()` hold a repo lock across the status check, file walk, and hash loop. Lock failure aborts with exit code 8. Worker identity uses `uuid.uuid4().hex` or `{worker_id}:export-audit` suffix to prevent same-identity bypass and reentrant-release. Metadata refreshed from locked read for manifest/tarball consistency. Supersedes the "no repo lock" non-goal in `docs/planning/p4/04-audit-bundle-export.md`.
+- **Goal:** Opt-in `worker_id`/`coordination_db_dir` params on `export_audit()` hold a repo lock across the status check, file walk, and hash loop. Lock failure aborts with exit code 8. Worker identity uses `uuid.uuid4().hex` or `{worker_id}:export-audit` suffix to prevent same-identity bypass and reentrant-release. Metadata refreshed from locked read for manifest/tarball consistency.
 - **Source:** `docs/context/discoveries.md` (debt logged during #232), triaged during P4-4 stabilization.
 - **Precondition:** #232 complete.
 - **Non-goals:** No CLI flags for `--worker-id` or `--coordination-db` (infrastructure only, for future `work_queue.py` wiring). No output-file write protection (pre-existing race, unrelated to run-directory reads).
