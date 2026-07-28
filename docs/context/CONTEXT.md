@@ -15,7 +15,7 @@
 
 **CLI:** `patchforge` (primary), `orchestrator` (legacy alias)
 
-**QA baseline:** `pytest -v` → 1027 passed, 5 skipped | `ruff check .` → 0 errors | `ruff format --check .` → 147 files clean
+**QA baseline:** `pytest -v` → 1029 passed, 5 skipped | `ruff check .` → 0 errors | `ruff format --check .` → 147 files clean
 
 **Key constraint:** Single-threaded, synchronous pipeline (invariant; Docker containerization complete in P3). `SqliteCircuitBreakerStore` is now thread-safe (issue #219).
 
@@ -40,7 +40,7 @@ for the current result; the historical count in this document is not a live metr
 
 **Latest delivery:** Issue #293 / PR #294 centralized the immutable timeout policy, preserved V1 validator aliases, and passed CI before merge.
 
-**Next task:** Issue #295 — timeout-policy propagation and context refresh. Implementation and QA are complete; pending commit, PR, and CI verification.
+**Next task:** Issue #295 — timeout-policy propagation and context refresh. PR #296 is open; pending review and remote CI verification.
 
 ---
 

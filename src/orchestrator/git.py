@@ -203,6 +203,8 @@ def create_controlled_branch(
         return GitCommandResult(return_code=res.returncode, stdout=res.stdout, stderr=res.stderr)
     except FileNotFoundError as e:
         return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {e}")
+    except subprocess.TimeoutExpired as exc:
+        return GitCommandResult(return_code=124, stdout="", stderr=f"git command timed out: {exc}")
 
 
 def git_common_dir(repo_root: Path, *, timeout: int = 30) -> Path:
@@ -380,6 +382,8 @@ def apply_patch(repo_root: Path, patch_path: Path, *, timeout: int = 30) -> GitC
         return GitCommandResult(return_code=res.returncode, stdout=res.stdout, stderr=res.stderr)
     except FileNotFoundError as e:
         return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {e}")
+    except subprocess.TimeoutExpired as exc:
+        return GitCommandResult(return_code=124, stdout="", stderr=f"git command timed out: {exc}")
 
 
 def force_reset_apply(repo_root: Path, target_sha: str) -> GitCommandResult:

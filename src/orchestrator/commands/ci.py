@@ -642,22 +642,30 @@ def execute(
     commit_msg = f"patchforge: apply {run_id}"
     if issue_number is not None:
         commit_msg += f" (issue #{issue_number})"
-    ar = subprocess.run(
-        ["git", "-C", str(target_path), "add", "--", *staged_files],
-        capture_output=True,
-        text=True,
-        timeout=config.timeouts.git_op,
-    )
+    try:
+        ar = subprocess.run(
+            ["git", "-C", str(target_path), "add", "--", *staged_files],
+            capture_output=True,
+            text=True,
+            timeout=config.timeouts.git_op,
+        )
+    except subprocess.TimeoutExpired as exc:
+        rolled = _rollback()
+        return _apply_fail(f"git add timed out: {exc}", rolled_back=rolled)
     if ar.returncode != 0:
         rolled = _rollback()
         return _apply_fail(f"git add failed: {ar.stderr}", rolled_back=rolled)
 
-    cr = subprocess.run(
-        ["git", "-C", str(target_path), "commit", "-m", commit_msg],
-        capture_output=True,
-        text=True,
-        timeout=config.timeouts.git_op,
-    )
+    try:
+        cr = subprocess.run(
+            ["git", "-C", str(target_path), "commit", "-m", commit_msg],
+            capture_output=True,
+            text=True,
+            timeout=config.timeouts.git_op,
+        )
+    except subprocess.TimeoutExpired as exc:
+        rolled = _rollback()
+        return _apply_fail(f"git commit timed out: {exc}", rolled_back=rolled)
     if cr.returncode != 0:
         rolled = _rollback()
         return _apply_fail(f"git commit failed: {cr.stderr}", rolled_back=rolled)

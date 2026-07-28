@@ -9,7 +9,9 @@ from unittest.mock import patch
 import pytest
 
 from orchestrator.git import (
+    apply_patch,
     commit_candidate,
+    create_controlled_branch,
     git_config_user_email,
     git_config_user_name,
     promote_candidate,
@@ -107,6 +109,24 @@ def test_git_config_user_name_returns_none_when_no_git_binary(tmp_path: Path):
 def test_git_config_user_email_returns_none_when_no_git_binary(tmp_path: Path):
     with patch("orchestrator.git.subprocess.run", side_effect=FileNotFoundError):
         assert git_config_user_email(tmp_path) is None
+
+
+def test_create_controlled_branch_returns_timeout_result(tmp_path: Path):
+    with patch(
+        "orchestrator.git.subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd="git", timeout=30),
+    ):
+        result = create_controlled_branch(tmp_path, "patchforge/test", timeout=1)
+    assert result.return_code == 124
+
+
+def test_apply_patch_returns_timeout_result(tmp_path: Path):
+    with patch(
+        "orchestrator.git.subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd="git", timeout=30),
+    ):
+        result = apply_patch(tmp_path, tmp_path / "patch.diff", timeout=1)
+    assert result.return_code == 124
 
 
 def test_promote_candidate_rejects_invalid_ref_before_update_ref(git_repo: Path):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import NoReturn, Optional
@@ -141,11 +142,14 @@ def execute(
         _fail("another PatchForge operation holds the repository lock")
     try:
         target = Path(metadata.target_path).resolve()
-        base_config = TargetConfig.load(
-            target_path=target,
-            workspace_path=workspace_path,
-            timeout_overrides=timeout_overrides,
-        )
+        try:
+            base_config = TargetConfig.load(
+                target_path=target,
+                workspace_path=workspace_path,
+                timeout_overrides=timeout_overrides,
+            )
+        except ValueError as exc:
+            _fail(f"failed to load target configuration: {exc}")
         git_timeout = base_config.timeouts.git_op
         metadata.approved_by = resolve_approved_by(target)
         manager.write_run_json(run_id, metadata)
@@ -170,11 +174,14 @@ def execute(
             _fail("base branch no longer matches this run's base_commit; run preview again")
 
         wal_path = run_dir / APPLY_JSON
-        repository_identity = str(
-            git_common_dir(target)
-            if git_timeout == 30
-            else git_common_dir(target, timeout=git_timeout)
-        )
+        try:
+            repository_identity = str(
+                git_common_dir(target)
+                if git_timeout == 30
+                else git_common_dir(target, timeout=git_timeout)
+            )
+        except RuntimeError as exc:
+            _fail(f"failed to resolve repository identity: {exc}")
 
         def recovery_is_authorized(wal: ApplyResult) -> bool:
             if (
@@ -244,7 +251,16 @@ def execute(
             if git_timeout == 30
             else candidate_worktree(target, metadata.base_commit, timeout=git_timeout)
         )
-        with candidate_workspace as candidate_tree:
+
+        @contextmanager
+        def _candidate_workspace_or_fail():
+            try:
+                with candidate_workspace as candidate_tree:
+                    yield candidate_tree
+            except RuntimeError as exc:
+                _fail(f"candidate promotion failed: {exc}")
+
+        with _candidate_workspace_or_fail() as candidate_tree:
             # The candidate worktree begins at base_commit, so configuration
             # loaded before the patch is committed is the authorization root.
             policy = validation_policy_for(base_config)
