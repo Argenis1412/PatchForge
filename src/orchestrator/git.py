@@ -48,7 +48,7 @@ def resolve_git_root(path: Path) -> Path:
         return path
 
 
-def current_branch(repo_root: Path) -> str:
+def current_branch(repo_root: Path, *, timeout: int = 30) -> str:
     """Return the name of the currently checked-out branch.
 
     Raises RuntimeError if git fails or the repo is in a detached HEAD state.
@@ -59,7 +59,7 @@ def current_branch(repo_root: Path) -> str:
             capture_output=True,
             text=True,
             check=True,
-            timeout=30,
+            timeout=timeout,
         )
         return res.stdout.strip()
     except subprocess.CalledProcessError as e:
@@ -74,7 +74,7 @@ def current_branch(repo_root: Path) -> str:
         ) from e
 
 
-def current_head(repo_root: Path) -> str:
+def current_head(repo_root: Path, *, timeout: int = 30) -> str:
     """Return the full SHA of the current HEAD commit.
 
     Raises RuntimeError if git fails (e.g. empty repo, not a git dir, no git binary).
@@ -85,7 +85,7 @@ def current_head(repo_root: Path) -> str:
             capture_output=True,
             text=True,
             check=True,
-            timeout=30,
+            timeout=timeout,
         )
         return res.stdout.strip()
     except subprocess.CalledProcessError as e:
@@ -190,23 +190,28 @@ def try_apply_dry_run(patch_path: Path, repo_path: Path) -> ApplyCheckStatus:
         return ApplyCheckStatus.ERROR
 
 
-def create_controlled_branch(repo_root: Path, branch_name: str) -> GitCommandResult:
+def create_controlled_branch(
+    repo_root: Path, branch_name: str, *, timeout: int = 30
+) -> GitCommandResult:
     try:
         res = subprocess.run(
             ["git", "-C", str(repo_root), "checkout", "-b", branch_name],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=timeout,
         )
         return GitCommandResult(return_code=res.returncode, stdout=res.stdout, stderr=res.stderr)
     except FileNotFoundError as e:
         return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {e}")
+    except subprocess.TimeoutExpired as exc:
+        return GitCommandResult(return_code=124, stdout="", stderr=f"git command timed out: {exc}")
 
 
-def git_common_dir(repo_root: Path) -> Path:
+def git_common_dir(repo_root: Path, *, timeout: int = 30) -> Path:
     """Return the canonical common Git directory shared by all worktrees."""
     res = _run_git_safe(
-        ["git", "-C", str(repo_root), "rev-parse", "--path-format=absolute", "--git-common-dir"]
+        ["git", "-C", str(repo_root), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        timeout=timeout,
     )
     if res.returncode != 0:
         raise RuntimeError(res.stderr or "failed to resolve common Git directory")
@@ -214,7 +219,9 @@ def git_common_dir(repo_root: Path) -> Path:
 
 
 @contextmanager
-def candidate_worktree(repo_root: Path, base_commit: str) -> Generator[Path, None, None]:
+def candidate_worktree(
+    repo_root: Path, base_commit: str, *, timeout: int = 30
+) -> Generator[Path, None, None]:
     """Create a detached, hook-free temporary worktree rooted at *base_commit*."""
     worktree_dir = Path(tempfile.mkdtemp(prefix="pf_candidate_"))
     hooks_dir = Path(tempfile.mkdtemp(prefix="pf_candidate_hooks_"))
@@ -231,7 +238,7 @@ def candidate_worktree(repo_root: Path, base_commit: str) -> Generator[Path, Non
         str(worktree_dir),
         base_commit,
     ]
-    res = _run_git_safe(cmd)
+    res = _run_git_safe(cmd, timeout=timeout)
     if res.returncode != 0:
         shutil.rmtree(worktree_dir, ignore_errors=True)
         shutil.rmtree(hooks_dir, ignore_errors=True)
@@ -243,24 +250,34 @@ def candidate_worktree(repo_root: Path, base_commit: str) -> Generator[Path, Non
     finally:
         _CANDIDATE_HOOK_PATHS.pop(worktree_key, None)
         _run_git_safe(
-            ["git", "-C", str(repo_root), "worktree", "remove", "--force", str(worktree_dir)]
+            ["git", "-C", str(repo_root), "worktree", "remove", "--force", str(worktree_dir)],
+            timeout=timeout,
         )
         shutil.rmtree(worktree_dir, ignore_errors=True)
         shutil.rmtree(hooks_dir, ignore_errors=True)
 
 
-def commit_candidate(repo_root: Path, patch_path: Path, message: str) -> str:
+def commit_candidate(
+    repo_root: Path,
+    patch_path: Path,
+    message: str,
+    *,
+    git_timeout: int = 30,
+    patch_timeout: int = 30,
+) -> str:
     """Apply *patch_path* in an isolated worktree and return its commit SHA."""
     hooks_path = _CANDIDATE_HOOK_PATHS.get(repo_root.resolve())
     hooks_config = ["-c", f"core.hooksPath={hooks_path}"] if hooks_path else []
     git_prefix = ["git", *hooks_config, "-C", str(repo_root)]
-    checked = _run_git_safe([*git_prefix, "apply", "--check", str(patch_path)])
+    checked = _run_git_safe(
+        [*git_prefix, "apply", "--check", str(patch_path)], timeout=patch_timeout
+    )
     if checked.returncode != 0:
         raise RuntimeError(checked.stderr or "candidate patch does not apply")
-    applied = _run_git_safe([*git_prefix, "apply", str(patch_path)])
+    applied = _run_git_safe([*git_prefix, "apply", str(patch_path)], timeout=patch_timeout)
     if applied.returncode != 0:
         raise RuntimeError(applied.stderr or "failed to apply candidate patch")
-    staged = _run_git_safe([*git_prefix, "add", "-A"])
+    staged = _run_git_safe([*git_prefix, "add", "-A"], timeout=git_timeout)
     if staged.returncode != 0:
         raise RuntimeError(staged.stderr or "failed to stage candidate")
     committed = _run_git_safe(
@@ -271,23 +288,24 @@ def commit_candidate(repo_root: Path, patch_path: Path, message: str) -> str:
             "--no-gpg-sign",
             "-m",
             message,
-        ]
+        ],
+        timeout=git_timeout,
     )
     if committed.returncode != 0:
         raise RuntimeError(committed.stderr or "failed to commit candidate")
-    return current_head(repo_root)
+    return current_head(repo_root, timeout=git_timeout)
 
 
 def worktree_is_clean(
-    repo_root: Path, expected_head: str, *, include_untracked: bool = True
+    repo_root: Path, expected_head: str, *, include_untracked: bool = True, timeout: int = 30
 ) -> bool:
     """Return whether a candidate worktree remained at its committed revision."""
-    if current_head(repo_root) != expected_head:
+    if current_head(repo_root, timeout=timeout) != expected_head:
         return False
     args = ["git", "-C", str(repo_root), "status", "--porcelain"]
     if not include_untracked:
         args.append("--untracked-files=no")
-    res = _run_git_safe(args)
+    res = _run_git_safe(args, timeout=timeout)
     return res.returncode == 0 and not res.stdout.strip()
 
 
@@ -303,12 +321,13 @@ def promote_candidate(
     candidate_ref: str,
     candidate_commit: str,
     receipt_ref: str,
+    timeout: int = 30,
 ) -> GitCommandResult:
     """Atomically verify the base and create candidate plus receipt refs."""
     for ref in (base_ref, candidate_ref, receipt_ref):
         if "\x00" in ref or "\n" in ref or "\r" in ref:
             return GitCommandResult(return_code=1, stdout="", stderr=f"invalid ref: {ref!r}")
-        checked = _run_git_safe(["git", "check-ref-format", ref])
+        checked = _run_git_safe(["git", "check-ref-format", ref], timeout=timeout)
         if checked.returncode != 0:
             return GitCommandResult(
                 return_code=1,
@@ -334,7 +353,7 @@ def promote_candidate(
             ["git", "-C", str(repo_root), "update-ref", "--stdin"],
             input=transaction,
             capture_output=True,
-            timeout=30,
+            timeout=timeout,
         )
         return GitCommandResult(
             return_code=res.returncode,
@@ -363,6 +382,8 @@ def apply_patch(repo_root: Path, patch_path: Path, *, timeout: int = 30) -> GitC
         return GitCommandResult(return_code=res.returncode, stdout=res.stdout, stderr=res.stderr)
     except FileNotFoundError as e:
         return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {e}")
+    except subprocess.TimeoutExpired as exc:
+        return GitCommandResult(return_code=124, stdout="", stderr=f"git command timed out: {exc}")
 
 
 def force_reset_apply(repo_root: Path, target_sha: str) -> GitCommandResult:

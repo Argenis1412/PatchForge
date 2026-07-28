@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import NoReturn, Optional
@@ -141,11 +142,24 @@ def execute(
         _fail("another PatchForge operation holds the repository lock")
     try:
         target = Path(metadata.target_path).resolve()
+        try:
+            base_config = TargetConfig.load(
+                target_path=target,
+                workspace_path=workspace_path,
+                timeout_overrides=timeout_overrides,
+            )
+        except ValueError as exc:
+            _fail(f"failed to load target configuration: {exc}")
+        git_timeout = base_config.timeouts.git_op
         metadata.approved_by = resolve_approved_by(target)
         manager.write_run_json(run_id, metadata)
         try:
-            base_branch = current_branch(target)
-            live_base = current_head(target)
+            if git_timeout == 30:
+                base_branch = current_branch(target)
+                live_base = current_head(target)
+            else:
+                base_branch = current_branch(target, timeout=git_timeout)
+                live_base = current_head(target, timeout=git_timeout)
         except RuntimeError as exc:
             manager.write_artifact(
                 run_id,
@@ -160,7 +174,14 @@ def execute(
             _fail("base branch no longer matches this run's base_commit; run preview again")
 
         wal_path = run_dir / APPLY_JSON
-        repository_identity = str(git_common_dir(target))
+        try:
+            repository_identity = str(
+                git_common_dir(target)
+                if git_timeout == 30
+                else git_common_dir(target, timeout=git_timeout)
+            )
+        except RuntimeError as exc:
+            _fail(f"failed to resolve repository identity: {exc}")
 
         def recovery_is_authorized(wal: ApplyResult) -> bool:
             if (
@@ -225,24 +246,41 @@ def execute(
                 _finish(manager, run_id, metadata, wal)
                 return
 
-        with candidate_worktree(target, metadata.base_commit) as candidate_tree:
+        candidate_workspace = (
+            candidate_worktree(target, metadata.base_commit)
+            if git_timeout == 30
+            else candidate_worktree(target, metadata.base_commit, timeout=git_timeout)
+        )
+
+        @contextmanager
+        def _candidate_workspace_or_fail():
+            try:
+                with candidate_workspace as candidate_tree:
+                    yield candidate_tree
+            except RuntimeError as exc:
+                _fail(f"candidate promotion failed: {exc}")
+
+        with _candidate_workspace_or_fail() as candidate_tree:
             # The candidate worktree begins at base_commit, so configuration
             # loaded before the patch is committed is the authorization root.
-            base_config = TargetConfig.load(
-                target_path=candidate_tree,
-                workspace_path=workspace_path,
-                timeout_overrides=timeout_overrides,
-            )
             policy = validation_policy_for(base_config)
             manager.write_artifact(run_id, VALIDATION_POLICY_JSON, policy.model_dump_json(indent=2))
             message = f"patchforge: apply {run_id}"
             if issue_number is not None:
                 message += f" (issue #{issue_number})"
             try:
-                candidate_commit = commit_candidate(candidate_tree, patch_path, message)
+                candidate_commit = commit_candidate(
+                    candidate_tree,
+                    patch_path,
+                    message,
+                    git_timeout=base_config.timeouts.git_op,
+                    patch_timeout=base_config.timeouts.patch_apply,
+                )
             except RuntimeError as exc:
                 _fail(str(exc))
-            if not worktree_is_clean(candidate_tree, candidate_commit):
+            if not worktree_is_clean(
+                candidate_tree, candidate_commit, timeout=base_config.timeouts.git_op
+            ):
                 _fail("candidate worktree changed while it was being prepared")
 
             result = ApplyResult(
@@ -280,7 +318,12 @@ def execute(
                 output, candidate_config, policy=policy, subject=subject
             )
             manager.write_artifact(run_id, "validation.json", output.model_dump_json(indent=2))
-            if not worktree_is_clean(candidate_tree, candidate_commit, include_untracked=False):
+            if not worktree_is_clean(
+                candidate_tree,
+                candidate_commit,
+                include_untracked=False,
+                timeout=base_config.timeouts.git_op,
+            ):
                 _fail("validator modified the candidate worktree; refusing promotion")
             decision = evaluate_validation(
                 output, fresh=True, expected_subject=subject, expected_policy=policy
@@ -296,6 +339,7 @@ def execute(
                 candidate_ref=candidate_ref,
                 candidate_commit=result.candidate_commit or "",
                 receipt_ref=receipt_ref,
+                timeout=base_config.timeouts.git_op,
             )
             if promoted.return_code != 0:
                 _fail(f"candidate promotion failed: {promoted.stderr.strip()}")

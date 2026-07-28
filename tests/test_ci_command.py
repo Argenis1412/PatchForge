@@ -422,12 +422,12 @@ class TestCiExecute:
             patch(
                 "orchestrator.git.create_controlled_branch",
                 return_value=mock_git_ok,
-            ),
+            ) as mock_branch,
             patch(
                 "orchestrator.git.apply_patch",
                 return_value=mock_git_ok,
-            ),
-            patch("subprocess.run", return_value=mock_git_ok),
+            ) as mock_apply,
+            patch("subprocess.run", return_value=mock_git_ok) as mock_subprocess,
         ):
             mock_val_ws.return_value.__enter__ = MagicMock(
                 return_value=MagicMock(
@@ -442,12 +442,19 @@ class TestCiExecute:
                 workspace_path=ws,
                 issue_file=issue_md,
                 issue_number=7,
+                timeout_overrides={"git_op": 41, "patch_apply": 42},
             )
 
         assert result.status == "applied"
         assert result.validation_passed is True
         assert result.issue_number == 7
         assert "patchforge/" in result.branch
+        assert mock_branch.call_args.kwargs["timeout"] == 41
+        assert mock_apply.call_args.kwargs["timeout"] == 42
+        final_git_calls = [
+            call for call in mock_subprocess.call_args_list if call.args[0][3] in {"add", "commit"}
+        ]
+        assert [call.kwargs["timeout"] for call in final_git_calls] == [41, 41]
 
     def test_happy_path_carries_provenance_in_ci_result_and_run_json(self, ci_repo, monkeypatch):
         """#241: success-path CiResult and the persisted RunMetadata must both
