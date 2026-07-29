@@ -19,6 +19,13 @@
 
 ## Log
 
+### [2026-07-29] Dogfooding 013 — Standard V2 pytest cannot authorize the self-clone (D-013a)
+
+- **File:** `src/orchestrator/agents/validator/adapters.py:74-99, 198-215`, `src/orchestrator/agents/validator/process.py:38-48`
+- **Debt:** The standard V2 `pytest` adapter invokes pytest with the complete candidate root as an explicit argument. In the self-clone, this bypassed a fixture `testpaths` setting, ran the full suite, and the validator then rejected a persistent candidate-root change with `Validation workspace changed during V2 validation.` The adapter correctly failed closed and published no candidate, but the current standard pytest path was not authorizable. The isolated child environment sets `PYTHONDONTWRITEBYTECODE`, while the trusted Python adapter uses isolated mode; any future fix must preserve the trusted-adapter and fail-closed contracts rather than merely suppressing the manifest check.
+- **Discovered by:** Dogfooding-013 V2 `ruff` + `pytest` runs (`run_20260729_000430_06cc27` and `run_20260729_001041_97fd27`)
+- **Why deferred:** Resolving this needs a scoped design for test selection and Python-process isolation, plus an end-to-end authorization regression. Dogfooding 013 was documentation and operational validation only; the current priority remains external-user evidence.
+
 ### [2026-07-22] Dogfooding 011 — Analysis-only task blocks entire DAG (D-011a)
 
 - **File:** `src/orchestrator/agents/architect/` (plan generation), `src/orchestrator/agents/executor/` (task executor, DAG scheduler)
