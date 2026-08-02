@@ -337,13 +337,15 @@ def test_preview_rejects_unbound_execution_plan_before_stage_start(
     before_run = (run_dir / "run.json").read_bytes()
     before_execution_plan = (run_dir / "execution_plan.json").read_bytes()
 
-    monkeypatch.setattr("orchestrator.clients.bootstrap.bootstrap_environment", lambda **kw: None)
+    bootstrap = MagicMock()
+    monkeypatch.setattr("orchestrator.commands.preview.bootstrap_environment", bootstrap)
     legacy_run = MagicMock(side_effect=AssertionError("executor must not be called"))
     monkeypatch.setattr("orchestrator.agents.executor.run", legacy_run)
 
     with pytest.raises(typer.Exit) as exc:
         _execute(run_id, workspace=env["workspace_path"])
     assert exc.value.exit_code == 1
+    bootstrap.assert_not_called()
     legacy_run.assert_not_called()
     assert "unbound_execution_plan" in capsys.readouterr().out
     assert (run_dir / "run.json").read_bytes() == before_run

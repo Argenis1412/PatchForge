@@ -10,6 +10,7 @@ import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Union
 
 from orchestrator.circuit_breaker import circuit_breaker_for
@@ -20,7 +21,7 @@ from orchestrator.validation_decision import attach_validation_decision
 from .adapters import run_v2_validators
 from .logging import _get_logger
 from .logging import _logger as _logger
-from .runners import run_pytest, run_ruff, run_tsc
+from .runners import _collect_staged_files, _create_overlay, run_pytest, run_ruff, run_tsc
 from .summarizer import _summarize_errors
 
 _cb_validator = circuit_breaker_for("gemini")
@@ -53,7 +54,14 @@ def run(
     _get_logger(logs_dir).info("=== Validator run %s (timeout=%ds) ===", run_id, timeout)
 
     if config.validators is not None:
-        output = run_v2_validators(run_id, project_root, config.validators, timeout)
+        if staging_dir is not None and _collect_staged_files(staging_dir):
+            with TemporaryDirectory(prefix="val_overlay_") as tmpdir:
+                candidate_root = _create_overlay(
+                    project_root, staging_dir, config.ignore_dirs, Path(tmpdir)
+                )
+                output = run_v2_validators(run_id, candidate_root, config.validators, timeout)
+        else:
+            output = run_v2_validators(run_id, project_root, config.validators, timeout)
         failed = [result for result in output.tools if result.passed is False]
         if failed:
             for tool_result in failed:
