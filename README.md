@@ -79,17 +79,17 @@ patchforge scan ./your-project --workspace /tmp/patchforge-workspace
 ## Development
 
 ```bash
-# Quick QA (portable on PowerShell, macOS, and Linux)
-python -m ruff check .
-python -m ruff format --check .
-python -m pytest tests/ -v -n auto
+# Quick QA
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest -v
 
 # Auto-fix lint and formatting (opt-in)
-python -m ruff check --fix .
-python -m ruff format .
+uv run ruff check --fix .
+uv run ruff format .
 ```
 
-The repository also includes a `Makefile` with equivalent `make qa`, `make lint`,
+The repository also includes a `Makefile` with `make qa`, `make lint`,
 `make format`, `make test`, and `make fix` shortcuts for environments where GNU
 Make is installed. PowerShell and Windows do not provide `make` by default.
 
