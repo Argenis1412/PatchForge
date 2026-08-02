@@ -14,16 +14,16 @@
 - **Delivery state:** V1, P0, P1, P2, P3, P4, and Validator Plugins (#282)
   are complete. Validator V2 operational integration, timeout policy, doctor
   diagnostics, candidate promotion, and the unbound executable-plan rejection
-  are delivered. The latter is pending review in [PR #300](https://github.com/Argenis1412/PatchForge/pull/300).
+  are delivered. The latter merged in [PR #300](https://github.com/Argenis1412/PatchForge/pull/300).
 - **Main branch:** Stable. CI runs the full test suite, Ruff lint, and Ruff
   formatting on every change. Historical test counts are not live metrics.
 - **Architecture:** Stable. No approved architectural migration is in
   progress.
-- **Known blockers:** PR #300 is awaiting review. Full LLM dogfooding remains
-  constrained by provider credits and is not a release gate.
-- **Current priority:** Complete review and merge of PR #300, then observe one
-  external user solving a real problem and document the problem, workflow, and
-  evidence before selecting further product work.
+- **Known blockers:** Full LLM dogfooding remains constrained by provider
+  credits and is not a release gate.
+- **Current priority:** Define the provider preflight and operator credential
+  boundary, then observe one external user solving a real problem and document
+  the problem, workflow, and evidence before selecting further product work.
 - **P5 status:** Learning Pipeline items are scoped backlog, not active work.
   Do not start P5 merely because it is next in the old roadmap; choose the
   next development priority from external-use evidence.
