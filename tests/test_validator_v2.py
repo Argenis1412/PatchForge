@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from orchestrator.agents import validator as validator_agent
 from orchestrator.agents.validator import adapters
 from orchestrator.agents.validator.adapters import run_v2_validators
 from orchestrator.agents.validator.process import ProcessResult, execute_process, prepare_process
@@ -33,6 +34,41 @@ def test_v2_results_keep_declaration_identity_and_order(monkeypatch, tmp_path):
         ("unit", 0),
         ("integration", 1),
     ]
+
+
+@pytest.mark.unit
+def test_v2_validator_runs_all_declarations_against_staged_overlay(monkeypatch, tmp_path):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "base.py").write_text("base = True\n", encoding="utf-8")
+    staging_dir = tmp_path / "staging"
+    staging_dir.mkdir()
+    (staging_dir / "base.py").write_text("base = False\n", encoding="utf-8")
+
+    config = TargetConfig(
+        schema_version="2.0",
+        target_path=project_root,
+        workspace_path=tmp_path / "workspace",
+        validators=[_validator("lint", "ruff"), _validator("tests", "pytest")],
+    )
+    seen_roots: list[Path] = []
+
+    def record_result(_declaration, root, _timeout):
+        seen_roots.append(root)
+        assert root != project_root
+        assert (root / "base.py").read_text(encoding="utf-8") == "base = False\n"
+        return ProcessResult(return_code=0)
+
+    monkeypatch.setattr(adapters, "_raw_result", record_result)
+    monkeypatch.setattr(
+        "orchestrator.agents.executor.providers.init_provider_models", lambda _config: None
+    )
+
+    output, _ = validator_agent.run(config=config, staging_dir=staging_dir)
+
+    assert output.overall_passed is True
+    assert len(seen_roots) == 2
+    assert len(set(seen_roots)) == 1
 
 
 @pytest.mark.unit

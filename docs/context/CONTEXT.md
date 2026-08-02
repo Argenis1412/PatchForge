@@ -1,6 +1,6 @@
 # PatchForge Project Context
 
-> Last updated: 2026-07-27
+> Last updated: 2026-08-01
 > Read [AGENTS.md](../../AGENTS.md) before this document. This is the
 > canonical current project state, not a changelog.
 
@@ -13,16 +13,17 @@
   Apply; a human explicitly invokes `apply`.
 - **Delivery state:** V1, P0, P1, P2, P3, P4, and Validator Plugins (#282)
   are complete. Validator V2 operational integration, timeout policy, doctor
-  diagnostics, and candidate promotion are delivered.
+  diagnostics, candidate promotion, and the unbound executable-plan rejection
+  are delivered. The latter is pending review in [PR #300](https://github.com/Argenis1412/PatchForge/pull/300).
 - **Main branch:** Stable. CI runs the full test suite, Ruff lint, and Ruff
   formatting on every change. Historical test counts are not live metrics.
 - **Architecture:** Stable. No approved architectural migration is in
   progress.
-- **Known blockers:** None in the repository. Full LLM dogfooding remains
+- **Known blockers:** PR #300 is awaiting review. Full LLM dogfooding remains
   constrained by provider credits and is not a release gate.
-- **Current priority:** Observe one external user solving a real problem and
-  document the problem, workflow, and evidence before selecting further
-  product work.
+- **Current priority:** Complete review and merge of PR #300, then observe one
+  external user solving a real problem and document the problem, workflow, and
+  evidence before selecting further product work.
 - **P5 status:** Learning Pipeline items are scoped backlog, not active work.
   Do not start P5 merely because it is next in the old roadmap; choose the
   next development priority from external-use evidence.
@@ -51,7 +52,9 @@ Internal agent names are implementation details, not product terminology.
 - `plan` may use configured providers to turn findings or an issue file into
   bounded work. A plan is not a patch and is never authority to modify files.
 - `preview` prepares a patch artifact and validation evidence in staging. It
-  must leave the target working tree unchanged.
+  must leave the target working tree unchanged. A persisted
+  `execution_plan.json` is rejected as an unauthorized transition input;
+  absence of that artifact preserves the existing LLM executor path.
 - `apply` is the only local command that changes target contents. It requires
   an existing patch, successful validation, compatible repository state, and
   explicit user invocation.
@@ -106,6 +109,12 @@ Do not change these without an ADR. Read the linked record for rationale.
    isolated candidate against base-tree policy and recovers only through its
    protocol-scoped receipt. See
    [ADR-0011](../adr/ADR-0011-apply-protocol-candidate-promotion.md).
+9. **Executable-plan authority is explicit.** The presence of
+   `execution_plan.json` cannot authorize Preview, Executor, or Validator
+   transitions. Those boundaries fail closed with `unbound_execution_plan`
+   until a separately designed compiler binds the artifact to the run's plan,
+   base commit, tasks, paths, and budgets. See
+   [ADR-0012](../adr/ADR-0012-unbound-execution-plan-authority.md).
 
 ## Active Debt and Decisions
 
@@ -122,6 +131,10 @@ Do not change these without an ADR. Read the linked record for rationale.
   metadata remains represented without maintaining a duplicate field list.
   Redaction classifies every field explicitly; see the audit-bundle discovery
   and its regression test in [discoveries.md](discoveries.md).
+- The deterministic execution-plan schema and executor remain internal
+  mechanics. Dogfooding 013's manually injected artifact is historical
+  evidence, not a supported authorization path. Any future compiler requires
+  an independent issue and design with verifiable provenance.
 
 ## Priority Handoff
 

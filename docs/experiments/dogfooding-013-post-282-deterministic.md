@@ -95,3 +95,10 @@ evidence justifies a dedicated issue.
 The full LLM dogfooding run remains deferred until Claude credits return; its
 purpose remains learning from a small real task, not re-proving this controlled
 path.
+
+## Post-review authority note
+
+The manually persisted `execution_plan.json` used by this experiment was a
+controlled operational fixture, not a provenance-bound refinement of
+`plan.json`. It remains historical evidence only; current pipeline consumers
+reject such artifacts until a separately designed authorized compiler exists.
