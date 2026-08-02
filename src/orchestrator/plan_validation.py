@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from orchestrator.safety import ensure_safe_relative
+from orchestrator.schemas.artifacts import EXECUTION_PLAN_JSON
 from orchestrator.schemas.execution_plan import (
     ExecutablePlanV2,
     ExecutionPlanContractError,
@@ -16,6 +17,33 @@ from orchestrator.schemas.execution_plan import (
 
 if TYPE_CHECKING:
     from orchestrator.schemas.architect_output import ArchitectOutput
+
+
+def reject_unbound_execution_plan(run_dir: Path) -> None:
+    """Reject persisted executable plans until an authorized compiler exists.
+
+    The deterministic executor validates mutation mechanics, but the presence
+    of its artifact does not prove that it refines the persisted Architect
+    plan.  Every pipeline consumer therefore fails closed on any directory
+    entry with this name, including directories and symlinks.
+    """
+    artifact = run_dir / EXECUTION_PLAN_JSON
+    if not (artifact.exists() or artifact.is_symlink()):
+        return
+    raise ExecutionPlanContractError(
+        [
+            PlanViolation(
+                task_fingerprint="artifact:execution_plan.json",
+                field="execution_plan.json",
+                code="unbound_execution_plan",
+                message=(
+                    "execution_plan.json is not an authorized pipeline input; "
+                    "a provenance-bound compiler is required"
+                ),
+                value=EXECUTION_PLAN_JSON,
+            )
+        ]
+    )
 
 
 def validate_plan_paths(plan: ArchitectOutput, target_path: Path) -> list[str]:

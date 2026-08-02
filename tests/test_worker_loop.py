@@ -273,10 +273,10 @@ def test_worker_serializes_execution_plan_contract_error_to_dead_letter(
         [
             PlanViolation(
                 task_fingerprint="fingerprint",
-                field="operation.path",
-                code="noncanonical_target",
-                message="use canonical path",
-                value="src/../worker.py",
+                field="execution_plan.json",
+                code="unbound_execution_plan",
+                message="execution_plan.json is not an authorized pipeline input",
+                value="execution_plan.json",
             )
         ]
     )
@@ -293,9 +293,35 @@ def test_worker_serializes_execution_plan_contract_error_to_dead_letter(
     payload = json.loads(row["error"])
     assert payload["code"] == "execution_plan_contract_invalid"
     assert payload["violations"][0]["task_fingerprint"] == "fingerprint"
+    assert payload["violations"][0]["code"] == "unbound_execution_plan"
 
 
-def test_worker_v2_validator_receives_staged_overlay(
+@pytest.mark.parametrize("stage", ["executor", "validator"])
+def test_worker_rejects_unbound_execution_plan_before_stage(
+    tmp_path: Path, workspace: WorkspaceManager, monkeypatch: pytest.MonkeyPatch, stage: str
+):
+    run_id = f"unbound-{stage}"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "file.py").write_text("value = 1\n", encoding="utf-8")
+    workspace.create_run_directory(run_id)
+    (workspace.run_dir(run_id) / "execution_plan.json").mkdir()
+    config = TargetConfig(target_path=repo, workspace_path=workspace.root)
+    monkeypatch.setattr(TargetConfig, "load", classmethod(lambda cls, **kwargs: config))
+    executor = MagicMock(side_effect=AssertionError("executor must not run"))
+    validator = MagicMock(side_effect=AssertionError("validator must not run"))
+    monkeypatch.setattr("orchestrator.agents.executor.run", executor)
+    monkeypatch.setattr("orchestrator.agents.validator.run", validator)
+
+    with pytest.raises(ExecutionPlanContractError) as raised:
+        _run_llm_stage(stage, run_id, repo, workspace, {"architect": MagicMock()})
+
+    assert raised.value.violations[0].code == "unbound_execution_plan"
+    executor.assert_not_called()
+    validator.assert_not_called()
+
+
+def test_worker_validator_receives_staging_directory(
     tmp_path: Path, workspace: WorkspaceManager, monkeypatch: pytest.MonkeyPatch
 ):
     run_id = "v2-overlay"
@@ -305,7 +331,6 @@ def test_worker_v2_validator_receives_staged_overlay(
     workspace.create_run_directory(run_id)
     staging = workspace.staging_dir_for_run(run_id)
     (staging / "changed.py").write_text("staged\n", encoding="utf-8")
-    (workspace.run_dir(run_id) / "execution_plan.json").write_text("{}", encoding="utf-8")
     config = TargetConfig(target_path=repo, workspace_path=workspace.root)
     monkeypatch.setattr(TargetConfig, "load", classmethod(lambda cls, **kwargs: config))
 
@@ -313,17 +338,15 @@ def test_worker_v2_validator_receives_staged_overlay(
 
     def fake_validator(*, config, staging_dir):
         observed.append(config.target_path)
-        assert staging_dir is None
+        assert staging_dir == staging
         assert (config.target_path / "unchanged.py").read_text(encoding="utf-8") == "original\n"
-        assert (config.target_path / "changed.py").read_text(encoding="utf-8") == "staged\n"
         return ValidatorOutput(overall_passed=True, tools=[]), {}
 
     monkeypatch.setattr("orchestrator.agents.validator.run", fake_validator)
 
     _run_llm_stage("validator", run_id, repo, workspace, {})
 
-    assert observed and observed[0] != repo
-    assert not observed[0].exists()
+    assert observed == [repo]
 
 
 def test_worker_loop_transient_error_backoff_then_dead_letter(

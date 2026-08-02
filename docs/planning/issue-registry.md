@@ -6,6 +6,14 @@
 
 > **Note on historical entries:** `Source:` lines on completed issues point at the doc that was live when the issue was created. Some of those docs have been retired (`roadmap-phase2.md`, `dogfooding-vision.md`, `issue-a-design.md`) — the references stay verbatim as historical record. Only new entries reference the current `roadmap.md`.
 
+### 🔒 Issue #299 — Reject unbound execution plans at pipeline boundaries
+- **Priority:** Security boundary | **Status:** 🔧 **In progress**
+- **Branch:** `fix/issue-299-reject-unbound-execution-plans`
+- **Goal:** Reject persisted `execution_plan.json` artifacts as pipeline transition inputs until an authorized, provenance-bound compiler exists.
+- **Scope:** Shared contract rejection in CLI preview and work-queue Executor/Validator stages; preserve the internal deterministic executor API; document ADR-0012 and Dogfooding 013's historical status.
+- **Acceptance:** `unbound_execution_plan` fails closed before stage side effects, routes worker failures to dead letter, and leaves direct deterministic executor tests/API unchanged.
+- **Non-goals:** No compiler, provenance fields, provider changes, retry state, or onboarding work.
+
 ---
 
 ## Legend
