@@ -3,7 +3,12 @@ from __future__ import annotations
 import pytest
 
 from orchestrator.clients.credentials import resolve_operator_credentials
-from orchestrator.provider_policy import PROVIDERS, eligible_providers, provider_chain
+from orchestrator.provider_policy import (
+    PROVIDERS,
+    ProviderDefinition,
+    eligible_providers,
+    provider_chain,
+)
 
 
 @pytest.mark.parametrize(
@@ -30,15 +35,31 @@ def test_eligible_providers_preserves_policy_order(tmp_path):
         },
     )
 
-    assert eligible_providers(context, stage="architect") == ("claude", "gemini")
+    assert eligible_providers(context, stage="executor", risk_level="low") == ("gemini", "claude")
 
 
 def test_provider_metadata_is_non_secret_and_complete():
-    assert {definition.credential_environment_variable for definition in PROVIDERS.values()} == {
-        "ANTHROPIC_API_KEY",
-        "GOOGLE_API_KEY",
-        "OPENROUTER_API_KEY",
+    expected = {
+        "claude": ProviderDefinition(
+            name="claude",
+            credential_environment_variable="ANTHROPIC_API_KEY",
+            display_name="Claude",
+            doctor_check_name="anthropic_api_key",
+        ),
+        "gemini": ProviderDefinition(
+            name="gemini",
+            credential_environment_variable="GOOGLE_API_KEY",
+            display_name="Gemini",
+            doctor_check_name="google_api_key",
+        ),
+        "openrouter": ProviderDefinition(
+            name="openrouter",
+            credential_environment_variable="OPENROUTER_API_KEY",
+            display_name="OpenRouter",
+            doctor_check_name="openrouter_api_key",
+        ),
     }
+    assert expected == PROVIDERS
 
 
 def test_unknown_policy_route_is_rejected():
