@@ -440,7 +440,7 @@ class TestCheckApiKeys:
             assert r.required is False
         names = {r.name for r in results}
         assert names == {"anthropic_api_key", "google_api_key", "openrouter_api_key"}
-        assert all("not configured" in r.message for r in results)
+        assert all("not statically eligible" in r.message for r in results)
         assert all("Set" in r.fix_hint for r in results)
 
     def test_all_present(self, monkeypatch):

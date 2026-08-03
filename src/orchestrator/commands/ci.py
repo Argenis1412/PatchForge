@@ -45,6 +45,7 @@ def execute(
     allow_dirty: bool = False,
     result_path: Optional[Path] = None,
     force_provider: Optional[str] = None,
+    env_file: Optional[Path] = None,
     timeout_overrides: dict[str, int] | None = None,
 ) -> CiResult:
     """Run the full CI pipeline and return a :class:`CiResult`.
@@ -54,6 +55,9 @@ def execute(
     """
     if risk_budget not in ("low", "medium"):
         raise ValueError(f"Invalid risk_budget: {risk_budget!r}. Must be 'low' or 'medium'.")
+    from orchestrator.clients.credentials import resolve_operator_credentials
+
+    resolve_operator_credentials(target_path=target_path, env_file=env_file)
     from orchestrator.agents import architect as architect_agent
     from orchestrator.agents import executor as executor_agent
     from orchestrator.clients.bootstrap import bootstrap_environment
