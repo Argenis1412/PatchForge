@@ -362,27 +362,30 @@ def check_pytest(
     )
 
 
-def check_api_keys() -> list[CheckResult]:
-    """Check which API keys are set in the environment; return warnings.
+def check_api_keys(credential_context=None) -> list[CheckResult]:
+    """Report shared static credential eligibility without provider calls."""
+    from orchestrator.clients.credentials import PROVIDER_ENV_VARS, resolve_operator_credentials
 
-    Checks three environment variables: ANTHROPIC_API_KEY, GOOGLE_API_KEY,
-    and OPENROUTER_API_KEY. Returns one WARN-level CheckResult per missing key.
-    These checks are not required for V1 support.
-    """
-    keys = [
-        ("anthropic_api_key", "ANTHROPIC_API_KEY", "Claude"),
-        ("google_api_key", "GOOGLE_API_KEY", "Gemini"),
-        ("openrouter_api_key", "OPENROUTER_API_KEY", "OpenRouter"),
-    ]
+    if credential_context is None:
+        credential_context = resolve_operator_credentials(
+            target_path=Path.cwd(),
+            inherited_environment=os.environ,
+        )
     results = []
-    for name, env_var, provider in keys:
-        if not os.environ.get(env_var):
+    provider_labels = {"claude": "Claude", "gemini": "Gemini", "openrouter": "OpenRouter"}
+    check_names = {
+        "claude": "anthropic_api_key",
+        "gemini": "google_api_key",
+        "openrouter": "openrouter_api_key",
+    }
+    for provider, env_var in PROVIDER_ENV_VARS.items():
+        if not credential_context.is_eligible(provider):
             results.append(
                 CheckResult(
-                    name=name,
+                    name=check_names[provider],
                     status=CheckStatus.WARN,
-                    message=f"{env_var} not configured ({provider})",
-                    fix_hint=f"Set {env_var} in your environment before running scan",
+                    message=f"{env_var} is not statically eligible ({provider_labels[provider]})",
+                    fix_hint=f"Set a valid {env_var} before running an LLM command",
                     required=False,
                 )
             )
@@ -427,7 +430,12 @@ def _check_v2_validator(declaration, target: Path, timeout: int = 30) -> CheckRe
     )
 
 
-def check(path: str | Path, *, timeout_overrides: dict[str, int] | None = None) -> DoctorResult:
+def check(
+    path: str | Path,
+    *,
+    env_file: Path | None = None,
+    timeout_overrides: dict[str, int] | None = None,
+) -> DoctorResult:
     """Run all doctor checks on *path* and return a DoctorResult.
 
     Sub-checks executed: git_repository, workspace, pyproject_toml, ruff, pytest, api_keys,
@@ -435,6 +443,9 @@ def check(path: str | Path, *, timeout_overrides: dict[str, int] | None = None) 
     V1 support is determined by whether all required checks pass.
     """
     target = Path(path).resolve()
+    from orchestrator.clients.credentials import resolve_operator_credentials
+
+    credential_context = resolve_operator_credentials(target_path=target, env_file=env_file)
     checks: list[CheckResult] = []
     workspace_path: Optional[str] = None
     git_branch: Optional[str] = None
@@ -502,7 +513,7 @@ def check(path: str | Path, *, timeout_overrides: dict[str, int] | None = None) 
         checks.append(
             check_pytest(target, pyproject_data, config=orchestrator_config, timeout=doctor_timeout)
         )
-    checks.extend(check_api_keys())
+    checks.extend(check_api_keys(credential_context))
 
     if _detect_typescript(target):
         checks.append(

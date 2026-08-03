@@ -41,6 +41,9 @@ def _load_target_config(
 @app.command()
 def doctor(
     path: Path = typer.Argument(..., help="Target project path"),
+    env_file: Optional[Path] = typer.Option(
+        None, "--env-file", help="Path to an explicit credential file"
+    ),
     json_output: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
     timeout: List[str] = typer.Option([], "--timeout", help="Override NAME=SECONDS"),
 ) -> None:
@@ -48,7 +51,15 @@ def doctor(
     from orchestrator.doctor import check as doctor_check
     from orchestrator.schemas.doctor import CheckStatus
 
-    result = doctor_check(path, timeout_overrides=_parse_timeout_overrides(timeout))
+    try:
+        result = doctor_check(
+            path,
+            env_file=env_file,
+            timeout_overrides=_parse_timeout_overrides(timeout),
+        )
+    except ValueError as exc:
+        console.print(f"[bold red]Error: {exc}[/bold red]")
+        raise typer.Exit(code=1) from exc
 
     if json_output:
         print(result.model_dump_json(indent=2))
@@ -279,6 +290,9 @@ def ci(
         help="Force a specific LLM ('gemini'|'openrouter'|'claude') for all tasks, "
         "ignoring risk_level routing. Does not affect high-risk gating.",
     ),
+    env_file: Optional[Path] = typer.Option(
+        None, "--env-file", help="Path to an explicit credential file"
+    ),
     timeout: List[str] = typer.Option([], "--timeout", help="Override NAME=SECONDS"),
 ) -> None:
     """Run the full CI pipeline: scan, plan, preview, apply. No push."""
@@ -304,6 +318,7 @@ def ci(
         allow_dirty=allow_dirty,
         result_path=result_file,
         force_provider=force_provider,
+        env_file=env_file,
         timeout_overrides=timeout_overrides,
     )
 

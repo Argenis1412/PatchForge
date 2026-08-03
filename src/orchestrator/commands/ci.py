@@ -45,6 +45,7 @@ def execute(
     allow_dirty: bool = False,
     result_path: Optional[Path] = None,
     force_provider: Optional[str] = None,
+    env_file: Optional[Path] = None,
     timeout_overrides: dict[str, int] | None = None,
 ) -> CiResult:
     """Run the full CI pipeline and return a :class:`CiResult`.
@@ -57,6 +58,10 @@ def execute(
     from orchestrator.agents import architect as architect_agent
     from orchestrator.agents import executor as executor_agent
     from orchestrator.clients.bootstrap import bootstrap_environment
+    from orchestrator.clients.credentials import (
+        CredentialResolutionError,
+        resolve_operator_credentials,
+    )
     from orchestrator.git import (
         apply_patch,
         create_controlled_branch,
@@ -116,6 +121,11 @@ def execute(
         )
         _write_result(r, result_path)
         return r
+
+    try:
+        resolve_operator_credentials(target_path=target_path, env_file=env_file)
+    except CredentialResolutionError as exc:
+        return _fail("scan_failed", str(exc))
 
     # ── Bootstrap ──────────────────────────────────────────────────────
     try:
