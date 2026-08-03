@@ -98,6 +98,23 @@ def test_ci_rejects_negative_issue_number(tmp_path):
     assert result.exit_code == 1
 
 
+def test_ci_credential_resolution_failure_writes_default_result(tmp_path):
+    from orchestrator.commands.ci import execute
+
+    target = tmp_path / "target"
+    target.mkdir()
+    env_file = target / "credentials.env"
+    env_file.write_text("ANTHROPIC_API_KEY=test-key\n", encoding="utf-8")
+    workspace = tmp_path / "workspace"
+
+    result = execute(target_path=target, workspace_path=workspace, env_file=env_file)
+
+    assert result.status == "scan_failed"
+    assert str(env_file) not in result.error
+    persisted = CiResult.model_validate_json((workspace / "ci_result.json").read_text("utf-8"))
+    assert persisted == result
+
+
 # ---------------------------------------------------------------------------
 # execute() unit tests (mocked agents)
 # ---------------------------------------------------------------------------

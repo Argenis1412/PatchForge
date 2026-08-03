@@ -55,12 +55,13 @@ def execute(
     """
     if risk_budget not in ("low", "medium"):
         raise ValueError(f"Invalid risk_budget: {risk_budget!r}. Must be 'low' or 'medium'.")
-    from orchestrator.clients.credentials import resolve_operator_credentials
-
-    resolve_operator_credentials(target_path=target_path, env_file=env_file)
     from orchestrator.agents import architect as architect_agent
     from orchestrator.agents import executor as executor_agent
     from orchestrator.clients.bootstrap import bootstrap_environment
+    from orchestrator.clients.credentials import (
+        CredentialResolutionError,
+        resolve_operator_credentials,
+    )
     from orchestrator.git import (
         apply_patch,
         create_controlled_branch,
@@ -120,6 +121,11 @@ def execute(
         )
         _write_result(r, result_path)
         return r
+
+    try:
+        resolve_operator_credentials(target_path=target_path, env_file=env_file)
+    except CredentialResolutionError as exc:
+        return _fail("scan_failed", str(exc))
 
     # ── Bootstrap ──────────────────────────────────────────────────────
     try:
