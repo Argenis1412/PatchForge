@@ -47,18 +47,20 @@ they do not read `os.environ` themselves. LLM clients are invocation-scoped
 and must not use module-global singleton state that can retain a prior
 credential context.
 
-Provider credentials are never projected into an environment for a process
-whose command, working directory, or code is controlled by the target. This
-includes Validator commands running against an isolated target copy. The
-credential boundary protects both provider selection and exposure to target
-subprocesses.
+Before every preflight and Validator process, PatchForge constructs a sanitized
+child environment without provider variables, regardless of whether the
+credential context came from inherited variables or `--env-file`. Target-
+controlled commands, including Validators running against an isolated target
+copy, must never inherit provider variables. The credential boundary protects
+both provider selection and exposure to target subprocesses.
 
 ### 2. Availability vocabulary and shared policy
 
 The following terms are distinct:
 
-- **Credential eligibility**: the resolved context contains the non-empty
-  credential required by a provider.
+- **Credential eligibility**: the resolved context contains the credential
+  required by a provider, and it is neither missing, blank, nor statically
+  malformed according to that provider's local format rules.
 - **Policy admissibility**: the provider is permitted for the stage, known
   task risk, and any force-provider request.
 - **Operational availability**: an admissible provider can be called at that
@@ -69,9 +71,16 @@ policy-admissibility functions. They do not claim operational availability and
 do not invoke SDKs, make network calls, or probe provider accounts. A
 diagnostic's "first eligible provider" means the first provider in the policy
 chain that is credential-eligible and policy-admissible. Runtime applies its
-operational checks afterwards and records the provider actually used or the
+operational checks afterward and records the provider actually used or the
 operational failure. Circuit breakers are not a reason for Doctor to promise a
 different provider.
+
+Missing, blank, and statically malformed credentials are preflight failures:
+they preserve `scanned` for Plan and `planned` for Preview. A provider-rejected,
+expired, or revoked credential is an operational authentication failure because
+it can only be discovered by a provider call. It is outside effect-free
+preflight and follows the stage's ordinary runtime failure contract; it does
+not retroactively turn the preflight into a state-changing operation.
 
 The shared policy is consumed by Doctor, Architect, Executor, and any
 LLM-backed Validator summary. It is the only authority for provider ordering,
@@ -90,6 +99,11 @@ an eligible Claude credential. A high-risk task produced by a plan made with a
 low/medium chain remains blocked until that condition is met. `--force-provider`
 cannot bypass this requirement: for a high-risk task it must select Claude;
 another provider is a policy rejection before any provider call.
+
+Executor preflight evaluates this rule before its first event, staging write,
+artifact write, or run-state mutation. Thus a high-risk task with a valid
+non-Claude `--force-provider`, including `gemini`, is rejected without any of
+those effects; Claude remains the only permitted forced provider for that task.
 
 ### 4. Effect-free preflight and retry semantics
 
@@ -140,6 +154,12 @@ environments. If those changes exceed its agreed budget, child-environment
 scrubbing is a separate prerequisite issue before stage preflight is enabled
 for external users.
 
+That cutover includes Doctor. Its existing `check_api_keys()` path must
+delegate credential eligibility and policy admissibility to the shared policy;
+it must not retain separate environment-variable validation. The implementation
+must verify that Doctor and runtime return the same static eligibility result
+for the same resolved context.
+
 The lifecycle implementation issue then adds the shared preflight to `plan`,
 `preview`, and the equivalent `ci` boundaries. It must prove that a rejection
 does not change canonical run state or stage artifacts.
@@ -172,11 +192,18 @@ makes Doctor promise a provider selection it cannot guarantee.
   or contents.
 - Inherited-only and explicit-env-file credential contexts have the specified
   replacement semantics.
+- Two invocations with different credential contexts, while process environment
+  variables change between them, use only their respective invocation-scoped
+  credentials and retain neither prior credentials nor module-global client
+  state.
 - Doctor and runtime agree on static policy eligibility.
 - A low/medium Plan can proceed with its eligible planning chain; a classified
   high-risk task cannot reach Executor without Claude.
 - An invalid force provider and a missing forced-provider credential reject
   before SDK use.
+- A high-risk task forced to Gemini rejects before provider calls, events,
+  staging writes, artifacts, or run-state changes.
 - Rejected Plan, Preview, and CI preflights leave the documented state and
   artifacts untouched.
-- Target validator processes cannot read provider credential variables.
+- Validator processes cannot read provider credential variables from either
+  inherited or explicit-env-file credential contexts.
