@@ -11,13 +11,7 @@ from typing import Mapping
 
 from dotenv import dotenv_values
 
-PROVIDER_ENV_VARS: Mapping[str, str] = MappingProxyType(
-    {
-        "claude": "ANTHROPIC_API_KEY",
-        "gemini": "GOOGLE_API_KEY",
-        "openrouter": "OPENROUTER_API_KEY",
-    }
-)
+from orchestrator.provider_policy import PROVIDER_ENV_VARS
 
 
 class CredentialEligibility(StrEnum):

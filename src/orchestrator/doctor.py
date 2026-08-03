@@ -364,7 +364,8 @@ def check_pytest(
 
 def check_api_keys(credential_context=None) -> list[CheckResult]:
     """Report shared static credential eligibility without provider calls."""
-    from orchestrator.clients.credentials import PROVIDER_ENV_VARS, resolve_operator_credentials
+    from orchestrator.clients.credentials import resolve_operator_credentials
+    from orchestrator.provider_policy import PROVIDERS
 
     if credential_context is None:
         credential_context = resolve_operator_credentials(
@@ -372,20 +373,20 @@ def check_api_keys(credential_context=None) -> list[CheckResult]:
             inherited_environment=os.environ,
         )
     results = []
-    provider_labels = {"claude": "Claude", "gemini": "Gemini", "openrouter": "OpenRouter"}
-    check_names = {
-        "claude": "anthropic_api_key",
-        "gemini": "google_api_key",
-        "openrouter": "openrouter_api_key",
-    }
-    for provider, env_var in PROVIDER_ENV_VARS.items():
+    for provider, definition in PROVIDERS.items():
         if not credential_context.is_eligible(provider):
             results.append(
                 CheckResult(
-                    name=check_names[provider],
+                    name=definition.doctor_check_name,
                     status=CheckStatus.WARN,
-                    message=f"{env_var} is not statically eligible ({provider_labels[provider]})",
-                    fix_hint=f"Set a valid {env_var} before running an LLM command",
+                    message=(
+                        f"{definition.credential_environment_variable} is not statically eligible "
+                        f"({definition.display_name})"
+                    ),
+                    fix_hint=(
+                        f"Set a valid {definition.credential_environment_variable} "
+                        "before running an LLM command"
+                    ),
                     required=False,
                 )
             )
