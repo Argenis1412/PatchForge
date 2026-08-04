@@ -1,7 +1,24 @@
+from functools import partial
+
 import pytest
 
 from orchestrator.agents.scout import run
 from orchestrator.schemas.scout_output import ScoutOutput
+
+_run = run
+
+
+@pytest.fixture(autouse=True)
+def _supply_provider_runtime(monkeypatch, provider_runtime):
+    global run
+    run = partial(_run, runtime=provider_runtime)
+    from orchestrator.agents.scout import provider
+
+    monkeypatch.setattr(
+        provider, "call_gemini", partial(provider.call_gemini, runtime=provider_runtime)
+    )
+    yield
+    run = _run
 
 
 @pytest.mark.unit
@@ -104,7 +121,7 @@ def test_scout_provider_non_json_falls_back(monkeypatch):
 
     calls = []
 
-    def fake_call_chain(chain, prompt, run_id):
+    def fake_call_chain(chain, runtime, prompt, run_id, **kwargs):
         calls.append(chain[0].__name__)
         if chain[0].__name__ == "_call_gemini":
             return ProviderChainResult(

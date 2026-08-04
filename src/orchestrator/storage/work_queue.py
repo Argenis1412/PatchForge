@@ -26,11 +26,14 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from pydantic import BaseModel
 
 from orchestrator.storage import _sqlite_connect, _wal_write
+
+if TYPE_CHECKING:
+    from orchestrator.provider_runtime import ProviderRuntime
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS issue_lock (
@@ -253,6 +256,7 @@ def _run_llm_stage(
     repo_path: Path,
     workspace: Any,
     prior_outputs: dict,
+    runtime: ProviderRuntime,
 ) -> BaseModel:
     """Execute one LLM stage. Signatures match the existing agent modules verbatim."""
     from orchestrator.agents.architect import run as run_architect
@@ -269,13 +273,17 @@ def _run_llm_stage(
     staging = workspace.staging_dir_for_run(run_id)
 
     if stage == "scout":
-        out, _ = run_scout(config, run_id=run_id, trace_id=run_id)
+        out, _ = run_scout(config, run_id=run_id, trace_id=run_id, runtime=runtime)
     elif stage == "architect":
-        out, _ = run_architect(prior_outputs["scout"], config, run_id=run_id, trace_id=run_id)
+        out, _ = run_architect(
+            prior_outputs["scout"], config, run_id=run_id, trace_id=run_id, runtime=runtime
+        )
     elif stage == "executor":
-        out, _ = run_executor(prior_outputs["architect"], config, staging_dir=staging)
+        out, _ = run_executor(
+            prior_outputs["architect"], config, staging_dir=staging, runtime=runtime
+        )
     elif stage == "validator":
-        out, _ = run_validator(config=config, staging_dir=staging)
+        out, _ = run_validator(config=config, staging_dir=staging, runtime=runtime)
     else:
         raise ValueError(f"unknown LLM stage: {stage}")
     return out
@@ -299,6 +307,7 @@ def _execute_apply_with_checkpoints(
     github: Any,
     store: Any,
     *,
+    runtime: ProviderRuntime,
     base_branch: str = "main",
     triggered_by: Optional[str] = None,
 ) -> None:
@@ -391,7 +400,9 @@ def _execute_apply_with_checkpoints(
     # Post-apply validation against the freshly applied tree using the
     # configuration captured before the patch could change it.
     try:
-        val_out, _ = run_validator(config=config, staging_dir=None)  # validate real working tree
+        val_out, _ = run_validator(
+            config=config, staging_dir=None, runtime=runtime
+        )  # validate real working tree
     except Exception:
         val_out = None
     expected_subject = None
@@ -483,9 +494,12 @@ def _execute_pipeline_with_resume(
     github: Any,
     store: Any,
 ) -> None:
+    from orchestrator.clients.credentials import resolve_operator_credentials
     from orchestrator.exceptions import PatchApplyError
+    from orchestrator.provider_runtime import ProviderRuntime
     from orchestrator.risk import check_patch_gate
     from orchestrator.schemas.architect_output import ArchitectOutput
+    from orchestrator.schemas.config import TargetConfig
     from orchestrator.schemas.executor_output import ExecutorOutput
     from orchestrator.schemas.scout_output import ScoutOutput
     from orchestrator.schemas.validator_output import ValidatorOutput
@@ -494,6 +508,10 @@ def _execute_pipeline_with_resume(
 
     _hydrate_workspace(run_id, workspace, store)
     repo_path = _ensure_clone(payload_dict, workspace, run_id)
+    config = TargetConfig.load(target_path=repo_path, workspace_path=workspace.root)
+    runtime = ProviderRuntime.from_config(
+        resolve_operator_credentials(target_path=repo_path), config
+    )
     run_metadata = workspace.read_run_json(run_id)
     prior_outputs: dict[str, BaseModel] = {}
     inline_model = {
@@ -511,6 +529,7 @@ def _execute_pipeline_with_resume(
                 workspace,
                 github,
                 store,
+                runtime=runtime,
                 base_branch=run_metadata.branch,
                 triggered_by=run_metadata.triggered_by,
             )
@@ -528,7 +547,7 @@ def _execute_pipeline_with_resume(
                     prior_outputs[stage] = inline_model[stage].model_validate_json(existing[0])
             continue
 
-        out = _run_llm_stage(stage, run_id, repo_path, workspace, prior_outputs)
+        out = _run_llm_stage(stage, run_id, repo_path, workspace, prior_outputs, runtime)
         prior_outputs[stage] = out
 
         if stage == "executor":

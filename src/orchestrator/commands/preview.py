@@ -19,8 +19,10 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from orchestrator.agents import executor as executor_agent
 from orchestrator.agents.executor import collect_fallback_changes, log_fallback_events
 from orchestrator.clients.bootstrap import bootstrap_environment
+from orchestrator.clients.credentials import CredentialResolutionError, resolve_operator_credentials
 from orchestrator.observability.events import log_event, log_failure
 from orchestrator.plan_validation import reject_unbound_execution_plan
+from orchestrator.provider_runtime import ProviderRuntime
 from orchestrator.risk import check_patch_gate
 from orchestrator.schemas.architect_output import ArchitectOutput
 from orchestrator.schemas.config import TargetConfig, default_workspace_path
@@ -78,7 +80,6 @@ def execute(
     except Exception as exc:
         console.print(f"[bold red]Error reading implementation plan: {exc}[/bold red]")
         raise typer.Exit(code=1) from None
-
     try:
         reject_unbound_execution_plan(run_dir)
     except ExecutionPlanContractError as exc:
@@ -108,6 +109,14 @@ def execute(
     except Exception as exc:
         console.print(f"[bold red]Error loading target config: {exc}[/bold red]")
         raise typer.Exit(code=1) from None
+    try:
+        credential_context = resolve_operator_credentials(
+            target_path=target_path, env_file=env_file
+        )
+    except CredentialResolutionError as exc:
+        console.print(f"[bold red]Credential resolution failed: {exc}[/bold red]")
+        raise typer.Exit(code=1) from None
+    runtime = ProviderRuntime.from_config(credential_context, config)
 
     # 4. Run Executor
     log_event(
@@ -191,6 +200,7 @@ def execute(
                 force_provider=force_provider,
                 logs_dir=logs_dir,
                 run_dir=run_dir,
+                runtime=runtime,
             )
             progress.update(task, completed=100)
         except Exception as exc:
@@ -365,7 +375,10 @@ def execute(
                     )
                 else:
                     validator_output = run_validation_in_copy(
-                        val_ws.temporary_root, config, progress_callback=_update_progress
+                        val_ws.temporary_root,
+                        config,
+                        progress_callback=_update_progress,
+                        runtime=runtime,
                     )
             progress.update(task, completed=100)
         except Exception as exc:

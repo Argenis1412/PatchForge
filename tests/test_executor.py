@@ -1,20 +1,41 @@
 import json
 import logging
+from functools import partial
 from unittest.mock import MagicMock
 
 import pytest
 
 from orchestrator.agents.executor import run
 from orchestrator.agents.executor.providers import (
-    _PROVIDER_CHAIN,
     KNOWN_PROVIDER_NAMES,
     ProviderChainResult,
     _call_chain,
     _categorize_failure,
-    _provider_by_name,
 )
 from orchestrator.schemas.architect_output import ArchitectOutput, Task
 from orchestrator.schemas.config import TargetConfig
+
+_run = run
+_runtime_call_chain = _call_chain
+run = _run
+
+
+@pytest.fixture(autouse=True)
+def _supply_provider_runtime(monkeypatch, provider_runtime):
+    global _call_chain, run
+    run = partial(_run, runtime=provider_runtime)
+
+    def call_chain(chain, prompt, run_id):
+        return _runtime_call_chain(chain, provider_runtime, prompt, run_id)
+
+    _call_chain = call_chain
+    from orchestrator.agents.executor import applier
+
+    monkeypatch.setattr(
+        applier, "_apply_task", partial(applier._apply_task, runtime=provider_runtime)
+    )
+    yield
+    run = _run
 
 
 @pytest.mark.unit
@@ -269,16 +290,6 @@ def test_apply_task_full_file_preflight_skips_new_file_creation(tmp_path, monkey
 
 
 @pytest.mark.unit
-def test_provider_by_name_covers_all_chain_providers():
-    by_name = _provider_by_name()
-    all_chain_fns = {fn for chain in _PROVIDER_CHAIN.values() for fn in chain}
-    for fn in all_chain_fns:
-        short = fn.__name__.removeprefix("_call_")
-        assert short in by_name, f"{short} missing from _provider_by_name()"
-        assert by_name[short] is fn
-
-
-@pytest.mark.unit
 def test_known_provider_names_sorted():
     assert tuple(sorted(KNOWN_PROVIDER_NAMES)) == KNOWN_PROVIDER_NAMES
     assert len(KNOWN_PROVIDER_NAMES) >= 3
@@ -286,10 +297,10 @@ def test_known_provider_names_sorted():
 
 @pytest.mark.unit
 def test_call_chain_all_providers_fail(monkeypatch):
-    def _fail_a(prompt, run_id):
+    def _fail_a(runtime, prompt, run_id):
         raise Exception("a failed")
 
-    def _fail_b(prompt, run_id):
+    def _fail_b(runtime, prompt, run_id):
         raise Exception("b failed")
 
     monkeypatch.setattr(
@@ -306,10 +317,10 @@ def test_call_chain_all_providers_fail(monkeypatch):
 
 @pytest.mark.unit
 def test_call_chain_success_preserves_partial_failures(monkeypatch):
-    def _fail_first(prompt, run_id):
+    def _fail_first(runtime, prompt, run_id):
         raise Exception("first down")
 
-    def _succeed(prompt, run_id):
+    def _succeed(runtime, prompt, run_id):
         return ("patched code", 100, 50)
 
     monkeypatch.setattr(
@@ -330,7 +341,7 @@ def test_call_chain_success_preserves_partial_failures(monkeypatch):
 
 @pytest.mark.unit
 def test_call_chain_no_fallback_when_primary_succeeds(monkeypatch):
-    def _call_succeed(prompt, run_id):
+    def _call_succeed(runtime, prompt, run_id):
         return ("patched code", 100, 50)
 
     result = _call_chain([_call_succeed], "test prompt", "run_003")
@@ -345,10 +356,10 @@ def test_call_chain_reports_primary_provider_and_category_on_fallback(monkeypatc
     a genuine fallback, with the category derived from the primary's own
     failure — not from whichever provider happened to fail last."""
 
-    def _call_fail_primary(prompt, run_id):
+    def _call_fail_primary(runtime, prompt, run_id):
         raise Exception("402 credit balance too low")
 
-    def _call_succeed(prompt, run_id):
+    def _call_succeed(runtime, prompt, run_id):
         return ("patched code", 100, 50)
 
     monkeypatch.setattr(
@@ -366,10 +377,10 @@ def test_call_chain_reports_primary_provider_and_category_on_fallback(monkeypatc
 
 @pytest.mark.unit
 def test_call_chain_primary_provider_attempted_set_even_on_total_failure(monkeypatch):
-    def _fail_a(prompt, run_id):
+    def _fail_a(runtime, prompt, run_id):
         raise Exception("a failed")
 
-    def _fail_b(prompt, run_id):
+    def _fail_b(runtime, prompt, run_id):
         raise Exception("b failed")
 
     monkeypatch.setattr(

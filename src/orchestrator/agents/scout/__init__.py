@@ -14,9 +14,9 @@ import sys
 from pathlib import Path
 from typing import Union
 
-from orchestrator.agents.executor.providers import init_provider_models
 from orchestrator.agents.scout.provider import call_gemini
 from orchestrator.observability.events import FailureType, log_failure
+from orchestrator.provider_runtime import ProviderRuntime
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.scout_output import ScoutOutput
 
@@ -100,10 +100,10 @@ def run(
     *,
     trace_id: str | None = None,
     run_id: str | None = None,
+    runtime: ProviderRuntime,
 ) -> tuple[ScoutOutput, dict]:
     if isinstance(config, (str, Path)):
         config = TargetConfig.load(target_path=Path(config))
-    init_provider_models(config)
 
     root = config.target_path.resolve()
     logs_dir = config.workspace_path / "logs"
@@ -120,6 +120,7 @@ def run(
         run_id=run_id,
         stage="scout",
         span_id="scout_pass1",
+        runtime=runtime,
     )
     cost1_display = f"${cost1:.5f}" if cost1 is not None else "unknown"
     print(f"[Scout] Pass 1 done | model={model1} | tokens: {tokens1} | cost: {cost1_display}")
@@ -179,6 +180,7 @@ def run(
         run_id=run_id,
         stage="scout",
         span_id="scout_pass2",
+        runtime=runtime,
     )
 
     total_cost = None if cost1 is None or cost2 is None else cost1 + cost2

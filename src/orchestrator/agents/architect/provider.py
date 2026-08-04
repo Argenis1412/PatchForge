@@ -8,17 +8,13 @@ from typing import Optional
 from orchestrator.agents.executor.providers import (
     ProviderChainResult,
     _call_chain,
-    _call_claude,
-    _call_gemini,
-    _call_openrouter,
-    _get_model,
     _provider_by_name,
 )
 from orchestrator.exceptions import ProviderError
-from orchestrator.observability.events import FailureType, log_failure
+from orchestrator.observability.events import FailureType, log_event, log_failure
 from orchestrator.observability.logger import log_call
-
-_ARCHITECT_CHAIN = [_call_claude, _call_gemini, _call_openrouter]
+from orchestrator.provider_policy import provider_chain
+from orchestrator.provider_runtime import ProviderRuntime
 
 
 @dataclass
@@ -30,6 +26,7 @@ class ArchitectCallResult:
     provider_name: str | None = None
     primary_provider_attempted: str | None = None
     primary_failure_category: str | None = None
+    static_skipped_providers: tuple[str, ...] = ()
 
 
 def call_claude(
@@ -42,6 +39,7 @@ def call_claude(
     stage: str | None = None,
     span_id: str | None = None,
     force_provider: str | None = None,
+    runtime: ProviderRuntime,
 ) -> ArchitectCallResult:
     """Call the architect provider chain."""
     call_started = time.monotonic()
@@ -56,9 +54,28 @@ def call_claude(
             )
         chain = [provider]
     else:
-        chain = _ARCHITECT_CHAIN
+        chain = [_provider_by_name()[name] for name in provider_chain("architect")]
 
-    chain_result: ProviderChainResult = _call_chain(chain, prompt, run_id or "")
+    def _record_static_skip(provider_name: str) -> None:
+        if logs_dir is None:
+            return
+        log_event(
+            trace_id=trace_id or "",
+            run_id=run_id or "",
+            source="architect",
+            stage=stage,
+            event="provider_skipped_static_ineligible",
+            data={"provider": provider_name, "cause": "static_ineligible"},
+            logs_dir=logs_dir,
+        )
+
+    chain_result: ProviderChainResult = _call_chain(
+        chain,
+        runtime,
+        prompt,
+        run_id or "",
+        on_static_skip=_record_static_skip,
+    )
 
     if chain_result.success is None:
         latency_ms = int((time.monotonic() - call_started) * 1000)
@@ -79,7 +96,7 @@ def call_claude(
 
     raw, input_tokens, output_tokens, cost = chain_result.success
     provider_name = chain_result.provider_name or "claude"
-    model_used = _get_model(provider_name)
+    model_used = runtime.model_for(provider_name)
 
     tokens = {"input": input_tokens, "output": output_tokens}
     latency_ms = int((time.monotonic() - call_started) * 1000)
@@ -107,4 +124,5 @@ def call_claude(
         provider_name=provider_name,
         primary_provider_attempted=chain_result.primary_provider_attempted,
         primary_failure_category=chain_result.primary_failure_category,
+        static_skipped_providers=chain_result.static_skipped_providers,
     )

@@ -298,7 +298,11 @@ def test_worker_serializes_execution_plan_contract_error_to_dead_letter(
 
 @pytest.mark.parametrize("stage", ["executor", "validator"])
 def test_worker_rejects_unbound_execution_plan_before_stage(
-    tmp_path: Path, workspace: WorkspaceManager, monkeypatch: pytest.MonkeyPatch, stage: str
+    tmp_path: Path,
+    workspace: WorkspaceManager,
+    monkeypatch: pytest.MonkeyPatch,
+    provider_runtime,
+    stage: str,
 ):
     run_id = f"unbound-{stage}"
     repo = tmp_path / "repo"
@@ -314,7 +318,7 @@ def test_worker_rejects_unbound_execution_plan_before_stage(
     monkeypatch.setattr("orchestrator.agents.validator.run", validator)
 
     with pytest.raises(ExecutionPlanContractError) as raised:
-        _run_llm_stage(stage, run_id, repo, workspace, {"architect": MagicMock()})
+        _run_llm_stage(stage, run_id, repo, workspace, {"architect": MagicMock()}, provider_runtime)
 
     assert raised.value.violations[0].code == "unbound_execution_plan"
     executor.assert_not_called()
@@ -322,7 +326,10 @@ def test_worker_rejects_unbound_execution_plan_before_stage(
 
 
 def test_worker_validator_receives_staging_directory(
-    tmp_path: Path, workspace: WorkspaceManager, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    workspace: WorkspaceManager,
+    monkeypatch: pytest.MonkeyPatch,
+    provider_runtime,
 ):
     run_id = "v2-overlay"
     repo = tmp_path / "repo"
@@ -336,7 +343,7 @@ def test_worker_validator_receives_staging_directory(
 
     observed: list[Path] = []
 
-    def fake_validator(*, config, staging_dir):
+    def fake_validator(*, config, staging_dir, runtime):
         observed.append(config.target_path)
         assert staging_dir == staging
         assert (config.target_path / "unchanged.py").read_text(encoding="utf-8") == "original\n"
@@ -344,7 +351,7 @@ def test_worker_validator_receives_staging_directory(
 
     monkeypatch.setattr("orchestrator.agents.validator.run", fake_validator)
 
-    _run_llm_stage("validator", run_id, repo, workspace, {})
+    _run_llm_stage("validator", run_id, repo, workspace, {}, provider_runtime)
 
     assert observed == [repo]
 
@@ -474,9 +481,11 @@ def test_worker_loop_resumes_from_checkpoint(
     qconn.close()
 
     called_stages: list[str] = []
+    observed_runtimes: list[object] = []
 
     def fake_run_llm(stage, *a, **kw):
         called_stages.append(stage)
+        observed_runtimes.append(a[-1])
         if stage == "validator":
             from orchestrator.schemas.validator_output import ValidatorOutput
 
@@ -486,12 +495,14 @@ def test_worker_loop_resumes_from_checkpoint(
     monkeypatch.setattr("orchestrator.storage.work_queue._run_llm_stage", fake_run_llm)
     monkeypatch.setattr(
         "orchestrator.storage.work_queue._execute_apply_with_checkpoints",
-        lambda *a, **kw: None,
+        lambda *a, **kw: observed_runtimes.append(kw["runtime"]),
     )
 
     worker_loop(qdb_path, cdb_path, workspace, fake_store, fake_github, iterations=1)
 
     assert called_stages == ["validator"]
+    assert len(observed_runtimes) == 2
+    assert observed_runtimes[0] is observed_runtimes[1]
     conn = _sqlite_connect(qdb_path)
     row = conn.execute("SELECT status FROM work_queue WHERE run_id=?", (run_id,)).fetchone()
     assert row["status"] == "completed"
@@ -519,7 +530,9 @@ def _seed_apply_wal(workspace, run_id, status, *, pr_number=None, pre_apply_head
     )
 
 
-def test_apply_wal_recovery_from_pushed_remote(workspace, fake_github, fake_store, monkeypatch):
+def test_apply_wal_recovery_from_pushed_remote(
+    workspace, fake_github, fake_store, monkeypatch, provider_runtime
+):
     run_id = "run_recover_push"
     _seed_apply_wal(workspace, run_id, "pushed_remote")
     repo_path = workspace.run_dir(run_id) / "repo"
@@ -546,7 +559,15 @@ def test_apply_wal_recovery_from_pushed_remote(workspace, fake_github, fake_stor
     )
 
     with pytest.raises(RuntimeError, match="stop here"):
-        _execute_apply_with_checkpoints(run_id, 1, repo_path, workspace, fake_github, fake_store)
+        _execute_apply_with_checkpoints(
+            run_id,
+            1,
+            repo_path,
+            workspace,
+            fake_github,
+            fake_store,
+            runtime=provider_runtime,
+        )
 
     assert "push_delete" in calls
     assert "reset" in calls
@@ -554,7 +575,9 @@ def test_apply_wal_recovery_from_pushed_remote(workspace, fake_github, fake_stor
     fake_github.close_pr.assert_not_called()
 
 
-def test_apply_wal_recovery_from_pr_created(workspace, fake_github, fake_store, monkeypatch):
+def test_apply_wal_recovery_from_pr_created(
+    workspace, fake_github, fake_store, monkeypatch, provider_runtime
+):
     run_id = "run_recover_pr"
     _seed_apply_wal(workspace, run_id, "pr_created", pr_number=42)
     repo_path = workspace.run_dir(run_id) / "repo"
@@ -575,13 +598,21 @@ def test_apply_wal_recovery_from_pr_created(workspace, fake_github, fake_store, 
     )
 
     with pytest.raises(RuntimeError, match="stop here"):
-        _execute_apply_with_checkpoints(run_id, 1, repo_path, workspace, fake_github, fake_store)
+        _execute_apply_with_checkpoints(
+            run_id,
+            1,
+            repo_path,
+            workspace,
+            fake_github,
+            fake_store,
+            runtime=provider_runtime,
+        )
 
     fake_github.close_pr.assert_called_once_with(42)
 
 
 def test_apply_pr_body_includes_triggered_by(
-    workspace, fake_github, fake_store, monkeypatch, tmp_path
+    workspace, fake_github, fake_store, monkeypatch, tmp_path, provider_runtime
 ):
     """#241: PR body created in Phase 4 must include the Triggered by line
     when triggered_by is passed from _execute_pipeline_with_resume."""
@@ -633,6 +664,7 @@ def test_apply_pr_body_includes_triggered_by(
         workspace,
         fake_github,
         fake_store,
+        runtime=provider_runtime,
         triggered_by="github:octocat",
     )
 
@@ -643,7 +675,7 @@ def test_apply_pr_body_includes_triggered_by(
 
 
 def test_apply_pr_body_omits_triggered_by_when_none(
-    workspace, fake_github, fake_store, monkeypatch
+    workspace, fake_github, fake_store, monkeypatch, provider_runtime
 ):
     """When triggered_by is None (default), the PR body must not add an
     empty provenance line."""
@@ -682,7 +714,15 @@ def test_apply_pr_body_omits_triggered_by_when_none(
         ),
     )
 
-    _execute_apply_with_checkpoints(run_id, 1, repo_path, workspace, fake_github, fake_store)
+    _execute_apply_with_checkpoints(
+        run_id,
+        1,
+        repo_path,
+        workspace,
+        fake_github,
+        fake_store,
+        runtime=provider_runtime,
+    )
 
     body = fake_github.create_pr.call_args.kwargs["body"]
     assert "Triggered by" not in body

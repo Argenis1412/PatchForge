@@ -7,16 +7,13 @@ from pathlib import Path
 from orchestrator.agents.executor.providers import (
     ProviderChainResult,
     _call_chain,
-    _call_claude,
-    _call_gemini,
-    _call_openrouter,
-    _get_model,
+    _provider_by_name,
 )
 from orchestrator.exceptions import ProviderError
-from orchestrator.observability.events import FailureType, log_failure
+from orchestrator.observability.events import FailureType, log_event, log_failure
 from orchestrator.observability.logger import log_call
-
-_SCOUT_CHAIN = [_call_gemini, _call_openrouter, _call_claude]
+from orchestrator.provider_policy import provider_chain
+from orchestrator.provider_runtime import ProviderRuntime
 
 
 def call_gemini(
@@ -28,6 +25,7 @@ def call_gemini(
     run_id: str | None = None,
     stage: str | None = None,
     span_id: str | None = None,
+    runtime: ProviderRuntime,
 ) -> tuple[str, dict, float | None, str]:
     """Call the scout provider chain. Returns (raw, tokens, cost, model_used)."""
     call_started = time.monotonic()
@@ -35,8 +33,28 @@ def call_gemini(
     all_failures: list[tuple[str, str]] = []
     winning: ProviderChainResult | None = None
 
-    for provider in _SCOUT_CHAIN:
-        candidate = _call_chain([provider], prompt, run_id or "")
+    def _record_static_skip(provider_name: str) -> None:
+        if logs_dir is None:
+            return
+        log_event(
+            trace_id=trace_id or "",
+            run_id=run_id or "",
+            source="scout",
+            stage=stage,
+            event="provider_skipped_static_ineligible",
+            data={"provider": provider_name, "cause": "static_ineligible"},
+            logs_dir=logs_dir,
+        )
+
+    for provider_name in provider_chain("scout"):
+        provider = _provider_by_name()[provider_name]
+        candidate = _call_chain(
+            [provider],
+            runtime,
+            prompt,
+            run_id or "",
+            on_static_skip=_record_static_skip,
+        )
         if candidate.success is None:
             all_failures.extend(candidate.failures)
             continue
@@ -80,7 +98,7 @@ def call_gemini(
     raw, input_tokens, output_tokens, cost = winning.success
     provider_name = winning.provider_name or "gemini"
 
-    model_used = _get_model(provider_name)
+    model_used = runtime.model_for(provider_name)
 
     tokens = {"input": input_tokens, "output": output_tokens}
     latency_ms = int((time.monotonic() - call_started) * 1000)

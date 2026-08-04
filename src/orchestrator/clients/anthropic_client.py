@@ -1,8 +1,7 @@
-"""Anthropic (Claude) API client singleton."""
+"""Anthropic (Claude) API client factory."""
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 
 from orchestrator.clients import TIMEOUT_SECONDS
@@ -10,16 +9,9 @@ from orchestrator.clients import TIMEOUT_SECONDS
 if TYPE_CHECKING:
     import anthropic
 
-_client = None
 
+def create_anthropic_client(credential: str) -> anthropic.Anthropic:
+    """Create a client for one explicitly resolved credential."""
+    import anthropic
 
-def get_anthropic_client() -> anthropic.Anthropic:
-    global _client
-    if _client is None:
-        import anthropic
-
-        _client = anthropic.Anthropic(
-            api_key=os.getenv("ANTHROPIC_API_KEY"),
-            timeout=TIMEOUT_SECONDS,
-        )
-    return _client
+    return anthropic.Anthropic(api_key=credential, timeout=TIMEOUT_SECONDS)

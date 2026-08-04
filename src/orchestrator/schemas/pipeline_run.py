@@ -20,6 +20,7 @@ class AgentMeta(BaseModel):
     tokens_output: Optional[int] = None
     cost_usd: Optional[float] = None
     model_used: Optional[str] = None
+    static_skipped_providers: tuple[str, ...] = ()
     error: Optional[str] = None
 
 

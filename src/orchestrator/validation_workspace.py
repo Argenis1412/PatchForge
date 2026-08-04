@@ -10,6 +10,7 @@ from typing import Generator
 
 from orchestrator.agents.validator import run as run_validator
 from orchestrator.git import apply_patch
+from orchestrator.provider_runtime import ProviderRuntime
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.git import GitCommandResult, ValidationWorkspace
 from orchestrator.schemas.validator_output import ValidatorOutput
@@ -90,6 +91,7 @@ def run_validation_in_copy(
     temp_root: Path,
     config: TargetConfig,
     progress_callback: Callable[[str], None] | None = None,
+    runtime: ProviderRuntime | None = None,
 ) -> ValidatorOutput:
     import subprocess
 
@@ -102,7 +104,9 @@ def run_validation_in_copy(
                 timeout=config.timeouts.format_run,
                 check=False,
             )
-    validator_output, _ = run_validator(config=val_config, progress_callback=progress_callback)
+    validator_output, _ = run_validator(
+        config=val_config, progress_callback=progress_callback, runtime=runtime
+    )
     return validator_output
 
 

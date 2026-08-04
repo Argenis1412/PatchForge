@@ -15,7 +15,9 @@ from rich.console import Console
 from rich.panel import Panel
 
 from orchestrator.clients.bootstrap import bootstrap_environment
+from orchestrator.clients.credentials import CredentialResolutionError, resolve_operator_credentials
 from orchestrator.provenance import resolve_approved_by
+from orchestrator.provider_runtime import ProviderRuntime
 from orchestrator.schemas.artifacts import APPLY_JSON
 from orchestrator.schemas.config import TargetConfig, default_workspace_path
 from orchestrator.storage import _wal_write
@@ -150,6 +152,11 @@ def execute(
             )
         except ValueError as exc:
             _fail(f"failed to load target configuration: {exc}")
+        try:
+            credential_context = resolve_operator_credentials(target_path=target, env_file=env_file)
+        except CredentialResolutionError as exc:
+            _fail(f"credential resolution failed: {exc}")
+        runtime = ProviderRuntime.from_config(credential_context, base_config)
         git_timeout = base_config.timeouts.git_op
         metadata.approved_by = resolve_approved_by(target)
         manager.write_run_json(run_id, metadata)
@@ -304,7 +311,7 @@ def execute(
             _wal_write(result, wal_path)
 
             candidate_config = base_config.model_copy(update={"target_path": candidate_tree})
-            output, _ = run_validator(config=candidate_config)
+            output, _ = run_validator(config=candidate_config, runtime=runtime)
             subject = expected_validation_subject(
                 run_id=output.run_id,
                 project_root=target,

@@ -74,10 +74,10 @@
 - **File:** `tests/test_executor.py` (`test_apply_task_dependency_skip_has_no_fallback_fields`), `src/orchestrator/agents/executor/applier.py` (`_apply_task`'s `pending_human_review` and empty-`files_to_modify` return sites)
 - **Debt:** `/diff-review` found three coverage gaps relative to the plan's own enumeration of `_apply_task` return sites, none fixed here:
   1. `test_apply_task_dependency_skip_has_no_fallback_fields` constructs a `FileChange` directly rather than exercising the real dependency-skip construction code in `executor/__init__.py:162-174` — it only proves Pydantic's own field defaults, not that the actual skip path leaves the new fields unset (though the skip path is unmodified by this issue, so it can't have regressed).
-  2. The `pending_human_review` return site's new fields are untested at the `_apply_task` level. A genuine fallback there is structurally unreachable through real execution — `_PROVIDER_CHAIN["high"] = [_call_claude]` is single-element by design — so no non-artificial test can drive it; `collect_fallback_changes`'s own unit test covers the filter logic against a synthetic `FileChange` instead.
+  2. The `pending_human_review` return site's new fields are untested at the `_apply_task` level. A genuine fallback there is structurally unreachable through real execution because the high-risk provider policy is single-element by design, so no non-artificial test can drive it; `collect_fallback_changes`'s own unit test covers the filter logic against a synthetic `FileChange` instead.
   3. The empty-`files_to_modify` return site (`applier.py:67-69`) is untouched by this issue's diff (no new fields added there) and has no dedicated test, pre-existing and unrelated to fallback visibility.
 - **Discovered by:** `/diff-review` during issue #278 implementation.
-- **Why deferred:** (1) and (3) require either a fuller DAG-scheduling integration test or a test of pre-existing, unmodified code — both larger than this visibility fix's scope. (2) cannot be closed without artificially reconfiguring `_PROVIDER_CHAIN["high"]` to have more than one provider purely for the test, which would test a scenario that cannot occur through the CLI. Revisit only if a future change makes HIGH-risk fallback reachable, or as part of a broader executor test-coverage pass.
+- **Why deferred:** (1) and (3) require either a fuller DAG-scheduling integration test or a test of pre-existing, unmodified code — both larger than this visibility fix's scope. (2) cannot be closed without artificially reconfiguring the high-risk provider policy to have more than one provider purely for the test, which would test a scenario that cannot occur through the CLI. Revisit only if a future change makes HIGH-risk fallback reachable, or as part of a broader executor test-coverage pass.
 
 ### [2026-07-22] Issue #278 — retry-loop attempts within a single task are not individually tracked for fallback reporting
 
@@ -89,7 +89,7 @@
 ### [2026-07-22] Issue #278 — `--force-provider` on a HIGH-risk task bypasses the no-fallback policy invisibly
 
 - **File:** `src/orchestrator/agents/executor/applier.py:109-118` (`force_provider` overriding `chain` selection unconditionally)
-- **Debt:** `force_provider` overrides chain selection regardless of `task.risk_level` — including HIGH risk, whose `_PROVIDER_CHAIN["high"] = [_call_claude]` exists specifically so a HIGH-risk task never silently degrades to a less capable model. A forced single-element chain can never look like a fallback under `collect_fallback_changes`'s definition (`provider_name != primary_provider_attempted` is trivially false for a one-element chain), so this risk-policy bypass has no diagnostic trail at all — and could be mistaken for something the new fallback-visibility feature would catch, when it structurally cannot.
+- **Debt:** `force_provider` overrides chain selection regardless of `task.risk_level` — including HIGH risk, whose single-provider Claude policy exists specifically so a HIGH-risk task never silently degrades to a less capable model. A forced single-element chain can never look like a fallback under `collect_fallback_changes`'s definition (`provider_name != primary_provider_attempted` is trivially false for a one-element chain), so this risk-policy bypass has no diagnostic trail at all — and could be mistaken for something the new fallback-visibility feature would catch, when it structurally cannot.
 - **Discovered by:** `/adversarial` review during issue #278 planning.
 - **Why deferred:** Pre-existing (present since before Part 1), unrelated to fallback visibility. Fixing it means deciding whether `--force-provider` should be allowed to bypass risk policy at all, a policy question separate from this issue.
 
@@ -465,7 +465,7 @@
 ### ✅ [2026-06-15] Phase 4 — Dead `mock_openrouter` fixture in conftest.py (RESOLVED)
 
 - **File:** `tests/conftest.py:30-37`
-- **Debt:** The `mock_openrouter` fixture patches `orchestrator.agents.executor.providers._call_openrouter` but no test in the suite uses it. Dead code. Furthermore, even if a test did use it, it would not work — `_PROVIDER_CHAIN` stores references to `_call_openrouter` at import time, so the monkeypatch would have no effect.
+- **Debt:** The `mock_openrouter` fixture patches `orchestrator.agents.executor.providers._call_openrouter` but no test in the suite uses it. Dead code.
 - **Discovered by:** Phase 4 dependency audit
 - **Resolution:** Removed `mock_openrouter` and `mock_subprocess` dead fixtures from conftest.py.
 

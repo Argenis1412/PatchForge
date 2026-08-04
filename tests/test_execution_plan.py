@@ -168,7 +168,9 @@ def test_non_utf8_base_blob_requires_replan(tmp_path: Path):
         run_execution_plan(_plan(commit), project_root=repo, staging_dir=repo / "staging")
 
 
-def test_legacy_analysis_only_task_is_rejected_before_provider_call(tmp_path: Path):
+def test_legacy_analysis_only_task_is_rejected_before_provider_call(
+    tmp_path: Path, provider_runtime
+):
     repo, _ = _git_repo(tmp_path)
     proposal = ArchitectOutput(
         validated_findings=[],
@@ -190,7 +192,12 @@ def test_legacy_analysis_only_task_is_rejected_before_provider_call(tmp_path: Pa
     config = TargetConfig(target_path=repo, workspace_path=repo.parent / "workspace")
 
     with pytest.raises(ExecutionPlanContractError) as raised:
-        run(proposal, config=config, staging_dir=repo / "staging")
+        run(
+            proposal,
+            config=config,
+            staging_dir=repo / "staging",
+            runtime=provider_runtime,
+        )
 
     assert raised.value.model_dump()["violations"][0]["code"] == "analysis_only_task"
     assert not (repo / "staging").exists()

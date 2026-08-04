@@ -14,7 +14,9 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Union
 
 from orchestrator.circuit_breaker import circuit_breaker_for
+from orchestrator.observability.events import log_event
 from orchestrator.observability.logging import get_file_logger as get_file_logger
+from orchestrator.provider_runtime import ProviderRuntime
 from orchestrator.schemas.validator_output import ToolResult, ValidatorOutput
 from orchestrator.validation_decision import attach_validation_decision
 
@@ -34,6 +36,7 @@ def run(
     config: Union[str, Path, "TargetConfig"] | None = None,
     staging_dir: Path | None = None,
     progress_callback: Callable[[str], None] | None = None,
+    runtime: ProviderRuntime | None = None,
 ) -> tuple[ValidatorOutput, dict]:
     from orchestrator.schemas.config import TargetConfig
 
@@ -42,9 +45,8 @@ def run(
     elif isinstance(config, (str, Path)):
         config = TargetConfig.load(target_path=Path(config))
 
-    from orchestrator.agents.executor.providers import init_provider_models
-
-    init_provider_models(config)
+    if runtime is None:
+        raise ValueError("Provider runtime is required")
 
     logs_dir = config.workspace_path / "logs"
     project_root = config.target_path.resolve()
@@ -52,6 +54,21 @@ def run(
 
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:6]
     _get_logger(logs_dir).info("=== Validator run %s (timeout=%ds) ===", run_id, timeout)
+    static_skips_reported: set[str] = set()
+
+    def _record_static_skip(provider: str) -> None:
+        if provider in static_skips_reported:
+            return
+        static_skips_reported.add(provider)
+        log_event(
+            trace_id=run_id,
+            run_id=run_id,
+            source="validator",
+            stage="validator",
+            event="provider_skipped_static_ineligible",
+            data={"provider": provider, "cause": "static_ineligible"},
+            logs_dir=logs_dir,
+        )
 
     if config.validators is not None:
         if staging_dir is not None and _collect_staged_files(staging_dir):
@@ -65,9 +82,13 @@ def run(
         failed = [result for result in output.tools if result.passed is False]
         if failed:
             for tool_result in failed:
-                summary, _ = _summarize_errors([tool_result], run_id)
+                summary, _ = _summarize_errors(
+                    [tool_result], run_id, runtime, on_static_skip=_record_static_skip
+                )
                 tool_result.error_summary = summary
-            output.llm_summary, output.model_used_for_summary = _summarize_errors(failed, run_id)
+            output.llm_summary, output.model_used_for_summary = _summarize_errors(
+                failed, run_id, runtime, on_static_skip=_record_static_skip
+            )
         _get_logger().info(
             "[%s] Finished V2 | overall=%s | state=%s",
             run_id,
@@ -148,10 +169,14 @@ def run(
 
     if failed:
         for tool_result in failed:
-            summary, _ = _summarize_errors([tool_result], run_id)
+            summary, _ = _summarize_errors(
+                [tool_result], run_id, runtime, on_static_skip=_record_static_skip
+            )
             tool_result.error_summary = summary
 
-        llm_summary, model_used = _summarize_errors(failed, run_id)
+        llm_summary, model_used = _summarize_errors(
+            failed, run_id, runtime, on_static_skip=_record_static_skip
+        )
 
     output = ValidatorOutput(
         overall_passed=overall_passed,

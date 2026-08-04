@@ -37,7 +37,9 @@ def test_v2_results_keep_declaration_identity_and_order(monkeypatch, tmp_path):
 
 
 @pytest.mark.unit
-def test_v2_validator_runs_all_declarations_against_staged_overlay(monkeypatch, tmp_path):
+def test_v2_validator_runs_all_declarations_against_staged_overlay(
+    monkeypatch, tmp_path, provider_runtime
+):
     project_root = tmp_path / "project"
     project_root.mkdir()
     (project_root / "base.py").write_text("base = True\n", encoding="utf-8")
@@ -60,11 +62,9 @@ def test_v2_validator_runs_all_declarations_against_staged_overlay(monkeypatch, 
         return ProcessResult(return_code=0)
 
     monkeypatch.setattr(adapters, "_raw_result", record_result)
-    monkeypatch.setattr(
-        "orchestrator.agents.executor.providers.init_provider_models", lambda _config: None
+    output, _ = validator_agent.run(
+        config=config, staging_dir=staging_dir, runtime=provider_runtime
     )
-
-    output, _ = validator_agent.run(config=config, staging_dir=staging_dir)
 
     assert output.overall_passed is True
     assert len(seen_roots) == 2

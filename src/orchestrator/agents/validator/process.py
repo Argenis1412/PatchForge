@@ -15,6 +15,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping
 
+from orchestrator.provider_policy import PROVIDER_ENV_VARS
+
 
 @dataclass(frozen=True)
 class PreparedProcess:
@@ -37,20 +39,33 @@ class ProcessResult:
     cleanup_failed: bool = False
 
 
-def build_venv_environment(project_root: Path) -> dict[str, str] | None:
+def _without_provider_credentials(environment: Mapping[str, str]) -> dict[str, str]:
+    """Copy an environment without credentials that belong to LLM providers."""
+    sanitized = dict(environment)
+    for variable in PROVIDER_ENV_VARS.values():
+        sanitized.pop(variable, None)
+    return sanitized
+
+
+def build_sanitized_environment() -> dict[str, str]:
+    """Copy the inherited environment without LLM provider credentials."""
+    return _without_provider_credentials(os.environ)
+
+
+def build_venv_environment(project_root: Path) -> dict[str, str]:
     """Return an environment preferring the target's virtual environment."""
+    env = build_sanitized_environment()
     for subdir in ("bin", "Scripts"):
         venv_bin = project_root / ".venv" / subdir
         if venv_bin.is_dir():
-            env = os.environ.copy()
             env["PATH"] = str(venv_bin) + os.pathsep + env.get("PATH", "")
             return env
-    return None
+    return env
 
 
 def build_isolated_environment(scratch_dir: Path) -> dict[str, str]:
     """Return a child environment whose transient files stay outside the target."""
-    env = os.environ.copy()
+    env = build_sanitized_environment()
     scratch = str(scratch_dir)
     env["TMP"] = scratch
     env["TEMP"] = scratch

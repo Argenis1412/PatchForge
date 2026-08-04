@@ -3,6 +3,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from orchestrator.clients.credentials import resolve_operator_credentials
+from orchestrator.provider_runtime import ProviderRuntime
+
 
 @pytest.fixture(autouse=True)
 def _reset_circuit_breakers(tmp_path):
@@ -32,7 +35,19 @@ def _reset_circuit_breakers(tmp_path):
             cb.reset()
     except (ImportError, AttributeError):
         pass
-    providers._resolved_models = {}
+
+
+@pytest.fixture
+def provider_runtime(tmp_path):
+    context = resolve_operator_credentials(
+        target_path=tmp_path,
+        inherited_environment={
+            "ANTHROPIC_API_KEY": "test-anthropic",
+            "GOOGLE_API_KEY": "test-google",
+            "OPENROUTER_API_KEY": "test-openrouter",
+        },
+    )
+    return ProviderRuntime.from_config(context, None)
 
 
 @pytest.fixture
