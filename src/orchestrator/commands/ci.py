@@ -71,6 +71,7 @@ def execute(
     )
     from orchestrator.observability.events import log_event, log_failure
     from orchestrator.plan_validation import validate_plan_paths
+    from orchestrator.provider_runtime import ProviderRuntime
     from orchestrator.risk import check_patch_gate, check_plan_gate, parse_diff_files
     from orchestrator.scanners.python import scan
     from orchestrator.schemas.artifacts import ApplyResult, RunMetadata, generate_run_id
@@ -123,7 +124,9 @@ def execute(
         return r
 
     try:
-        resolve_operator_credentials(target_path=target_path, env_file=env_file)
+        credential_context = resolve_operator_credentials(
+            target_path=target_path, env_file=env_file
+        )
     except CredentialResolutionError as exc:
         return _fail("scan_failed", str(exc))
 
@@ -159,6 +162,7 @@ def execute(
         )
     except Exception as exc:
         return _fail("scan_failed", f"Config load failed: {exc}")
+    runtime = ProviderRuntime.from_config(credential_context, config)
 
     log_event(
         trace_id=run_id,
@@ -234,6 +238,7 @@ def execute(
                 trace_id=run_id,
                 run_id=run_id,
                 force_provider=force_provider,
+                runtime=runtime,
             )
             goal = issue_input.title
         else:
@@ -247,6 +252,7 @@ def execute(
                 trace_id=run_id,
                 run_id=run_id,
                 force_provider=force_provider,
+                runtime=runtime,
             )
             goal = scout_output.summary
     except Exception as exc:
@@ -396,6 +402,7 @@ def execute(
             force_provider=force_provider,
             logs_dir=logs_dir,
             run_dir=run_dir,
+            runtime=runtime,
         )
     except Exception as exc:
         log_failure(
@@ -500,7 +507,9 @@ def execute(
                     run_id=run_id,
                 )
             else:
-                validator_output = run_validation_in_copy(val_ws.temporary_root, config)
+                validator_output = run_validation_in_copy(
+                    val_ws.temporary_root, config, runtime=runtime
+                )
     except Exception as exc:
         log_failure(
             trace_id=run_id,

@@ -1,6 +1,7 @@
 """Tests for issue #151: configurable validator timeout and short-circuit on timeout."""
 
 import subprocess
+from functools import partial
 from unittest.mock import patch
 
 import pytest
@@ -11,6 +12,17 @@ from orchestrator.agents.validator.runners import DEFAULT_TIMEOUT
 from orchestrator.main import _parse_timeout_overrides
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.validator_output import ToolResult
+
+_validator_run = validator_run
+
+
+@pytest.fixture(autouse=True)
+def _supply_provider_runtime(provider_runtime):
+    global validator_run
+    validator_run = partial(_validator_run, runtime=provider_runtime)
+    yield
+    validator_run = _validator_run
+
 
 # ---------------------------------------------------------------------------
 # DEFAULT_TIMEOUT sanity

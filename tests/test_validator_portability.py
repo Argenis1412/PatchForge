@@ -39,8 +39,10 @@ def test_build_env_venv_scripts_windows(tmp_path):
 
 
 @pytest.mark.unit
-def test_build_env_no_venv_returns_none(tmp_path):
-    assert _build_env_with_venv(tmp_path) is None
+def test_build_env_no_venv_returns_sanitized_copy(tmp_path):
+    environment = _build_env_with_venv(tmp_path)
+    assert environment is not None
+    assert environment["PATH"] == os.environ.get("PATH", "")
 
 
 @pytest.mark.unit
@@ -161,7 +163,7 @@ def test_run_ruff_no_venv_injection_with_default_cmd(tmp_path):
     with patch("subprocess.run", side_effect=fake_run):
         run_ruff("r1", tmp_path)
 
-    assert captured["env"] is None
+    assert captured["env"] is not None
 
 
 @pytest.mark.unit
@@ -196,7 +198,7 @@ def test_run_ruff_no_venv_injection_with_absolute_cmd(tmp_path):
     with patch("subprocess.run", side_effect=fake_run):
         run_ruff("r1", tmp_path, cmd_override=abs_cmd)
 
-    assert captured["env"] is None
+    assert captured["env"] is not None
 
 
 @pytest.mark.unit
@@ -213,7 +215,7 @@ def test_run_pytest_no_venv_injection_with_default_cmd(tmp_path):
     with patch("subprocess.run", side_effect=fake_run):
         run_pytest("r1", tmp_path)
 
-    assert captured["env"] is None
+    assert captured["env"] is not None
 
 
 @pytest.mark.unit
@@ -248,7 +250,7 @@ def test_run_pytest_no_venv_injection_with_absolute_cmd(tmp_path):
     with patch("subprocess.run", side_effect=fake_run):
         run_pytest("r1", tmp_path, cmd_override=abs_cmd)
 
-    assert captured["env"] is None
+    assert captured["env"] is not None
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +275,7 @@ def test_run_ruff_staging_no_venv_injection_with_default_cmd(tmp_path):
     with patch("subprocess.run", side_effect=fake_run):
         run_ruff("r1", tmp_path, staging_dir=staging_dir)
 
-    assert captured["env"] is None
+    assert captured["env"] is not None
 
 
 # ---------------------------------------------------------------------------
@@ -319,7 +321,7 @@ def test_run_pytest_overlay_no_venv_injection_with_default_cmd(tmp_path):
     with patch("subprocess.run", side_effect=fake_run):
         run_pytest("r1", tmp_path, staging_dir=staging_dir)
 
-    assert captured["env"] is None
+    assert captured["env"] is not None
 
 
 # ---------------------------------------------------------------------------
@@ -364,4 +366,4 @@ def test_run_tsc_no_venv_injection_with_absolute_cmd(tmp_path):
     with patch("subprocess.run", side_effect=fake_run):
         run_tsc("r1", tmp_path, cmd_override=abs_cmd)
 
-    assert captured["env"] is None
+    assert captured["env"] is not None

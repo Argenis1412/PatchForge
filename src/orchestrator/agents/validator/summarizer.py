@@ -1,97 +1,49 @@
-"""LLM-based error summarizer for validation failures with provider fallback."""
+"""LLM-based validation-error summaries using the invocation runtime."""
 
-import os
-import time
+from __future__ import annotations
 
-from orchestrator.circuit_breaker import CircuitBreakerOpenError
+from collections.abc import Callable
+
+from orchestrator.agents.executor.providers import _call_chain, _provider_by_name
+from orchestrator.provider_policy import provider_chain
+from orchestrator.provider_runtime import ProviderRuntime
 from orchestrator.schemas.validator_output import ToolResult
 
 from .logging import _get_logger
 
-COST_PER_SUMMARY = 0.0
 
-
-def _summarize_errors(failed_tools: list[ToolResult], run_id: str) -> tuple[str, str]:
-    """Summarize tool errors via LLM. Returns (summary, model_used).
-
-    Falls back through: Gemini → OpenRouter → Claude → raw stderr.
-    ``model_used`` is empty string when raw stderr fallback is used.
-    """
-    has_google_key = bool(os.getenv("GOOGLE_API_KEY"))
-
+def _summarize_errors(
+    failed_tools: list[ToolResult],
+    run_id: str,
+    runtime: ProviderRuntime,
+    on_static_skip: Callable[[str], None] | None = None,
+) -> tuple[str, str]:
+    """Return a provider summary, or raw stderr when no provider succeeds."""
     stderr_sections = "\n\n".join(
-        f"### {r.tool.upper()} (rc={r.return_code})\n{(r.stderr or r.stdout)[:3000]}"
-        for r in failed_tools
+        f"### {result.tool.upper()} (rc={result.return_code})\n"
+        f"{(result.stderr or result.stdout)[:3000]}"
+        for result in failed_tools
     )
-
     prompt = f"""You are a code quality analyst. Summarize the following tool errors concisely.
 
 Rules:
 - Maximum 5 bullet points
 - Each bullet: tool name + root cause + file/line if available
 - No suggestions, no fixes — only what failed and why
-- If the same error repeats, group it
 
 ERRORS
 ------
 {stderr_sections}
 """
-
-    if has_google_key:
-        _get_logger().debug(
-            "[%s] Gemini summary request | tools=%s", run_id, [r.tool for r in failed_tools]
-        )
-        t0 = time.perf_counter()
-        try:
-            from orchestrator.agents.executor.providers import _get_model
-            from orchestrator.agents.validator import _cb_validator
-            from orchestrator.clients.gemini_client import get_gemini_client
-
-            model = _get_model("gemini")
-            client = get_gemini_client()
-            response = _cb_validator.call(
-                lambda: client.models.generate_content(
-                    model=model,
-                    contents=prompt,
-                )
-            )
-            elapsed = time.perf_counter() - t0
-            summary = response.text.strip()
-
-            usage = getattr(response, "usage_metadata", None)
-            input_tok = getattr(usage, "prompt_token_count", 0) if usage else 0
-            output_tok = getattr(usage, "candidates_token_count", 0) if usage else 0
-
-            _get_logger().info(
-                "[%s] Gemini summary OK | latency=%.2fs | in=%d | out=%d | cost=$0.00 (free tier)",
-                run_id,
-                elapsed,
-                input_tok,
-                output_tok,
-            )
-            return summary, model
-
-        except CircuitBreakerOpenError:
-            _get_logger().warning("[%s] Gemini CB open — trying provider chain", run_id)
-        except Exception as exc:
-            _get_logger().error(
-                "[%s] Gemini summary failed: %s — trying provider chain", run_id, exc
-            )
-    else:
-        _get_logger().warning("[%s] GOOGLE_API_KEY not set — trying provider chain", run_id)
-
     try:
-        from orchestrator.agents.executor.providers import (
-            _call_chain,
-            _call_claude,
-            _call_openrouter,
-        )
-
-        chain_result = _call_chain([_call_openrouter, _call_claude], prompt, run_id)
-        if chain_result.success is not None:
-            return chain_result.success[0], chain_result.provider_name
-    except Exception as inner_exc:
-        _get_logger().warning("[%s] Provider chain fallback also failed: %s", run_id, inner_exc)
-
-    raw = "\n".join(f"[{r.tool}] {(r.stderr or r.stdout)[:500]}" for r in failed_tools)
+        chain = [_provider_by_name()[name] for name in provider_chain("validator_summary")]
+        result = _call_chain(chain, runtime, prompt, run_id, on_static_skip=on_static_skip)
+    except Exception as exc:
+        _get_logger().warning("[%s] Validator summary failed: %s", run_id, exc)
+    else:
+        if result.success is not None:
+            return result.success[0], result.provider_name or ""
+    raw = "\n".join(
+        f"[{result.tool}] {(result.stderr or result.stdout)[:500]}" for result in failed_tools
+    )
     return raw, ""

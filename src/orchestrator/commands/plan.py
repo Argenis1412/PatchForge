@@ -16,8 +16,10 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from orchestrator.agents import architect as architect_agent
 from orchestrator.clients.bootstrap import bootstrap_environment
+from orchestrator.clients.credentials import CredentialResolutionError, resolve_operator_credentials
 from orchestrator.observability.events import log_event, log_failure
 from orchestrator.plan_validation import validate_plan_paths
+from orchestrator.provider_runtime import ProviderRuntime
 from orchestrator.risk import check_plan_gate
 from orchestrator.schemas.config import TargetConfig, default_workspace_path
 from orchestrator.schemas.findings import ScanFindings
@@ -68,6 +70,14 @@ def execute(
     except Exception as exc:
         console.print(f"[bold red]Error loading target config: {exc}[/bold red]")
         raise typer.Exit(code=1) from None
+    try:
+        credential_context = resolve_operator_credentials(
+            target_path=target_path, env_file=env_file
+        )
+    except CredentialResolutionError as exc:
+        console.print(f"[bold red]Credential resolution failed: {exc}[/bold red]")
+        raise typer.Exit(code=1) from None
+    runtime = ProviderRuntime.from_config(credential_context, config)
 
     log_event(
         trace_id=run_id,
@@ -136,6 +146,7 @@ def execute(
                     trace_id=run_id,
                     run_id=run_id,
                     force_provider=force_provider,
+                    runtime=runtime,
                 )
                 for plan_task in output.implementation_plan:
                     if plan_task.risk_level == "high":
@@ -209,6 +220,7 @@ def execute(
                     trace_id=run_id,
                     run_id=run_id,
                     force_provider=force_provider,
+                    runtime=runtime,
                 )
                 for plan_task in output.implementation_plan:
                     if plan_task.risk_level == "high":

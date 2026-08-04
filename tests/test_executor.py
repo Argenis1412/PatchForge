@@ -1,20 +1,41 @@
 import json
 import logging
+from functools import partial
 from unittest.mock import MagicMock
 
 import pytest
 
 from orchestrator.agents.executor import run
 from orchestrator.agents.executor.providers import (
-    _PROVIDER_CHAIN,
     KNOWN_PROVIDER_NAMES,
     ProviderChainResult,
     _call_chain,
     _categorize_failure,
-    _provider_by_name,
 )
 from orchestrator.schemas.architect_output import ArchitectOutput, Task
 from orchestrator.schemas.config import TargetConfig
+
+_run = run
+_runtime_call_chain = _call_chain
+run = _run
+
+
+@pytest.fixture(autouse=True)
+def _supply_provider_runtime(monkeypatch, provider_runtime):
+    global _call_chain, run
+    run = partial(_run, runtime=provider_runtime)
+
+    def call_chain(chain, prompt, run_id):
+        return _runtime_call_chain(chain, provider_runtime, prompt, run_id)
+
+    _call_chain = call_chain
+    from orchestrator.agents.executor import applier
+
+    monkeypatch.setattr(
+        applier, "_apply_task", partial(applier._apply_task, runtime=provider_runtime)
+    )
+    yield
+    run = _run
 
 
 @pytest.mark.unit
@@ -266,16 +287,6 @@ def test_apply_task_full_file_preflight_skips_new_file_creation(tmp_path, monkey
 # ---------------------------------------------------------------------------
 # Fix #2 — ProviderChainResult and failure tracking
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-def test_provider_by_name_covers_all_chain_providers():
-    by_name = _provider_by_name()
-    all_chain_fns = {fn for chain in _PROVIDER_CHAIN.values() for fn in chain}
-    for fn in all_chain_fns:
-        short = fn.__name__.removeprefix("_call_")
-        assert short in by_name, f"{short} missing from _provider_by_name()"
-        assert by_name[short] is fn
 
 
 @pytest.mark.unit

@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
+from orchestrator.provider_policy import provider_chain
+from orchestrator.provider_runtime import ProviderRuntime
 from orchestrator.schemas.architect_output import Task
 from orchestrator.schemas.executor_output import FileChange, TaskStatus
 
 from .diffing import _make_diff
 from .logging import _get_logger
-from .providers import _PROVIDER_CHAIN, MAX_RETRIES, _call_chain, _provider_by_name
+from .providers import MAX_RETRIES, _call_chain, _provider_by_name
 from .validation import strip_fences, validate_python_content
 
 # This protects only the current strategy that sends an existing file's full
@@ -79,6 +82,9 @@ def _apply_task(
     project_root: Path,
     staging_dir: Path,
     force_provider: str | None = None,
+    *,
+    runtime: ProviderRuntime,
+    on_static_skip: Callable[[str], None] | None = None,
 ) -> FileChange:
     if not task.files_to_modify:
         _get_logger().warning("[%s] Task %s has no files_to_modify — skip", run_id, task.task_id)
@@ -146,13 +152,13 @@ def _apply_task(
             )
         chain = [provider]
     else:
-        chain = _PROVIDER_CHAIN.get(task.risk_level)
+        chain = [_provider_by_name()[name] for name in provider_chain("executor", task.risk_level)]
     if not chain:
         raise ValueError(f"Unknown risk level: {task.risk_level}")
 
     last_failures: list[tuple[str, str]] = []
     for attempt in range(MAX_RETRIES + 1):
-        chain_result = _call_chain(chain, prompt, run_id)
+        chain_result = _call_chain(chain, runtime, prompt, run_id, on_static_skip=on_static_skip)
         if chain_result.success is not None:
             raw, input_tokens, output_tokens, cost_this_call = chain_result.success
             modified_content = raw

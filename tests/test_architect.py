@@ -1,3 +1,4 @@
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,25 @@ from orchestrator.schemas.architect_output import ArchitectOutput
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.issue import IssueInput
 from orchestrator.schemas.scout_output import ScoutOutput
+
+_run = run
+_run_from_issue = run_from_issue
+
+
+@pytest.fixture(autouse=True)
+def _supply_provider_runtime(monkeypatch, provider_runtime):
+    global run, run_from_issue
+    run = partial(_run, runtime=provider_runtime)
+    run_from_issue = partial(_run_from_issue, runtime=provider_runtime)
+    from orchestrator.agents.architect import provider
+
+    monkeypatch.setattr(
+        provider, "call_claude", partial(provider.call_claude, runtime=provider_runtime)
+    )
+    yield
+    run = _run
+    run_from_issue = _run_from_issue
+
 
 _SNAPSHOT_DIR = Path(__file__).resolve().parent / "snapshots"
 

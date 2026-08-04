@@ -11,7 +11,7 @@ from orchestrator.schemas.config import TimeoutPolicy
 from orchestrator.schemas.validator_output import ToolResult
 
 from .logging import _get_logger
-from .process import build_venv_environment, prepare_process
+from .process import build_sanitized_environment, build_venv_environment, prepare_process
 
 DEFAULT_TIMEOUT = TimeoutPolicy().validator_run
 assert DEFAULT_TIMEOUT > 0
@@ -36,9 +36,15 @@ def _resolve_cmd(cmd_override: list[str] | None, default: list[str]) -> list[str
     return cmd
 
 
-def _build_env_with_venv(project_root: Path) -> dict[str, str] | None:
+def _build_env_with_venv(project_root: Path) -> dict[str, str]:
     """Backward-compatible alias for shared process preparation."""
     return build_venv_environment(project_root)
+
+
+def _build_command_environment(project_root: Path, command: list[str]) -> dict[str, str]:
+    if Path(command[0]).is_absolute():
+        return build_sanitized_environment()
+    return _build_env_with_venv(project_root)
 
 
 def _run(
@@ -161,13 +167,13 @@ def run_ruff(
         if staged_files:
             cmd = _resolve_cmd(cmd_override, [sys.executable, "-m", "ruff", "check"])
             cmd.extend(str(sf) for sf in staged_files)
-            env = _build_env_with_venv(project_root) if not Path(cmd[0]).is_absolute() else None
+            env = _build_command_environment(project_root, cmd)
             return _run(cmd, project_root, "ruff", run_id, timeout=timeout, env=env)
     cmd = _resolve_cmd(cmd_override, [sys.executable, "-m", "ruff", "check", "."])
     if ignore_dirs:
         for d in ignore_dirs:
             cmd.append(f"--extend-exclude={d}")
-    env = _build_env_with_venv(project_root) if not Path(cmd[0]).is_absolute() else None
+    env = _build_command_environment(project_root, cmd)
     return _run(cmd, project_root, "ruff", run_id, timeout=timeout, env=env)
 
 
@@ -193,13 +199,13 @@ def run_pytest(
             if ignore_dirs:
                 for d in ignore_dirs:
                     cmd.append(f"--ignore={d}")
-            env = _build_env_with_venv(project_root) if not Path(cmd[0]).is_absolute() else None
+            env = _build_command_environment(project_root, cmd)
             return _run(cmd, overlay_root, "pytest", run_id, timeout=timeout, env=env)
     cmd = _resolve_cmd(cmd_override, _PYTEST_DEFAULT)
     if ignore_dirs:
         for d in ignore_dirs:
             cmd.append(f"--ignore={d}")
-    env = _build_env_with_venv(project_root) if not Path(cmd[0]).is_absolute() else None
+    env = _build_command_environment(project_root, cmd)
     return _run(
         cmd,
         project_root,
@@ -234,7 +240,7 @@ def run_tsc(
                     stdout="Skipped — frontend/ not found",
                 )
             cmd = _resolve_cmd(cmd_override, ["npx", "tsc", "--noEmit"])
-            env = _build_env_with_venv(project_root) if not Path(cmd[0]).is_absolute() else None
+            env = _build_command_environment(project_root, cmd)
             return _run(cmd, frontend, "tsc", run_id, timeout=timeout, env=env)
     frontend = _find_frontend_dir(project_root)
     if frontend is None:
@@ -246,5 +252,5 @@ def run_tsc(
             stdout="Skipped — frontend/ not found",
         )
     cmd = list(cmd_override) if cmd_override is not None else ["npx", "tsc", "--noEmit"]
-    env = _build_env_with_venv(project_root) if not Path(cmd[0]).is_absolute() else None
+    env = _build_command_environment(project_root, cmd)
     return _run(cmd, frontend, "tsc", run_id, timeout=timeout, env=env)

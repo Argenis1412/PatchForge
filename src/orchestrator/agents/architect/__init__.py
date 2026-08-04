@@ -17,9 +17,9 @@ from orchestrator.agents.architect.fallback import log_architect_fallback as log
 from orchestrator.agents.architect.file_collector import build_target_files_block
 from orchestrator.agents.architect.prompts import ARCHITECT_PROMPT, ISSUE_ARCHITECT_PROMPT
 from orchestrator.agents.architect.provider import call_claude
-from orchestrator.agents.executor.providers import _get_model, init_provider_models
 from orchestrator.llm.parser import LLMParseError, SchemaValidationError, parse_llm_response
 from orchestrator.observability.events import FailureType, log_failure
+from orchestrator.provider_runtime import ProviderRuntime
 from orchestrator.schemas.architect_output import ArchitectOutput
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.issue import IssueInput
@@ -33,13 +33,13 @@ def run(
     trace_id: str | None = None,
     run_id: str | None = None,
     force_provider: str | None = None,
+    runtime: ProviderRuntime,
 ) -> tuple[ArchitectOutput, dict]:
     logs_dir: Optional[Path] = None
     if config is not None:
         if isinstance(config, (str, Path)):
             config = TargetConfig.load(target_path=Path(config))
         logs_dir = config.workspace_path / "logs"
-    init_provider_models(config)
 
     print("[Architect] Processing ScoutOutput object...")
     scout_data = scout_output.model_dump_json()
@@ -48,7 +48,7 @@ def run(
     print(
         f"[Architect] Target files: {len(paths)} of {total} paths injected (truncated={truncated})"
     )
-    display_model = force_provider or _get_model("claude")
+    display_model = force_provider or runtime.model_for("claude")
     print(f"[Architect] Asking {display_model} to structure the implementation plan...")
 
     result = call_claude(
@@ -60,6 +60,7 @@ def run(
         stage="architect",
         span_id="architect",
         force_provider=force_provider,
+        runtime=runtime,
     )
     raw_response, tokens, cost, model_used = (
         result.raw,
@@ -108,6 +109,7 @@ def run(
         "provider_name": result.provider_name,
         "primary_provider_attempted": result.primary_provider_attempted,
         "primary_failure_category": result.primary_failure_category,
+        "static_skipped_providers": result.static_skipped_providers,
     }
 
     return output, meta
@@ -120,6 +122,7 @@ def run_from_issue(
     trace_id: str | None = None,
     run_id: str | None = None,
     force_provider: str | None = None,
+    runtime: ProviderRuntime,
 ) -> tuple[ArchitectOutput, dict]:
     """Run the Architect agent from a human-written issue file.
 
@@ -131,7 +134,6 @@ def run_from_issue(
         if isinstance(config, (str, Path)):
             config = TargetConfig.load(target_path=Path(config))
         logs_dir = config.workspace_path / "logs"
-    init_provider_models(config)
 
     print("[Architect] Processing IssueInput object...")
 
@@ -150,7 +152,7 @@ def run_from_issue(
         body=_escape(issue_input.body),
         target_files=_escape(target_files_block),
     )
-    display_model = force_provider or _get_model("claude")
+    display_model = force_provider or runtime.model_for("claude")
     print(f"[Architect] Asking {display_model} to structure the implementation plan...")
 
     result = call_claude(
@@ -162,6 +164,7 @@ def run_from_issue(
         stage="architect",
         span_id="architect-issue",
         force_provider=force_provider,
+        runtime=runtime,
     )
     raw_response, tokens, cost, model_used = (
         result.raw,
@@ -210,6 +213,7 @@ def run_from_issue(
         "provider_name": result.provider_name,
         "primary_provider_attempted": result.primary_provider_attempted,
         "primary_failure_category": result.primary_failure_category,
+        "static_skipped_providers": result.static_skipped_providers,
     }
 
     return output, meta

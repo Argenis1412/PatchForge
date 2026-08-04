@@ -147,7 +147,7 @@ def test_candidate_promotion_preserves_unrelated_dirty_tree(tmp_path: Path) -> N
 def test_validator_untracked_artifact_does_not_block_promotion(tmp_path: Path) -> None:
     ctx = _setup_run(tmp_path)
 
-    def validator(*, config):
+    def validator(*, config, runtime):
         (config.target_path / "validator.log").write_text("artifact\n", encoding="utf-8")
         return ValidatorOutput(overall_passed=True, run_id=str(ctx["run_id"])), {}
 

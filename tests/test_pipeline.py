@@ -110,6 +110,23 @@ def test_successful_run_completed(config, monkeypatch):
     assert result.status == "completed"
 
 
+def test_architect_static_skips_are_persisted(config, monkeypatch):
+    monkeypatch.setattr(
+        "orchestrator.pipeline.run_architect",
+        MagicMock(
+            return_value=(
+                _architect_output(),
+                _meta(static_skipped_providers=("gemini", "openrouter")),
+            )
+        ),
+    )
+
+    pipeline = Pipeline(config=config)
+    pipeline._stage_architect(_scout_output())
+
+    assert pipeline.run.architect_meta.static_skipped_providers == ("gemini", "openrouter")
+
+
 def test_stage_executor_forwards_pipeline_trace_id(config, monkeypatch):
     """The executor must receive the pipeline's trace_id, not just run_id,
     so its events correlate with the rest of the run's trace."""

@@ -10,8 +10,10 @@ from orchestrator.agents.executor import collect_fallback_changes, log_fallback_
 from orchestrator.agents.executor import run as run_executor
 from orchestrator.agents.scout import run as run_scout
 from orchestrator.agents.validator import run as run_validator
+from orchestrator.clients.credentials import resolve_operator_credentials
 from orchestrator.exceptions import PatchForgeError, SchemaVersionError
 from orchestrator.observability.events import FailureType, log_event, log_failure
+from orchestrator.provider_runtime import ProviderRuntime
 from orchestrator.schemas.architect_output import ArchitectOutput
 from orchestrator.schemas.artifacts import CURRENT_SCHEMA_VERSION
 from orchestrator.schemas.config import TargetConfig
@@ -46,6 +48,9 @@ class Pipeline:
         self.trace_id = str(uuid.uuid4())
         self.workspace = WorkspaceManager(self.config.workspace_path)
         self.workspace.setup()
+        self.runtime = ProviderRuntime.from_config(
+            resolve_operator_credentials(target_path=self.target_path), self.config
+        )
 
     def _log_event(
         self,
@@ -237,7 +242,12 @@ class Pipeline:
         self._log_event("stage_start", stage="scout")
         t0 = time.monotonic()
         try:
-            output, meta = run_scout(self.config, trace_id=self.trace_id, run_id=self.run.run_id)
+            output, meta = run_scout(
+                self.config,
+                trace_id=self.trace_id,
+                run_id=self.run.run_id,
+                runtime=self.runtime,
+            )
             self.run.scout_meta = AgentMeta(status="success", latency_ms=_ms(t0), **meta)
             self._persist_stage_output("scout", output)
             self._log_event("stage_end", stage="scout", data={"cost_usd": meta.get("cost_usd")})
@@ -251,7 +261,11 @@ class Pipeline:
         t0 = time.monotonic()
         try:
             output, meta = run_architect(
-                scout_output, config=self.config, trace_id=self.trace_id, run_id=self.run.run_id
+                scout_output,
+                config=self.config,
+                trace_id=self.trace_id,
+                run_id=self.run.run_id,
+                runtime=self.runtime,
             )
             self.run.architect_meta = AgentMeta(status="success", latency_ms=_ms(t0), **meta)
             self._persist_stage_output("architect", output)
@@ -322,6 +336,7 @@ class Pipeline:
                 logs_dir=self.config.workspace_path / "logs",
                 run_dir=self.workspace.run_dir(self.run.run_id),
                 trace_id=self.trace_id,
+                runtime=self.runtime,
             )
             self.run.executor_meta = AgentMeta(status="success", latency_ms=_ms(t0), **meta)
             self._persist_stage_output("executor", result)
@@ -353,7 +368,9 @@ class Pipeline:
         t0 = time.monotonic()
         try:
             staging_dir = self.workspace.staging_dir_for_run(self.run.run_id)
-            result, meta = run_validator(config=self.config, staging_dir=staging_dir)
+            result, meta = run_validator(
+                config=self.config, staging_dir=staging_dir, runtime=self.runtime
+            )
             status = "success" if result.overall_passed else "failed"
             self.run.validator_meta = AgentMeta(status=status, latency_ms=_ms(t0), **meta)
             self._persist_stage_output("validator", result)

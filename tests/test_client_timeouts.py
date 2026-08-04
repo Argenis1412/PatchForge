@@ -1,4 +1,4 @@
-"""Tests that each LLM client singleton wires TIMEOUT_SECONDS correctly."""
+"""Tests that each invocation-scoped LLM client wires its timeout."""
 
 from unittest.mock import MagicMock, patch
 
@@ -11,12 +11,10 @@ class TestGeminiTimeout:
 
         from orchestrator.clients import gemini_client
 
-        monkeypatch.setattr(gemini_client, "_client", None)
-
         mock_client_cls = MagicMock()
         monkeypatch.setattr("google.genai.Client", mock_client_cls)
 
-        gemini_client.get_gemini_client()
+        gemini_client.create_gemini_client("test-credential")
 
         mock_client_cls.assert_called_once()
         call_kwargs = mock_client_cls.call_args[1]
@@ -29,8 +27,6 @@ class TestAnthropicTimeout:
     def test_timeout_seconds(self, monkeypatch):
         from orchestrator.clients import anthropic_client
 
-        monkeypatch.setattr(anthropic_client, "_client", None)
-
         mock_cls = MagicMock()
 
         import sys
@@ -39,7 +35,7 @@ class TestAnthropicTimeout:
         fake_anthropic.Anthropic = mock_cls
 
         with patch.dict(sys.modules, {"anthropic": fake_anthropic}):
-            anthropic_client.get_anthropic_client()
+            anthropic_client.create_anthropic_client("test-credential")
 
         mock_cls.assert_called_once()
         call_kwargs = mock_cls.call_args[1]
@@ -50,12 +46,10 @@ class TestOpenRouterTimeout:
     def test_timeout_seconds(self, monkeypatch):
         from orchestrator.clients import openrouter_client
 
-        monkeypatch.setattr(openrouter_client, "_client", None)
-
         mock_cls = MagicMock()
         monkeypatch.setattr(openrouter_client, "httpx", MagicMock(Client=mock_cls))
 
-        openrouter_client.get_openrouter_client()
+        openrouter_client.create_openrouter_client("test-credential")
 
         mock_cls.assert_called_once()
         call_kwargs = mock_cls.call_args[1]

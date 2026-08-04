@@ -27,6 +27,7 @@ from orchestrator import paths as _paths
 from orchestrator.exceptions import SchedulerInvariantError
 from orchestrator.observability.events import log_event
 from orchestrator.plan_validation import validate_execution_plan, validate_legacy_executor_plan
+from orchestrator.provider_runtime import MODEL_CLAUDE, ProviderRuntime
 from orchestrator.schemas.architect_output import ArchitectOutput
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.execution_plan import ExecutablePlanV2, MutationPreconditionError
@@ -36,7 +37,7 @@ from . import applier as _applier
 from .fallback import collect_fallback_changes as collect_fallback_changes
 from .fallback import log_fallback_events as log_fallback_events
 from .logging import _get_logger
-from .providers import KNOWN_PROVIDER_NAMES, MODEL_CLAUDE, _get_model, init_provider_models
+from .providers import KNOWN_PROVIDER_NAMES
 from .rollback import rollback_to_commit as rollback_to_commit
 from .scheduler import _build_dag, _topological_order
 
@@ -197,6 +198,8 @@ def run(
     logs_dir: Optional[Path] = None,
     run_dir: Optional[Path] = None,
     trace_id: Optional[str] = None,
+    *,
+    runtime: ProviderRuntime,
 ) -> tuple[ExecutorOutput, dict]:
     if config is None:
         config = TargetConfig.load(target_path=_paths.PROJECT_ROOT)
@@ -229,11 +232,11 @@ def run(
             )
         _get_logger().info("[%s] force_provider override active: %s", run_id, force_provider)
 
-    resolved = init_provider_models(config)
     model_string = (
-        f"GM:{_get_model('gemini')}|OR:{_get_model('openrouter')}|CL:{_get_model('claude')}"
+        f"GM:{runtime.model_for('gemini')}|OR:{runtime.model_for('openrouter')}|"
+        f"CL:{runtime.model_for('claude')}"
     )
-    claude_override_used = _get_model("claude") != MODEL_CLAUDE
+    claude_override_used = runtime.model_for("claude") != MODEL_CLAUDE
     providers_used: set[str] = set()
     result = ExecutorOutput(model=model_string, run_id=run_id)
 
@@ -244,6 +247,20 @@ def run(
     dag = _build_dag(tasks)
     ordered_tasks = _topological_order(tasks, dag)
     task_status_results: dict[str, TaskStatus] = {}
+    static_skips_reported: set[str] = set()
+
+    def _record_static_skip(provider: str) -> None:
+        if provider in static_skips_reported:
+            return
+        static_skips_reported.add(provider)
+        _safe_log_event(
+            effective_trace_id,
+            run_id,
+            "provider_skipped_static_ineligible",
+            {"provider": provider, "cause": "static_ineligible"},
+            event_logs_dir,
+            run_dir,
+        )
 
     _safe_log_event(
         effective_trace_id,
@@ -328,7 +345,13 @@ def run(
                 run_dir,
             )
             change = _applier._apply_task(
-                single_file_task, run_id, project_root, staging_dir, force_provider=force_provider
+                single_file_task,
+                run_id,
+                project_root,
+                staging_dir,
+                force_provider=force_provider,
+                runtime=runtime,
+                on_static_skip=_record_static_skip,
             )
             _safe_log_event(
                 effective_trace_id,
@@ -423,7 +446,7 @@ def run(
         "tokens_output": total_tokens_output,
         "cost_usd": result.total_cost_usd,
         "model_used": model_string,
-        "models_resolved": resolved,
+        "models_resolved": dict(runtime.models),
         "cost_llm": None if cost_llm_null else result.total_cost_usd,
     }
 

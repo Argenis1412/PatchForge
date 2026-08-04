@@ -1,3 +1,4 @@
+from functools import partial
 from unittest.mock import MagicMock
 
 import pytest
@@ -8,6 +9,17 @@ from orchestrator.exceptions import CycleDetectedError, SchedulerInvariantError
 from orchestrator.schemas.architect_output import ArchitectOutput, Task
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.executor_output import ExecutorOutput, FileChange, TaskStatus
+
+_run = run
+
+
+@pytest.fixture(autouse=True)
+def _supply_provider_runtime(provider_runtime):
+    global run
+    run = partial(_run, runtime=provider_runtime)
+    yield
+    run = _run
+
 
 # ---------------------------------------------------------------------------
 # Helpers

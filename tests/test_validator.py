@@ -3,195 +3,101 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from orchestrator.agents.executor.providers import ProviderChainResult
 from orchestrator.agents.validator import run
+from orchestrator.agents.validator.summarizer import _summarize_errors
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.validator_output import ToolResult, ValidatorOutput
 
 
 @pytest.mark.unit
-def test_validator_run_returns_tuple(monkeypatch, tmp_path):
-    mock_tool = ToolResult(tool="ruff", passed=True, return_code=0)
-    monkeypatch.setattr(
-        "orchestrator.agents.validator.run_ruff",
-        lambda *a, **kw: mock_tool,
+def test_validator_run_returns_tuple(monkeypatch, tmp_path, provider_runtime):
+    result = ToolResult(tool="ruff", passed=True, return_code=0)
+    monkeypatch.setattr("orchestrator.agents.validator.run_ruff", lambda *a, **kw: result)
+    monkeypatch.setattr("orchestrator.agents.validator.run_pytest", lambda *a, **kw: result)
+    monkeypatch.setattr("orchestrator.agents.validator.run_tsc", lambda *a, **kw: result)
+    config = TargetConfig(
+        target_path=tmp_path,
+        workspace_path=tmp_path.parent / f"{tmp_path.name}-workspace",
     )
-    monkeypatch.setattr(
-        "orchestrator.agents.validator.run_pytest",
-        lambda *a, **kw: mock_tool,
-    )
-    monkeypatch.setattr(
-        "orchestrator.agents.validator.run_tsc",
-        lambda *a, **kw: mock_tool,
-    )
-    workspace = tmp_path.parent / f"{tmp_path.name}-workspace"
-    config = TargetConfig(target_path=tmp_path, workspace_path=workspace)
-    output, meta = run(config=config)
+
+    output, meta = run(config=config, runtime=provider_runtime)
+
     assert isinstance(output, ValidatorOutput)
     assert isinstance(meta, dict)
 
 
 @pytest.mark.unit
 def test_validator_get_logger_uses_shared_helper(tmp_path, monkeypatch):
-    import orchestrator.agents.validator as val_mod
+    import orchestrator.agents.validator as validator
 
-    val_mod._logger = None
-    for h in list(logging.getLogger("validator").handlers):
-        logging.getLogger("validator").removeHandler(h)
-        h.close()
-
-    mock = MagicMock(wraps=val_mod.get_file_logger)
+    validator._logger = None
+    for handler in list(logging.getLogger("validator").handlers):
+        logging.getLogger("validator").removeHandler(handler)
+        handler.close()
+    mock = MagicMock(wraps=validator.get_file_logger)
     monkeypatch.setattr("orchestrator.agents.validator.get_file_logger", mock)
 
-    val_mod._get_logger(tmp_path)
+    validator._get_logger(tmp_path)
+
     mock.assert_called_once_with("validator", tmp_path, "validator.log")
 
 
-# ---------------------------------------------------------------------------
-# Summarizer fallback tests
-# ---------------------------------------------------------------------------
+def _failed_tool(stderr: str = "error") -> list[ToolResult]:
+    return [ToolResult(tool="ruff", passed=False, return_code=1, stderr=stderr)]
 
 
 @pytest.mark.unit
-def test_summarizer_returns_tuple(monkeypatch):
-    from orchestrator.agents.validator.summarizer import _summarize_errors
+def test_summarizer_returns_provider_result(monkeypatch, provider_runtime):
+    monkeypatch.setattr(
+        "orchestrator.agents.validator.summarizer._call_chain",
+        lambda *args, **kwargs: ProviderChainResult(
+            success=("- ruff: syntax error", 10, 5, 0.0), provider_name="gemini"
+        ),
+    )
 
-    monkeypatch.setenv("GOOGLE_API_KEY", "fake")
+    summary, model = _summarize_errors(_failed_tool(), "run", provider_runtime)
 
-    mock_response = MagicMock()
-    mock_response.text = "- ruff: syntax error in main.py:10"
-    mock_response.usage_metadata = None
-
-    mock_cb = MagicMock()
-    mock_cb.call.return_value = mock_response
-    monkeypatch.setattr("orchestrator.agents.validator._cb_validator", mock_cb)
-
-    failed = [ToolResult(tool="ruff", passed=False, return_code=1, stderr="error")]
-    summary, model = _summarize_errors(failed, "test-run")
-    assert model == "gemini-2.5-flash"
+    assert model == "gemini"
     assert "ruff" in summary
 
 
 @pytest.mark.unit
-def test_summarizer_openrouter_fallback(monkeypatch):
-    from orchestrator.agents.executor.providers import ProviderChainResult, _call_claude
-    from orchestrator.agents.validator.summarizer import _summarize_errors
-    from orchestrator.exceptions import CircuitBreakerOpenError
-
-    monkeypatch.setenv("GOOGLE_API_KEY", "fake")
-
-    mock_cb = MagicMock()
-    mock_cb.call.side_effect = CircuitBreakerOpenError("gemini", MagicMock(), 0.0)
-    monkeypatch.setattr("orchestrator.agents.validator._cb_validator", mock_cb)
-
-    chain_result = ProviderChainResult(
-        success=("- openrouter summary", 10, 5, 0.0),
-        provider_name="openrouter",
-    )
-
-    def _mock_chain(chain, prompt, run_id):
-        assert _call_claude in chain, "_call_claude must be in the fallback chain"
-        return chain_result
-
+def test_summarizer_fallback_result(monkeypatch, provider_runtime):
     monkeypatch.setattr(
-        "orchestrator.agents.executor.providers._call_chain",
-        _mock_chain,
+        "orchestrator.agents.validator.summarizer._call_chain",
+        lambda *args, **kwargs: ProviderChainResult(
+            success=("- openrouter summary", 10, 5, 0.0), provider_name="openrouter"
+        ),
     )
 
-    failed = [ToolResult(tool="ruff", passed=False, return_code=1, stderr="error")]
-    summary, model = _summarize_errors(failed, "test-run")
+    summary, model = _summarize_errors(_failed_tool(), "run", provider_runtime)
+
     assert model == "openrouter"
     assert "openrouter summary" in summary
 
 
 @pytest.mark.unit
-def test_summarizer_all_fail_returns_raw(monkeypatch):
-    from orchestrator.agents.validator.summarizer import _summarize_errors
-    from orchestrator.exceptions import CircuitBreakerOpenError
-
-    monkeypatch.setenv("GOOGLE_API_KEY", "fake")
-
-    mock_cb = MagicMock()
-    mock_cb.call.side_effect = CircuitBreakerOpenError("gemini", MagicMock(), 0.0)
-    monkeypatch.setattr("orchestrator.agents.validator._cb_validator", mock_cb)
-
+def test_summarizer_all_fail_returns_raw(monkeypatch, provider_runtime):
     monkeypatch.setattr(
-        "orchestrator.agents.executor.providers._call_chain",
-        MagicMock(side_effect=Exception("OpenRouter down")),
+        "orchestrator.agents.validator.summarizer._call_chain",
+        lambda *args, **kwargs: ProviderChainResult(),
     )
 
-    failed = [ToolResult(tool="ruff", passed=False, return_code=1, stderr="some error")]
-    summary, model = _summarize_errors(failed, "test-run")
+    summary, model = _summarize_errors(_failed_tool("some error"), "run", provider_runtime)
+
     assert model == ""
     assert "[ruff]" in summary
 
 
 @pytest.mark.unit
-def test_summarizer_generic_exception_openrouter_fallback(monkeypatch):
-    """A non-CB exception from Gemini still falls through to OpenRouter."""
-    from orchestrator.agents.executor.providers import ProviderChainResult
-    from orchestrator.agents.validator.summarizer import _summarize_errors
-
-    monkeypatch.setenv("GOOGLE_API_KEY", "fake")
-
-    mock_cb = MagicMock()
-    mock_cb.call.side_effect = RuntimeError("gemini transport error")
-    monkeypatch.setattr("orchestrator.agents.validator._cb_validator", mock_cb)
-
-    chain_result = ProviderChainResult(
-        success=("- openrouter summary", 10, 5, 0.0),
-        provider_name="openrouter",
-    )
+def test_summarizer_provider_lookup_failure_returns_raw(monkeypatch, provider_runtime):
     monkeypatch.setattr(
-        "orchestrator.agents.executor.providers._call_chain",
-        lambda chain, prompt, run_id: chain_result,
+        "orchestrator.agents.validator.summarizer._provider_by_name",
+        lambda: {},
     )
 
-    failed = [ToolResult(tool="ruff", passed=False, return_code=1, stderr="error")]
-    summary, model = _summarize_errors(failed, "test-run")
-    assert model == "openrouter"
-    assert "openrouter summary" in summary
+    summary, model = _summarize_errors(_failed_tool("lookup error"), "run", provider_runtime)
 
-
-@pytest.mark.unit
-def test_summarizer_generic_exception_all_fail_returns_raw(monkeypatch):
-    """Non-CB Gemini failure + OpenRouter failure degrades to raw stderr."""
-    from orchestrator.agents.validator.summarizer import _summarize_errors
-
-    monkeypatch.setenv("GOOGLE_API_KEY", "fake")
-
-    mock_cb = MagicMock()
-    mock_cb.call.side_effect = RuntimeError("gemini transport error")
-    monkeypatch.setattr("orchestrator.agents.validator._cb_validator", mock_cb)
-
-    monkeypatch.setattr(
-        "orchestrator.agents.executor.providers._call_chain",
-        MagicMock(side_effect=Exception("OpenRouter down")),
-    )
-
-    failed = [ToolResult(tool="ruff", passed=False, return_code=1, stderr="some error")]
-    summary, model = _summarize_errors(failed, "test-run")
     assert model == ""
-    assert "[ruff]" in summary
-
-
-@pytest.mark.unit
-def test_summarizer_no_google_key_uses_openrouter(monkeypatch):
-    """When GOOGLE_API_KEY is absent, OpenRouter is tried instead of returning a placeholder."""
-    from orchestrator.agents.executor.providers import ProviderChainResult
-    from orchestrator.agents.validator.summarizer import _summarize_errors
-
-    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-
-    chain_result = ProviderChainResult(
-        success=("- openrouter summary", 10, 5, 0.0),
-        provider_name="openrouter",
-    )
-    monkeypatch.setattr(
-        "orchestrator.agents.executor.providers._call_chain",
-        lambda chain, prompt, run_id: chain_result,
-    )
-
-    failed = [ToolResult(tool="ruff", passed=False, return_code=1, stderr="error")]
-    summary, model = _summarize_errors(failed, "test-run")
-    assert model == "openrouter"
-    assert "openrouter summary" in summary
+    assert summary == "[ruff] lookup error"

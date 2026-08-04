@@ -20,6 +20,16 @@ from orchestrator.schemas.config import TargetConfig
 # Helpers
 # ---------------------------------------------------------------------------
 
+_provider_runtime = None
+
+
+@pytest.fixture(autouse=True)
+def _supply_provider_runtime(provider_runtime):
+    global _provider_runtime
+    _provider_runtime = provider_runtime
+    yield
+    _provider_runtime = None
+
 
 def _make_task(risk_level: str, task_id: str = "t-cb-01") -> Task:
     return Task(
@@ -49,7 +59,12 @@ def _run(tmp_path, arch_out, staging_dir=None):
 
     workspace = tmp_path.parent / f"{tmp_path.name}-workspace"
     config = TargetConfig(target_path=tmp_path, workspace_path=workspace)
-    return run(arch_out, config=config, staging_dir=staging_dir or tmp_path / "staging")
+    return run(
+        arch_out,
+        config=config,
+        staging_dir=staging_dir or tmp_path / "staging",
+        runtime=_provider_runtime,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -268,23 +283,13 @@ def test_all_providers_exhausted(monkeypatch, tmp_path):
 
 
 @pytest.mark.integration
-def test_validator_uses_raw_stderr_when_cb_open(monkeypatch):
+def test_validator_uses_raw_stderr_when_cb_open(monkeypatch, provider_runtime):
     """
     When _cb_validator raises CircuitBreakerOpenError, _summarize_errors
     must return the raw stderr fallback string — not an LLM summary.
     """
     from orchestrator.agents.validator import _summarize_errors
     from orchestrator.schemas.validator_output import ToolResult
-
-    monkeypatch.setenv("GOOGLE_API_KEY", "fake-key-for-test")
-
-    cb_mock = MagicMock()
-    cb_mock.call.side_effect = CircuitBreakerOpenError(
-        provider="gemini",
-        state=CircuitBreakerState.OPEN,
-        retry_after=999_999.0,
-    )
-    monkeypatch.setattr("orchestrator.agents.validator._cb_validator", cb_mock)
 
     failed_tool = ToolResult(
         tool="ruff",  # type: ignore[arg-type]
@@ -296,13 +301,14 @@ def test_validator_uses_raw_stderr_when_cb_open(monkeypatch):
 
     # Also mock _call_chain to fail so we reach raw stderr fallback
     monkeypatch.setattr(
-        "orchestrator.agents.executor.providers._call_chain",
+        "orchestrator.agents.validator.summarizer._call_chain",
         MagicMock(side_effect=Exception("OpenRouter unavailable")),
     )
 
-    summary, model_used = _summarize_errors([failed_tool], run_id="test-run-id")
+    summary, model_used = _summarize_errors(
+        [failed_tool], run_id="test-run-id", runtime=provider_runtime
+    )
 
-    cb_mock.call.assert_called_once()
     assert "ruff" in summary
     assert "E501" in summary
     assert model_used == ""
