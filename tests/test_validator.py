@@ -88,6 +88,7 @@ def test_summarizer_all_fail_returns_raw(monkeypatch, provider_runtime):
 
     assert model == ""
     assert "[ruff]" in summary
+    assert "some error" in summary
 
 
 @pytest.mark.unit

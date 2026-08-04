@@ -91,6 +91,21 @@ def test_gemini_override_reaches_sdk(tmp_path, monkeypatch):
 
 
 @pytest.mark.unit
+def test_gemini_missing_text_returns_empty_response(tmp_path, monkeypatch):
+    runtime = _runtime(tmp_path, _config(tmp_path))
+    response = MagicMock(text=None, usage_metadata=None)
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.models.generate_content.return_value = response
+    factory = MagicMock(return_value=client)
+    monkeypatch.setattr("orchestrator.agents.executor.providers.create_gemini_client", factory)
+
+    result = _do_gemini_call(runtime, "prompt", "run")
+
+    assert result == ("", 0, 0)
+
+
+@pytest.mark.unit
 def test_claude_override_reaches_sdk_and_has_unknown_cost(tmp_path, monkeypatch):
     runtime = _runtime(
         tmp_path,
@@ -142,6 +157,22 @@ def test_openrouter_override_reaches_sdk(tmp_path, monkeypatch):
     factory.assert_called_once_with("test-openrouter")
     client.__exit__.assert_called_once()
     assert client.post.call_args.kwargs["json"]["model"] == "custom/openrouter"
+
+
+@pytest.mark.unit
+def test_openrouter_malformed_content_returns_empty_response(tmp_path, monkeypatch):
+    runtime = _runtime(tmp_path, _config(tmp_path))
+    response = MagicMock()
+    response.json.return_value = {"choices": [{"message": {"content": None}}]}
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.post.return_value = response
+    factory = MagicMock(return_value=client)
+    monkeypatch.setattr("orchestrator.agents.executor.providers.create_openrouter_client", factory)
+
+    result = _do_openrouter_call(runtime, "prompt", "run")
+
+    assert result == ("", 0, 0)
 
 
 @pytest.mark.unit

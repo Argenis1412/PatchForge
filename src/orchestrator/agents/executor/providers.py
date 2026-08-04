@@ -80,7 +80,7 @@ def _do_gemini_call(runtime: ProviderRuntime, prompt: str, run_id: str) -> tuple
         usage = response.usage_metadata
         _get_logger().info("[%s] Gemini OK | latency=%.2fs", run_id, time.perf_counter() - started)
         return (
-            _strip_markdown(response.text),
+            _strip_markdown(getattr(response, "text", "") or ""),
             usage.prompt_token_count if usage else 0,
             usage.candidates_token_count if usage else 0,
         )
@@ -104,12 +104,20 @@ def _do_openrouter_call(runtime: ProviderRuntime, prompt: str, run_id: str) -> t
         )
         response.raise_for_status()
         data = response.json()
-        usage = data.get("usage", {})
+        usage = data.get("usage", {}) if isinstance(data, dict) else {}
+        if not isinstance(usage, dict):
+            usage = {}
+        choices = data.get("choices") if isinstance(data, dict) else None
+        first_choice = choices[0] if isinstance(choices, list) and choices else None
+        message = first_choice.get("message") if isinstance(first_choice, dict) else None
+        content = message.get("content") if isinstance(message, dict) else ""
+        if not isinstance(content, str):
+            content = ""
         _get_logger().info(
             "[%s] OpenRouter OK | latency=%.2fs", run_id, time.perf_counter() - started
         )
         return (
-            _strip_markdown(data["choices"][0]["message"]["content"]),
+            _strip_markdown(content),
             usage.get("prompt_tokens", 0),
             usage.get("completion_tokens", 0),
         )
@@ -152,6 +160,16 @@ KNOWN_PROVIDER_NAMES = tuple(sorted(_PROVIDER_BY_NAME))
 
 def _provider_by_name() -> dict[str, object]:
     return dict(_PROVIDER_BY_NAME)
+
+
+def _provider_name(provider: object) -> str:
+    name = getattr(provider, "__name__", None)
+    if name is None:
+        wrapped = getattr(provider, "__wrapped__", None) or getattr(provider, "func", None)
+        if wrapped is not None:
+            return _provider_name(wrapped)
+        return provider.__class__.__name__
+    return name.removeprefix("_call_")
 
 
 @dataclass
@@ -198,7 +216,7 @@ def _categorize_failure(exc: BaseException) -> str:
 def _compute_cost(
     provider: object, input_tokens: int, output_tokens: int, model: str
 ) -> float | None:
-    if provider is not _call_claude:
+    if provider is not _call_claude and _provider_name(provider) != "claude":
         return 0.0
     if model != MODEL_CLAUDE:
         _get_logger().warning("Claude model overridden to %s — cost_llm will be null", model)
@@ -218,30 +236,28 @@ def _call_chain(
     """Call only statically eligible providers in the supplied policy order."""
 
     def _is_eligible(provider: object) -> bool:
-        name = provider.__name__.removeprefix("_call_")
-        return name not in runtime.credentials.eligibility or runtime.credentials.is_eligible(name)
+        name = _provider_name(provider)
+        if name not in _PROVIDER_BY_NAME:
+            return True
+        return name in runtime.credentials.eligibility and runtime.credentials.is_eligible(name)
 
     eligible_chain = [provider for provider in chain if _is_eligible(provider)]
     skipped = tuple(
-        provider.__name__.removeprefix("_call_")
-        for provider in chain
-        if provider not in eligible_chain
+        _provider_name(provider) for provider in chain if provider not in eligible_chain
     )
     if on_static_skip is not None:
         for provider_name in skipped:
             on_static_skip(provider_name)
-    primary = eligible_chain[0].__name__.removeprefix("_call_") if eligible_chain else None
+    primary = _provider_name(eligible_chain[0]) if eligible_chain else None
     failures: list[tuple[str, str]] = []
     primary_failure_category: str | None = None
     for provider in eligible_chain:
-        provider_name = provider.__name__.removeprefix("_call_")
+        provider_name = _provider_name(provider)
+        failure_name = getattr(provider, "__name__", provider_name)
         try:
-            if provider in _PROVIDER_BY_NAME.values():
-                raw, input_tokens, output_tokens = provider(runtime, prompt, run_id)
-            else:
-                raw, input_tokens, output_tokens = provider(prompt, run_id)
+            raw, input_tokens, output_tokens = provider(runtime, prompt, run_id)
             if not raw or not raw.strip():
-                failures.append((provider.__name__, "invalid/empty response"))
+                failures.append((failure_name, "invalid/empty response"))
                 if provider_name == primary:
                     primary_failure_category = "invalid_response"
                 continue
@@ -261,7 +277,7 @@ def _call_chain(
                 static_skipped_providers=skipped,
             )
         except _recoverable_exceptions() as exc:
-            failures.append((provider.__name__, str(exc)))
+            failures.append((failure_name, str(exc)))
             if provider_name == primary:
                 primary_failure_category = _categorize_failure(exc)
     return ProviderChainResult(

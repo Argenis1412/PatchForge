@@ -297,10 +297,10 @@ def test_known_provider_names_sorted():
 
 @pytest.mark.unit
 def test_call_chain_all_providers_fail(monkeypatch):
-    def _fail_a(prompt, run_id):
+    def _fail_a(runtime, prompt, run_id):
         raise Exception("a failed")
 
-    def _fail_b(prompt, run_id):
+    def _fail_b(runtime, prompt, run_id):
         raise Exception("b failed")
 
     monkeypatch.setattr(
@@ -317,10 +317,10 @@ def test_call_chain_all_providers_fail(monkeypatch):
 
 @pytest.mark.unit
 def test_call_chain_success_preserves_partial_failures(monkeypatch):
-    def _fail_first(prompt, run_id):
+    def _fail_first(runtime, prompt, run_id):
         raise Exception("first down")
 
-    def _succeed(prompt, run_id):
+    def _succeed(runtime, prompt, run_id):
         return ("patched code", 100, 50)
 
     monkeypatch.setattr(
@@ -341,7 +341,7 @@ def test_call_chain_success_preserves_partial_failures(monkeypatch):
 
 @pytest.mark.unit
 def test_call_chain_no_fallback_when_primary_succeeds(monkeypatch):
-    def _call_succeed(prompt, run_id):
+    def _call_succeed(runtime, prompt, run_id):
         return ("patched code", 100, 50)
 
     result = _call_chain([_call_succeed], "test prompt", "run_003")
@@ -356,10 +356,10 @@ def test_call_chain_reports_primary_provider_and_category_on_fallback(monkeypatc
     a genuine fallback, with the category derived from the primary's own
     failure — not from whichever provider happened to fail last."""
 
-    def _call_fail_primary(prompt, run_id):
+    def _call_fail_primary(runtime, prompt, run_id):
         raise Exception("402 credit balance too low")
 
-    def _call_succeed(prompt, run_id):
+    def _call_succeed(runtime, prompt, run_id):
         return ("patched code", 100, 50)
 
     monkeypatch.setattr(
@@ -377,10 +377,10 @@ def test_call_chain_reports_primary_provider_and_category_on_fallback(monkeypatc
 
 @pytest.mark.unit
 def test_call_chain_primary_provider_attempted_set_even_on_total_failure(monkeypatch):
-    def _fail_a(prompt, run_id):
+    def _fail_a(runtime, prompt, run_id):
         raise Exception("a failed")
 
-    def _fail_b(prompt, run_id):
+    def _fail_b(runtime, prompt, run_id):
         raise Exception("b failed")
 
     monkeypatch.setattr(

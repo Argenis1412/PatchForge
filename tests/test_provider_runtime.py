@@ -20,11 +20,11 @@ def test_static_ineligible_provider_is_skipped_before_call(tmp_path):
     calls: list[str] = []
     skipped: list[str] = []
 
-    def _call_gemini(prompt, run_id):
+    def _call_gemini(runtime, prompt, run_id):
         calls.append("gemini")
         raise AssertionError("statically ineligible provider was invoked")
 
-    def _call_claude(prompt, run_id):
+    def _call_claude(runtime, prompt, run_id):
         calls.append("claude")
         return "ok", 1, 1
 
