@@ -101,6 +101,7 @@ The LLM implemented the Claude fallback with a new manual try/except block that 
 
 ```python
 from orchestrator.agents.validator import _cb_validator
+
 response = _cb_validator.call(lambda: client.messages.create(...))
 ```
 

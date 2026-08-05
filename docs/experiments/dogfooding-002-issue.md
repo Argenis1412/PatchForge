@@ -12,11 +12,13 @@ Add `Field()` with description and constraints to the three bare fields in `Phil
 
 ```python
 class PhilosophyItemSchema(BaseModel):
-    id: str                  # missing Field()
-    name: str                # missing Field()
+    id: str  # missing Field()
+    name: str  # missing Field()
     role: dict[str, str] = Field(..., description="Role or title in multiple languages")
-    image_url: str           # missing Field()
-    description: dict[str, str] = Field(..., description="Detailed description in multiple languages")
+    image_url: str  # missing Field()
+    description: dict[str, str] = Field(
+        ..., description="Detailed description in multiple languages"
+    )
 ```
 
 ## Target state
@@ -27,7 +29,9 @@ class PhilosophyItemSchema(BaseModel):
     name: str = Field(..., description="Name of the philosopher", max_length=100)
     role: dict[str, str] = Field(..., description="Role or title in multiple languages")
     image_url: str = Field(..., description="URL of the philosopher's image")
-    description: dict[str, str] = Field(..., description="Detailed description in multiple languages")
+    description: dict[str, str] = Field(
+        ..., description="Detailed description in multiple languages"
+    )
 ```
 
 ## Scope
