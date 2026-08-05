@@ -19,6 +19,7 @@ from orchestrator.clients.bootstrap import bootstrap_environment
 from orchestrator.clients.credentials import CredentialResolutionError, resolve_operator_credentials
 from orchestrator.observability.events import log_event, log_failure
 from orchestrator.plan_validation import validate_plan_paths
+from orchestrator.provider_policy import eligible_providers
 from orchestrator.provider_runtime import ProviderRuntime
 from orchestrator.risk import check_plan_gate
 from orchestrator.schemas.config import TargetConfig, default_workspace_path
@@ -78,6 +79,22 @@ def execute(
         console.print(f"[bold red]Credential resolution failed: {exc}[/bold red]")
         raise typer.Exit(code=1) from None
     runtime = ProviderRuntime.from_config(credential_context, config)
+
+    try:
+        providers = eligible_providers(
+            credential_context,
+            stage="architect",
+            force_provider=force_provider,
+        )
+    except ValueError as exc:
+        console.print(f"[bold red]Provider preflight failed: {exc}[/bold red]")
+        raise typer.Exit(code=1) from None
+    if not providers:
+        console.print(
+            "[bold red]Provider preflight failed: no credential-eligible provider "
+            "is available for Architect.[/bold red]"
+        )
+        raise typer.Exit(code=1) from None
 
     log_event(
         trace_id=run_id,

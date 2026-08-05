@@ -358,6 +358,35 @@ def test_preview_rejects_unbound_execution_plan_before_stage_start(
 # ── Scenario 5: Empty patch ─────────────────────────────────────────────────
 
 
+def test_preview_provider_preflight_preserves_planned_run_without_side_effects(
+    env, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """Missing credentials reject before executor events or staging changes."""
+    wm, run_id = env["wm"], env["run_id"]
+    run_dir = wm.run_dir(run_id)
+    before_run = (run_dir / "run.json").read_bytes()
+    before_files = sorted(path.name for path in run_dir.iterdir())
+    target = env["target"]
+    before_target = _snapshot_target(target)
+
+    for variable in ("ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY"):
+        monkeypatch.delenv(variable, raising=False)
+    executor = MagicMock(side_effect=AssertionError("executor must not be called"))
+    monkeypatch.setattr("orchestrator.agents.executor.run", executor)
+
+    with pytest.raises(typer.Exit) as exc:
+        _execute(run_id, workspace=env["workspace_path"])
+
+    assert exc.value.exit_code == 1
+    assert "Provider preflight failed" in capsys.readouterr().out
+    executor.assert_not_called()
+    assert (run_dir / "run.json").read_bytes() == before_run
+    assert sorted(path.name for path in run_dir.iterdir()) == before_files
+    assert not (run_dir / "staging").exists()
+    assert not (env["workspace_path"] / "logs" / "pipeline.jsonl").exists()
+    _assert_target_unchanged(target, before_target)
+
+
 def test_empty_patch(env, monkeypatch: pytest.MonkeyPatch) -> None:
     wm, run_id = env["wm"], env["run_id"]
     target = env["target"]

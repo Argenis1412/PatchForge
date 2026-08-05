@@ -67,15 +67,39 @@ def provider_chain(stage: str, risk_level: str | None = None) -> tuple[str, ...]
         raise ValueError(f"No provider policy is declared for {stage!r}/{risk_level!r}") from exc
 
 
+def effective_provider_chain(
+    stage: str,
+    *,
+    risk_level: str | None = None,
+    force_provider: str | None = None,
+) -> tuple[str, ...]:
+    """Return the policy-admissible chain after applying an optional override."""
+    declared_chain = provider_chain(stage, risk_level)
+    if force_provider is None:
+        return declared_chain
+    if force_provider not in PROVIDERS:
+        raise ValueError(
+            f"Unknown provider: {force_provider}. Available: {tuple(sorted(PROVIDERS))}"
+        )
+    if force_provider not in declared_chain:
+        raise ValueError(f"Provider {force_provider!r} is not allowed for {stage!r}/{risk_level!r}")
+    return (force_provider,)
+
+
 def eligible_providers(
     credential_context: CredentialContext,
     *,
     stage: str,
     risk_level: str | None = None,
+    force_provider: str | None = None,
 ) -> tuple[str, ...]:
     """Return static credential-eligible providers in declared order."""
     return tuple(
         provider
-        for provider in provider_chain(stage, risk_level)
+        for provider in effective_provider_chain(
+            stage,
+            risk_level=risk_level,
+            force_provider=force_provider,
+        )
         if credential_context.is_eligible(provider)
     )

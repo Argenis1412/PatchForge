@@ -435,6 +435,20 @@ class TestArchitectProviderChain:
         with pytest.raises(ProviderError):
             arch_provider.call_claude("prompt", "architect", force_provider="nonexistent")
 
+    @pytest.mark.unit
+    def test_force_provider_uses_shared_policy(self, monkeypatch):
+        from orchestrator.agents.architect import provider as arch_provider
+        from orchestrator.exceptions import ProviderError
+
+        monkeypatch.setattr(
+            arch_provider,
+            "effective_provider_chain",
+            lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("policy rejected override")),
+        )
+
+        with pytest.raises(ProviderError, match="policy rejected override"):
+            arch_provider.call_claude("prompt", "architect", force_provider="gemini")
+
 
 # ---------------------------------------------------------------------------
 # Target files injection tests (D-001 root cause)

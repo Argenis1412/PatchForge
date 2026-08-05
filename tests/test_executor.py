@@ -927,6 +927,34 @@ def test_force_provider_preserves_high_risk_gating(tmp_path, monkeypatch):
 
 
 @pytest.mark.unit
+def test_high_risk_force_provider_rejects_non_claude_before_provider_call(tmp_path, monkeypatch):
+    from orchestrator.agents.executor.applier import _apply_task
+
+    source_file = tmp_path / "test.py"
+    source_file.write_text("x = 1\n", encoding="utf-8")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    task = Task(
+        task_id="t1",
+        title="change x",
+        description="change x to 2",
+        files_to_modify=["test.py"],
+        priority="high",
+        effort="low",
+        risk_level="high",
+        dependencies=[],
+    )
+    call_chain = MagicMock(side_effect=AssertionError("provider must not be called"))
+    monkeypatch.setattr("orchestrator.agents.executor.applier._call_chain", call_chain)
+
+    with pytest.raises(ValueError, match="not allowed"):
+        _apply_task(task, "run_006", tmp_path, staging, force_provider="gemini")
+
+    call_chain.assert_not_called()
+    assert not (staging / "test.py").exists()
+
+
+@pytest.mark.unit
 def test_executor_run_unknown_force_provider(tmp_path):
     arch_out = ArchitectOutput(
         validated_findings=[],

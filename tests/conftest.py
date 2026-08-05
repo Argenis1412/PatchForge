@@ -8,7 +8,7 @@ from orchestrator.provider_runtime import ProviderRuntime
 
 
 @pytest.fixture(autouse=True)
-def _reset_circuit_breakers(tmp_path):
+def _reset_circuit_breakers(tmp_path, monkeypatch):
     """Lazily init circuit breakers into a per-test temp dir so that
     (a) import-time SQLite races under xdist are avoided, and
     (b) production ~/.patchforge/coordination.db is never touched.
@@ -16,6 +16,10 @@ def _reset_circuit_breakers(tmp_path):
     After each test, reset CB state to prevent leakage across reuse.
     """
     from orchestrator.agents.executor import providers
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic")
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-google")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter")
 
     if providers._coord_store is None:
         from orchestrator.circuit_breaker import circuit_breaker_for
