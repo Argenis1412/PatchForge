@@ -25,13 +25,23 @@ Repository → Scan → Plan → Patch → Validation → Apply
 The target command flow is:
 
 ```bash
-patchforge doctor .
-patchforge scan .
+patchforge doctor <target-repository> --env-file <operator-env-file>
+patchforge scan <target-repository> --workspace <workspace>
 # Use the run_id printed by scan for the remaining stages.
-patchforge plan <run_id>
-patchforge preview <run_id>
-patchforge apply <run_id>
+patchforge plan <run_id> --workspace <workspace> --issue-file <issue.md> --env-file <operator-env-file>
+patchforge preview <run_id> --workspace <workspace> --env-file <operator-env-file>
+patchforge apply <run_id> --workspace <workspace> --env-file <operator-env-file>
 ```
+
+Use credentials inherited by the shell, or pass an operator-owned
+`--env-file` outside the target repository. An explicit file replaces inherited
+provider credentials for that command invocation. `doctor` reports static
+credential eligibility; it does not verify account balance, network access, or
+runtime provider availability.
+
+The deterministic `scan` command requires a human-written Markdown issue file
+for the next stage: pass it to `plan --issue-file`. Before `apply`, all stages
+leave the target working tree unchanged.
 
 The target safety rule is:
 
@@ -74,8 +84,11 @@ Design and architecture decisions are documented in Architecture Decision Record
 ## Current Status
 
 - V1 and P0–P4 complete, including Validator Plugins (#282).
-- Current priority: observe external users solving real problems before
-  selecting the next product development priority.
+- ADR-0013 and its credential-boundary foundations are complete: explicit
+  credential resolution, shared provider policy, and invocation-scoped runtime
+  migration (issues #302-#309).
+- Current priority: implement effect-free provider preflight at stage lifecycle
+  boundaries, then observe one external user solving a real problem.
 - P5 Learning Pipeline items remain scoped backlog, not active work.
 - QA: CI verifies the full test suite, Ruff lint, and Ruff formatting on every change. See the [CI workflow](https://github.com/Argenis1412/PatchForge/actions/workflows/ci.yml) for the current result.
 
@@ -92,19 +105,13 @@ cd PatchForge
 pip install -e .
 ```
 
-### Configuration
-
-Create a `.env` file with your API keys:
-
-```bash
-cp .env.example .env
-# Edit .env and add your API keys
-```
-
 ### First Run
 
 ```bash
+# Store credentials outside /path/to/project, then run:
+patchforge doctor /path/to/project --env-file /path/to/operator.env
 patchforge scan /path/to/project --workspace /tmp/patchforge-workspace
+# Continue with plan --issue-file, preview, and apply as shown above.
 ```
 
 ## Development

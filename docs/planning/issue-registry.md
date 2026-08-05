@@ -17,6 +17,32 @@
 
 ---
 
+## Recent Provider Boundary Delivery
+
+### Issue #302 - Provider preflight and operator credential boundary
+- **Priority:** Adoption safety | **Status:** Completed | **PR:** #303
+- **Goal:** Record ADR-0013, defining trusted credential sources, shared
+  provider-policy vocabulary, and effect-free retry semantics for the future
+  stage preflight.
+
+### Issue #304 - Resolve operator credentials from explicit trusted sources
+- **Priority:** Adoption safety | **Status:** Completed | **PR:** #305
+- **Goal:** Resolve provider credentials only from inherited environment or an
+  explicit trusted file, while excluding target-owned credential files.
+
+### Issue #306 - Centralize provider policy for credential routing
+- **Priority:** Adoption safety | **Status:** Completed | **PR:** #307
+- **Goal:** Give doctor and runtime one non-secret authority for provider
+  ordering and static credential eligibility.
+
+### Issue #308 - Migrate explicit credential runtime
+- **Priority:** Adoption safety | **Status:** Completed | **PR:** #309
+- **Goal:** Pass one invocation-scoped credential and model runtime through
+  provider-backed stages, CI, and workers, without exposing credentials to
+  validator processes.
+
+---
+
 ## Legend
 
 | Status | Meaning |
