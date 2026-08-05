@@ -67,13 +67,19 @@ must apply this precedence:
 | Condition | Later evaluation | `preflight_reason` |
 | --- | --- | --- |
 | Credential source is untrusted or unavailable | Do not evaluate policy | `credential_source_rejected` |
-| Credential source is valid and a syntactically valid forced provider is not policy-admissible for Architect | Do not evaluate eligibility | `provider_policy_rejected` |
-| Credential source and policy are valid, but no provider in the admissible chain is credential-eligible | None | `no_eligible_provider` |
+| Credential source is valid, but provider-policy evaluation is invalid, unavailable, or raises an evaluation error | Do not evaluate eligibility | `provider_policy_unavailable` |
+| Provider policy is valid and a syntactically valid forced provider is not policy-admissible for Architect | Do not evaluate eligibility | `provider_policy_rejected` |
+| Provider policy is valid, but credential-eligibility evaluation raises an error | None | `eligibility_evaluation_failed` |
+| Credential source, policy, and eligibility evaluation are valid, but no provider in the admissible chain is credential-eligible | None | `no_eligible_provider` |
 | Credential source, policy, and eligibility are valid | Continue CI | No rejection result |
 
 An unknown `--force-provider` remains CLI argument validation and is not a
 preflight result. Mixed provider chains are classified only after the full
-admissible chain is evaluated for eligibility.
+admissible chain is evaluated for eligibility. The implementation must evaluate
+credential resolution, provider policy, and eligibility as separate classifier
+inputs so an invalid result or evaluation error cannot be collapsed into
+`no_eligible_provider`. Every table row other than `Continue CI` emits exactly
+one `preflight_reason` and its fixed redacted error message.
 
 `error` is a fixed operator-facing message derived from `preflight_reason`.
 It must not serialize an internal exception or include credential values,
@@ -117,7 +123,8 @@ The implementation issue must verify:
 - result-path rejection inside the target, runs, and staging without writes;
 - one redacted result for each public preflight reason at a valid destination;
 - classifier precedence for invalid credential sources, policy rejection, and
-  chains without eligible credentials;
+  chains without eligible credentials, including provider-policy and
+  eligibility-evaluation errors;
 - v1 historical dispatch, v2 dispatch, and safe rejection of unknown
   versions; and
 - absence of runs, events, staging, artifacts, pushes, and pull requests for
