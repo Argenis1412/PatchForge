@@ -6,6 +6,7 @@ from orchestrator.clients.credentials import resolve_operator_credentials
 from orchestrator.provider_policy import (
     PROVIDERS,
     ProviderDefinition,
+    effective_provider_chain,
     eligible_providers,
     provider_chain,
 )
@@ -36,6 +37,33 @@ def test_eligible_providers_preserves_policy_order(tmp_path):
     )
 
     assert eligible_providers(context, stage="executor", risk_level="low") == ("gemini", "claude")
+
+
+def test_effective_provider_chain_applies_admissible_override():
+    assert effective_provider_chain("executor", risk_level="medium", force_provider="claude") == (
+        "claude",
+    )
+
+
+def test_effective_provider_chain_rejects_high_risk_non_claude_override():
+    with pytest.raises(ValueError, match="not allowed"):
+        effective_provider_chain("executor", risk_level="high", force_provider="gemini")
+
+
+def test_eligible_providers_respects_forced_provider(tmp_path):
+    context = resolve_operator_credentials(
+        target_path=tmp_path,
+        inherited_environment={
+            "ANTHROPIC_API_KEY": "claude-key",
+            "GOOGLE_API_KEY": "gemini-key",
+        },
+    )
+
+    assert eligible_providers(
+        context,
+        stage="architect",
+        force_provider="gemini",
+    ) == ("gemini",)
 
 
 def test_provider_metadata_is_non_secret_and_complete():

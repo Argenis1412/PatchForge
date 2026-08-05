@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from orchestrator.provider_policy import provider_chain
+from orchestrator.provider_policy import effective_provider_chain
 from orchestrator.provider_runtime import ProviderRuntime
 from orchestrator.schemas.architect_output import Task
 from orchestrator.schemas.executor_output import FileChange, TaskStatus
@@ -140,21 +140,12 @@ def _apply_task(
     primary_provider_attempted: str | None = None
     primary_failure_category: str | None = None
 
-    # force_provider is orthogonal to risk_level: it only changes which LLM
-    # generates the patch.  risk_level still controls high-risk gating
-    # (pending_human_review) and staging writes below.
-    if force_provider:
-        by_name = _provider_by_name()
-        provider = by_name.get(force_provider)
-        if provider is None:
-            raise ValueError(
-                f"Unknown provider: {force_provider}. Available: {tuple(sorted(by_name))}"
-            )
-        chain = [provider]
-    else:
-        chain = [_provider_by_name()[name] for name in provider_chain("executor", task.risk_level)]
-    if not chain:
-        raise ValueError(f"Unknown risk level: {task.risk_level}")
+    provider_names = effective_provider_chain(
+        "executor",
+        risk_level=task.risk_level,
+        force_provider=force_provider,
+    )
+    chain = [_provider_by_name()[name] for name in provider_names]
 
     last_failures: list[tuple[str, str]] = []
     for attempt in range(MAX_RETRIES + 1):

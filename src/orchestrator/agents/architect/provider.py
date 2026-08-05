@@ -13,7 +13,7 @@ from orchestrator.agents.executor.providers import (
 from orchestrator.exceptions import ProviderError
 from orchestrator.observability.events import FailureType, log_event, log_failure
 from orchestrator.observability.logger import log_call
-from orchestrator.provider_policy import provider_chain
+from orchestrator.provider_policy import effective_provider_chain
 from orchestrator.provider_runtime import ProviderRuntime
 
 
@@ -44,17 +44,11 @@ def call_claude(
     """Call the architect provider chain."""
     call_started = time.monotonic()
 
-    if force_provider:
-        by_name = _provider_by_name()
-        provider = by_name.get(force_provider)
-        if provider is None:
-            raise ProviderError(
-                "provider_chain",
-                f"Unknown provider: {force_provider}. Available: {tuple(sorted(by_name))}",
-            )
-        chain = [provider]
-    else:
-        chain = [_provider_by_name()[name] for name in provider_chain("architect")]
+    try:
+        provider_names = effective_provider_chain("architect", force_provider=force_provider)
+    except ValueError as exc:
+        raise ProviderError("provider_chain", str(exc)) from exc
+    chain = [_provider_by_name()[name] for name in provider_names]
 
     def _record_static_skip(provider_name: str) -> None:
         if logs_dir is None:

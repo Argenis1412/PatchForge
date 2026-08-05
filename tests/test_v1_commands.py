@@ -1,7 +1,7 @@
 import json
 import subprocess
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
@@ -592,6 +592,72 @@ def test_v1_issue_file_flow(target_repo: Path, workspace_dir: Path, tmp_path: Pa
             text=True,
         )
         assert candidate.stdout == "Hello World Issue\n"
+
+
+def test_plan_provider_preflight_preserves_scanned_run_without_side_effects(
+    target_repo: Path, workspace_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    scan_result = runner.invoke(app, ["scan", str(target_repo), "--workspace", str(workspace_dir)])
+    assert scan_result.exit_code == 1, scan_result.stdout
+
+    run_id = next((workspace_dir / "runs").iterdir()).name
+    run_dir = workspace_dir / "runs" / run_id
+    before_run = (run_dir / "run.json").read_bytes()
+    before_files = sorted(path.name for path in run_dir.iterdir())
+    pipeline_path = workspace_dir / "logs" / "pipeline.jsonl"
+    before_pipeline = pipeline_path.read_bytes() if pipeline_path.exists() else None
+    issue_path = tmp_path / "issue.md"
+    issue_path.write_text("# Fix the README\n", encoding="utf-8")
+
+    for variable in ("ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY"):
+        monkeypatch.delenv(variable, raising=False)
+    architect = MagicMock(side_effect=AssertionError("architect must not be called"))
+    monkeypatch.setattr("orchestrator.agents.architect.run_from_issue", architect)
+
+    result = runner.invoke(
+        app,
+        ["plan", run_id, "--workspace", str(workspace_dir), "--issue-file", str(issue_path)],
+    )
+
+    assert result.exit_code == 1
+    assert "Provider preflight failed" in result.stdout
+    architect.assert_not_called()
+    assert (run_dir / "run.json").read_bytes() == before_run
+    assert sorted(path.name for path in run_dir.iterdir()) == before_files
+    assert not (run_dir / "issue.md").exists()
+    if before_pipeline is None:
+        assert not pipeline_path.exists()
+    else:
+        assert pipeline_path.read_bytes() == before_pipeline
+
+    monkeypatch.setenv("GOOGLE_API_KEY", "corrected-credential")
+    architect.side_effect = None
+    architect.return_value = (
+        ArchitectOutput(
+            validated_findings=[],
+            false_positives=[],
+            systemic_risks=[],
+            implementation_plan=[
+                Task(
+                    task_id="T1",
+                    title="Fix README",
+                    description="Fix README",
+                    files_to_modify=["README.md"],
+                    priority="low",
+                    effort="low",
+                    risk_level="low",
+                )
+            ],
+            blockers=[],
+        ),
+        {"cost_usd": 0.0},
+    )
+    retry = runner.invoke(
+        app,
+        ["plan", run_id, "--workspace", str(workspace_dir), "--issue-file", str(issue_path)],
+    )
+    assert retry.exit_code == 0, retry.stdout
+    assert json.loads((run_dir / "run.json").read_text(encoding="utf-8"))["status"] == "planned"
 
 
 def test_plan_with_issue_file_not_found(target_repo: Path, workspace_dir: Path, tmp_path: Path):
