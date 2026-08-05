@@ -49,7 +49,8 @@ Most AI coding tools optimize for speed. PatchForge optimizes for trust — chan
 
 - **Delivery:** V1 and P0–P4 are complete, including Validator Plugins
   (#282), ADR-0013, explicit credential resolution, shared provider policy,
-  and invocation-scoped provider runtime migration (#302-#309).
+  and invocation-scoped provider runtime migration (#302, #304, #306, and
+  #308).
 - **Priority:** Implement effect-free provider preflight at stage lifecycle
   boundaries, then observe one external user solving a real problem. Scoped P5
   items are backlog, not active work.

@@ -86,7 +86,7 @@ Design and architecture decisions are documented in Architecture Decision Record
 - V1 and P0–P4 complete, including Validator Plugins (#282).
 - ADR-0013 and its credential-boundary foundations are complete: explicit
   credential resolution, shared provider policy, and invocation-scoped runtime
-  migration (issues #302-#309).
+  migration (issues #302, #304, #306, and #308).
 - Current priority: implement effect-free provider preflight at stage lifecycle
   boundaries, then observe one external user solving a real problem.
 - P5 Learning Pipeline items remain scoped backlog, not active work.
