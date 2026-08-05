@@ -11,13 +11,22 @@ AI-powered, safety-first code modification tool. Generates, validates, and appli
 ## Workflow
 
 ```bash
-patchforge doctor .
-patchforge scan .
+# Use credentials inherited by this shell, or an operator-owned credential
+# file outside the target repository.
+patchforge doctor <target-repository> --env-file <operator-env-file>
+patchforge scan <target-repository> --workspace <workspace>
 # Use the run_id printed by scan for the remaining stages.
-patchforge plan <run_id>
-patchforge preview <run_id>
-patchforge apply <run_id>
+patchforge plan <run_id> --workspace <workspace> --issue-file <issue.md> --env-file <operator-env-file>
+patchforge preview <run_id> --workspace <workspace> --env-file <operator-env-file>
+patchforge apply <run_id> --workspace <workspace> --env-file <operator-env-file>
 ```
+
+`plan` requires a Markdown issue file when the run was created by the
+deterministic `scan` command. Keep an explicit credential file outside the
+target repository: it replaces inherited provider credentials for that command
+invocation. Alternatively, omit `--env-file` and use credentials inherited by
+the shell. `doctor` reports static credential eligibility only; it does not
+check provider account balance, network access, or runtime availability.
 
 The internal runtime uses specialized agents, typed Pydantic contracts, and structured observability. The user-facing product is organized around repositories, plans, patches, validation, and Git review.
 
@@ -39,10 +48,12 @@ Most AI coding tools optimize for speed. PatchForge optimizes for trust — chan
 ## Current Status
 
 - **Delivery:** V1 and P0–P4 are complete, including Validator Plugins
-  (#282) and its V2 operational integration.
-- **Priority:** Observe external users solving real problems before selecting
-  the next product development priority. Scoped P5 items are backlog, not
-  active work.
+  (#282), ADR-0013, explicit credential resolution, shared provider policy,
+  and invocation-scoped provider runtime migration (#302, #304, #306, and
+  #308).
+- **Priority:** Implement effect-free provider preflight at stage lifecycle
+  boundaries, then observe one external user solving a real problem. Scoped P5
+  items are backlog, not active work.
 - **QA:** CI verifies the full test suite, Ruff lint, and Ruff formatting on every change. See the [CI workflow](https://github.com/Argenis1412/PatchForge/actions/workflows/ci.yml) for the current result.
 - [Project context](./docs/context/CONTEXT.md) | [Development workflow](./docs/context/Workflow.md) | [Roadmap](./docs/planning/roadmap.md)
 
@@ -72,8 +83,8 @@ patch_apply=120`. `validator_timeout`, `PATCHFORGE_VALIDATOR_TIMEOUT`, and
 ## Quickstart
 
 ```bash
-pip install -e ".[dev]"
-patchforge scan ./your-project --workspace /tmp/patchforge-workspace
+pip install -e .
+# Then follow the Workflow above with a repository-specific issue file.
 ```
 
 ## Development
