@@ -41,6 +41,17 @@
   provider-backed stages, CI, and workers, without exposing credentials to
   validator processes.
 
+### Issue #313 - Specify CI preflight rejection result contract
+- **Priority:** Adoption safety | **Status:** Specified
+- **Goal:** Record ADR-0014's versioned, external `ci_result@2` contract for
+  an initial Architect preflight rejection before Scan or Plan begins.
+- **Scope:** Define persistence outside target/run/staging directories,
+  redaction, public reason precedence, exit codes, and versioned consumer
+  dispatch. A later implementation issue must update the emitter, parser, and
+  automation consumers together.
+- **Non-goals:** No `CiResult`, CI lifecycle, workflow, provider-policy, SDK,
+  or ProviderRuntime change; no post-Plan Executor preflight contract.
+
 ---
 
 ## Legend
