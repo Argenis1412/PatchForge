@@ -41,6 +41,16 @@
   provider-backed stages, CI, and workers, without exposing credentials to
   validator processes.
 
+### Issue #310 - Sync provider status and first-run guidance
+- **Priority:** Adoption safety | **Status:** Completed | **PR:** #311
+- **Goal:** Align onboarding and the documented first-run workflow with the
+  explicit operator credential boundary.
+
+### Issue #312 - Enforce effect-free stage preflight
+- **Priority:** Adoption safety | **Status:** Completed | **PR:** #314
+- **Goal:** Reject static provider failures before effects in local Plan and
+  Preview while preserving the prior canonical run state.
+
 ### Issue #313 - Specify CI preflight rejection result contract
 - **Priority:** Adoption safety | **Status:** Specified
 - **Goal:** Record ADR-0014's versioned, external `ci_result@2` contract for
