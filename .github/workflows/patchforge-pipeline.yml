@@ -121,6 +121,14 @@ jobs:
           TRIGGERED_BY_JSON: ${{ steps.result.outputs.triggered_by_json }}
         run: |
           VALIDATION=""
+          AFFECTED=$(python3 -c "
+          import json, os
+          print('\n'.join(f'- \`{path}\`' for path in json.loads(os.environ['AFFECTED_FILES_JSON'])))
+          ")
+          TRIGGERED_BY=$(python3 -c "
+          import json, os
+          print(json.loads(os.environ['TRIGGERED_BY_JSON']))
+          ")
           VAL_FILE="/tmp/pf-workspace/runs/$RUN_ID/validation.json"
           if [ -f "$VAL_FILE" ]; then
             VALIDATION=$(python3 -c "
@@ -143,10 +151,10 @@ jobs:
           **Source issue:** #$ISSUE_NUMBER
           **Risk budget:** $RISK
           **Validation:** $VALIDATION
-          **Triggered by:** $TRIGGERED_BY_JSON
+          **Triggered by:** $TRIGGERED_BY
 
           ### Affected files
-          $AFFECTED_FILES_JSON
+          $AFFECTED
 
           ---
           Review the artifacts in the workflow run for \`plan.json\`, \`patch.diff\`, and \`validation.json\`.
@@ -169,8 +177,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PREFLIGHT_REASON: ${{ steps.result.outputs.preflight_reason }}
-          ERROR: ${{ steps.result.outputs.error_json }}
+          ERROR_JSON: ${{ steps.result.outputs.error_json }}
         run: |
+          ERROR=$(python3 -c "import json, os; print(json.loads(os.environ['ERROR_JSON']))")
           gh issue comment "$ISSUE_NUMBER" \
             --body "## PatchForge Provider Preflight Rejected
 
@@ -188,8 +197,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           STATUS: ${{ steps.result.outputs.status }}
-          ERROR: ${{ steps.result.outputs.error_json }}
+          ERROR_JSON: ${{ steps.result.outputs.error_json }}
         run: |
+          ERROR=$(python3 -c "import json, os; print(json.loads(os.environ['ERROR_JSON']))")
           gh issue comment "$ISSUE_NUMBER" \
             --body "## PatchForge Pipeline Failed
 

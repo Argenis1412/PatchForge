@@ -109,10 +109,7 @@ def execute(
     from orchestrator.agents import architect as architect_agent
     from orchestrator.agents import executor as executor_agent
     from orchestrator.clients.bootstrap import bootstrap_environment
-    from orchestrator.clients.credentials import (
-        CredentialResolutionError,
-        resolve_operator_credentials,
-    )
+    from orchestrator.clients.credentials import resolve_operator_credentials
     from orchestrator.git import (
         apply_patch,
         create_controlled_branch,
@@ -186,8 +183,6 @@ def execute(
         credential_context = resolve_operator_credentials(
             target_path=target_path, env_file=env_file
         )
-    except CredentialResolutionError:
-        return _preflight_rejected("credential_source_rejected")
     except Exception:
         return _preflight_rejected("credential_source_rejected")
 
@@ -199,7 +194,7 @@ def execute(
         policy=policy,
         eligibility=None,
     )
-    if reason in {"provider_policy_unavailable", "provider_policy_rejected"}:
+    if reason is not None:
         return _preflight_rejected(reason)
 
     eligibility: CredentialEligibilityEvaluation = evaluate_credential_eligibility(

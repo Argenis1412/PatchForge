@@ -85,13 +85,19 @@ def github_output_lines(result: CiCommandResult) -> list[str]:
         result.preflight_reason if isinstance(result, CiPreflightRejectedResult) else ""
     )
     schema_version = result.schema_version if isinstance(result, CiPreflightRejectedResult) else ""
+    raw_fields = {
+        "schema_version": schema_version,
+        "run_id": result.run_id,
+        "branch": result.branch,
+        "status": result.status,
+        "risk": result.risk_budget,
+        "preflight_reason": preflight_reason,
+    }
+    for name, value in raw_fields.items():
+        if "\n" in value or "\r" in value:
+            raise ValueError(f"CI result output field {name!r} must be single-line.")
     return [
-        f"schema_version={schema_version}",
-        f"run_id={result.run_id}",
-        f"branch={result.branch}",
-        f"status={result.status}",
-        f"risk={result.risk_budget}",
-        f"preflight_reason={preflight_reason}",
+        *(f"{name}={value}" for name, value in raw_fields.items()),
         f"error_json={json.dumps(result.error or '')}",
         f"affected_files_json={json.dumps(result.affected_files)}",
         f"triggered_by_json={json.dumps(result.triggered_by or '')}",

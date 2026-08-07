@@ -132,6 +132,20 @@ def evaluate_credential_eligibility(
     return CredentialEligibilityEvaluation(status="eligible", providers=eligible)
 
 
+def _require_admissible(
+    evaluation: ProviderPolicyEvaluation,
+    *,
+    stage: str,
+    risk_level: str | None,
+) -> tuple[str, ...]:
+    """Return an admissible chain or preserve the compatible error contract."""
+    if evaluation.status == "admissible":
+        return evaluation.providers
+    if evaluation.message is not None:
+        raise ValueError(evaluation.message)
+    raise ValueError(f"No provider policy is declared for {stage!r}/{risk_level!r}")
+
+
 def effective_provider_chain(
     stage: str,
     *,
@@ -144,11 +158,7 @@ def effective_provider_chain(
         risk_level=risk_level,
         force_provider=force_provider,
     )
-    if evaluation.status == "admissible":
-        return evaluation.providers
-    if evaluation.message is not None:
-        raise ValueError(evaluation.message)
-    raise ValueError(f"No provider policy is declared for {stage!r}/{risk_level!r}")
+    return _require_admissible(evaluation, stage=stage, risk_level=risk_level)
 
 
 def eligible_providers(
@@ -164,11 +174,8 @@ def eligible_providers(
         risk_level=risk_level,
         force_provider=force_provider,
     )
-    if policy.status != "admissible":
-        if policy.message is not None:
-            raise ValueError(policy.message)
-        raise ValueError(f"No provider policy is declared for {stage!r}/{risk_level!r}")
-    eligibility = evaluate_credential_eligibility(credential_context, policy.providers)
+    providers = _require_admissible(policy, stage=stage, risk_level=risk_level)
+    eligibility = evaluate_credential_eligibility(credential_context, providers)
     if eligibility.status == "evaluation_failed":
         raise ValueError("Provider credential eligibility evaluation failed")
     return eligibility.providers

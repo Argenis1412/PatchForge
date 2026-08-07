@@ -342,7 +342,7 @@ def ci_result_github_output(
     try:
         result = parse_ci_result(result_file.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        console.print(f"[bold red]Error: {exc}[/bold red]")
+        typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=2) from exc
     for line in github_output_lines(result):
         typer.echo(line)

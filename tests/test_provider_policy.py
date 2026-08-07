@@ -125,3 +125,17 @@ def test_structured_policy_rejects_known_inadmissible_force_provider():
     evaluation = evaluate_provider_policy("executor", risk_level="high", force_provider="gemini")
 
     assert evaluation.status == "rejected"
+
+
+def test_structured_policy_reports_unavailable_for_undeclared_stage():
+    assert evaluate_provider_policy("unknown_stage").status == "unavailable"
+
+
+def test_structured_eligibility_reports_evaluation_failed():
+    class BrokenContext:
+        def is_eligible(self, provider: str) -> bool:
+            raise TypeError("broken eligibility mapping")
+
+    evaluation = evaluate_credential_eligibility(BrokenContext(), ("claude",))
+
+    assert evaluation.status == "evaluation_failed"

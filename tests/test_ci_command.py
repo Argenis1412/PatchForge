@@ -203,6 +203,20 @@ def test_ci_result_github_outputs_are_derived_from_validated_result():
     ]
 
 
+def test_ci_result_github_outputs_reject_raw_multiline_fields():
+    result = CiResult(
+        run_id="run",
+        branch="branch\nunsafe",
+        status="applied",
+        risk_budget="low",
+        affected_files=[],
+        validation_passed=True,
+    )
+
+    with pytest.raises(ValueError, match="single-line"):
+        github_output_lines(result)
+
+
 @pytest.mark.parametrize(
     ("credential_source_rejected", "policy_status", "eligibility_status", "providers", "expected"),
     [
@@ -299,6 +313,14 @@ def test_ci_result_cli_emits_only_validated_outputs(tmp_path):
     assert "status=preflight_rejected" in result.stdout
 
 
+def test_ci_result_cli_reports_parse_errors_on_stderr(tmp_path):
+    result = runner.invoke(app, ["ci-result", "github-output", str(tmp_path / "missing.json")])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "Error:" in result.stderr
+
+
 def test_ci_result_path_rejects_target_symlink_without_writing(tmp_path):
     from orchestrator.commands.ci import CiResultDestinationError, execute
 
@@ -326,6 +348,9 @@ def test_pipeline_workflow_uses_validated_ci_result_consumer_only():
 
     assert "patchforge ci-result github-output /workspace/ci_result.json" in content
     assert "json.load(open('/tmp/pf-workspace/ci_result.json'))" not in content
+    assert "json.loads(os.environ['AFFECTED_FILES_JSON'])" in content
+    assert "json.loads(os.environ['TRIGGERED_BY_JSON'])" in content
+    assert "json.loads(os.environ['ERROR_JSON'])" in content
 
 
 # ---------------------------------------------------------------------------
