@@ -88,8 +88,11 @@ Design and architecture decisions are documented in Architecture Decision Record
 - ADR-0013 and its credential-boundary foundations are complete: explicit
   credential resolution, shared provider policy, and invocation-scoped runtime
   migration (issues #302, #304, #306, and #308).
-- Current priority: implement effect-free provider preflight at stage lifecycle
-  boundaries, then observe one external user solving a real problem.
+- First-run onboarding (#310) and effect-free provider preflight for local
+  Plan and Preview stages (#312) are complete. ADR-0014 specifies the initial
+  CI preflight result contract (#313); its implementation is pending.
+- Current priority: implement ADR-0014's initial Architect preflight result
+  for CI, then observe one external user solving a real problem.
 - P5 Learning Pipeline items remain scoped backlog, not active work.
 - QA: CI verifies the full test suite, Ruff lint, and Ruff formatting on every change. See the [CI workflow](https://github.com/Argenis1412/PatchForge/actions/workflows/ci.yml) for the current result.
 

@@ -17,16 +17,20 @@
   are delivered. Provider credential boundary foundations are also delivered:
   ADR-0013, explicit credential resolution, shared provider policy, and the
   invocation-scoped provider runtime (issues #302, #304, #306, and #308).
+  First-run onboarding (#310) and effect-free provider preflight for local
+  Plan and Preview stages (#312) are also delivered. ADR-0014 specifies the
+  remaining initial CI preflight result contract (#313); its implementation is
+  pending.
 - **Main branch:** Stable. CI runs the full test suite, Ruff lint, and Ruff
   formatting on every change. Historical test counts are not live metrics.
 - **Architecture:** Stable. No approved architectural migration is in
   progress.
 - **Known blockers:** Full LLM dogfooding remains constrained by provider
   credits and is not a release gate.
-- **Current priority:** Implement effect-free provider preflight at the stage
-  lifecycle boundaries, then observe one external user solving a real problem
-  and document the problem, workflow, and evidence before selecting further
-  product work.
+- **Current priority:** Implement ADR-0014's effect-free initial Architect
+  preflight result for CI, then observe one external user solving a real
+  problem and document the problem, workflow, and evidence before selecting
+  further product work.
 - **P5 status:** Learning Pipeline items are scoped backlog, not active work.
   Do not start P5 merely because it is next in the old roadmap; choose the
   next development priority from external-use evidence.
