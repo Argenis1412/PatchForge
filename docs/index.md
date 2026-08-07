@@ -26,8 +26,8 @@ Repository → Scan → Plan → Patch → Validation → Apply
 The target command flow is:
 
 ```bash
-patchforge doctor <target-repository> --env-file <operator-env-file>
-patchforge scan <target-repository> --workspace <workspace>
+patchforge doctor <python-project-directory> --env-file <operator-env-file>
+patchforge scan <python-project-directory> --workspace <workspace>
 # Use the run_id printed by scan for the remaining stages.
 patchforge plan <run_id> --workspace <workspace> --issue-file <issue.md> --env-file <operator-env-file>
 patchforge preview <run_id> --workspace <workspace> --env-file <operator-env-file>
@@ -39,6 +39,17 @@ Use credentials inherited by the shell, or pass an operator-owned
 provider credentials for that command invocation. `doctor` reports static
 credential eligibility; it does not verify account balance, network access, or
 runtime provider availability.
+
+In a monorepo, pass the Python project directory explicitly. For example, if
+the repository is `/path/to/repo` and the Python project is under `backend/`:
+
+```bash
+patchforge doctor /path/to/repo/backend --env-file /path/to/operator.env
+patchforge scan /path/to/repo/backend --workspace /tmp/patchforge-workspace
+```
+
+PatchForge keeps the enclosing Git repository context while using the selected
+Python directory for project checks and scanning.
 
 The deterministic `scan` command requires a human-written Markdown issue file
 for the next stage: pass it to `plan --issue-file`. Before `apply`, all stages
@@ -113,9 +124,9 @@ pip install -e .
 ### First Run
 
 ```bash
-# Store credentials outside /path/to/project, then run:
-patchforge doctor /path/to/project --env-file /path/to/operator.env
-patchforge scan /path/to/project --workspace /tmp/patchforge-workspace
+# Store credentials outside /path/to/repo, then run against its Python project:
+patchforge doctor /path/to/repo/backend --env-file /path/to/operator.env
+patchforge scan /path/to/repo/backend --workspace /tmp/patchforge-workspace
 # Continue with plan --issue-file, preview, and apply as shown above.
 ```
 
