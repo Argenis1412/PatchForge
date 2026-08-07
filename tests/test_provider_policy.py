@@ -5,10 +5,14 @@ import pytest
 from orchestrator.clients.credentials import resolve_operator_credentials
 from orchestrator.provider_policy import (
     PROVIDERS,
+    InvalidForceProviderError,
     ProviderDefinition,
     effective_provider_chain,
     eligible_providers,
+    evaluate_credential_eligibility,
+    evaluate_provider_policy,
     provider_chain,
+    validate_force_provider_name,
 )
 
 
@@ -93,3 +97,45 @@ def test_provider_metadata_is_non_secret_and_complete():
 def test_unknown_policy_route_is_rejected():
     with pytest.raises(ValueError, match="No provider policy"):
         provider_chain("unknown")
+
+
+def test_public_force_provider_validation_uses_policy_catalog():
+    for provider in PROVIDERS:
+        validate_force_provider_name(provider)
+    with pytest.raises(InvalidForceProviderError, match="Invalid value"):
+        validate_force_provider_name("unknown")
+
+
+def test_structured_policy_and_eligibility_match_compatible_facade(tmp_path):
+    context = resolve_operator_credentials(
+        target_path=tmp_path,
+        inherited_environment={"GOOGLE_API_KEY": "gemini-key"},
+    )
+    policy = evaluate_provider_policy("architect", force_provider="gemini")
+    eligibility = evaluate_credential_eligibility(context, policy.providers)
+
+    assert policy.status == "admissible"
+    assert eligibility.status == "eligible"
+    assert eligible_providers(context, stage="architect", force_provider="gemini") == (
+        eligibility.providers
+    )
+
+
+def test_structured_policy_rejects_known_inadmissible_force_provider():
+    evaluation = evaluate_provider_policy("executor", risk_level="high", force_provider="gemini")
+
+    assert evaluation.status == "rejected"
+
+
+def test_structured_policy_reports_unavailable_for_undeclared_stage():
+    assert evaluate_provider_policy("unknown_stage").status == "unavailable"
+
+
+def test_structured_eligibility_reports_evaluation_failed():
+    class BrokenContext:
+        def is_eligible(self, provider: str) -> bool:
+            raise TypeError("broken eligibility mapping")
+
+    evaluation = evaluate_credential_eligibility(BrokenContext(), ("claude",))
+
+    assert evaluation.status == "evaluation_failed"

@@ -95,22 +95,13 @@ jobs:
       - name: Parse CI result
         id: result
         if: always()
+        env:
+          PATCHFORGE_IMAGE: ${{ inputs.patchforge-image }}
         run: |
-          RESULT_FILE="/tmp/pf-workspace/ci_result.json"
-          if [ ! -f "$RESULT_FILE" ]; then
-            echo "status=unknown" >> "$GITHUB_OUTPUT"
-            echo "::error::ci_result.json not found"
-            exit 1
-          fi
-          cat "$RESULT_FILE"
-          RUN_ID=$(python3 -c "import json; print(json.load(open('$RESULT_FILE'))['run_id'])")
-          BRANCH=$(python3 -c "import json; print(json.load(open('$RESULT_FILE'))['branch'])")
-          STATUS=$(python3 -c "import json; print(json.load(open('$RESULT_FILE'))['status'])")
-          RISK=$(python3 -c "import json; print(json.load(open('$RESULT_FILE'))['risk_budget'])")
-          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
-          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
-          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
-          echo "risk=$RISK" >> "$GITHUB_OUTPUT"
+          docker run --rm \
+            -v /tmp/pf-workspace:/workspace \
+            "$PATCHFORGE_IMAGE" \
+            patchforge ci-result github-output /workspace/ci_result.json >> "$GITHUB_OUTPUT"
 
       - name: Push branch
         if: steps.result.outputs.status == 'applied'
@@ -126,25 +117,18 @@ jobs:
           RUN_ID: ${{ steps.result.outputs.run_id }}
           BRANCH: ${{ steps.result.outputs.branch }}
           RISK: ${{ steps.result.outputs.risk }}
+          AFFECTED_FILES_JSON: ${{ steps.result.outputs.affected_files_json }}
+          TRIGGERED_BY_JSON: ${{ steps.result.outputs.triggered_by_json }}
         run: |
-
-          AFFECTED=""
-          TRIGGERED_BY_LINE=""
-          if [ -f "/tmp/pf-workspace/ci_result.json" ]; then
-            AFFECTED=$(python3 -c "
-          import json
-          r = json.load(open('/tmp/pf-workspace/ci_result.json'))
-          print('\n'.join(f'- \`{f}\`' for f in r.get('affected_files', [])))
-          ")
-            TRIGGERED_BY_LINE=$(python3 -c "
-          import json
-          r = json.load(open('/tmp/pf-workspace/ci_result.json'))
-          triggered_by = r.get('triggered_by')
-          print(f'**Triggered by:** {triggered_by}' if triggered_by else '')
-          ")
-          fi
-
           VALIDATION=""
+          AFFECTED=$(python3 -c "
+          import json, os
+          print('\n'.join(f'- \`{path}\`' for path in json.loads(os.environ['AFFECTED_FILES_JSON'])))
+          ")
+          TRIGGERED_BY=$(python3 -c "
+          import json, os
+          print(json.loads(os.environ['TRIGGERED_BY_JSON']))
+          ")
           VAL_FILE="/tmp/pf-workspace/runs/$RUN_ID/validation.json"
           if [ -f "$VAL_FILE" ]; then
             VALIDATION=$(python3 -c "
@@ -167,7 +151,7 @@ jobs:
           **Source issue:** #$ISSUE_NUMBER
           **Risk budget:** $RISK
           **Validation:** $VALIDATION
-          $TRIGGERED_BY_LINE
+          **Triggered by:** $TRIGGERED_BY
 
           ### Affected files
           $AFFECTED
@@ -188,20 +172,34 @@ jobs:
           gh issue edit "$ISSUE_NUMBER" \
             --remove-label "patchforge/process" --add-label "patchforge/completed"
 
-      - name: Comment and label on failure
-        if: always() && steps.result.outputs.status != 'applied'
+      - name: Comment on preflight rejection
+        if: always() && steps.result.outputs.status == 'preflight_rejected'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREFLIGHT_REASON: ${{ steps.result.outputs.preflight_reason }}
+          ERROR_JSON: ${{ steps.result.outputs.error_json }}
+        run: |
+          ERROR=$(python3 -c "import json, os; print(json.loads(os.environ['ERROR_JSON']))")
+          gh issue comment "$ISSUE_NUMBER" \
+            --body "## PatchForge Provider Preflight Rejected
+
+          The pipeline did not start. Correct the operator credential or provider policy configuration and retry.
+
+          **Reason:** \`$PREFLIGHT_REASON\`
+          **Error:** $ERROR
+
+          See the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details."
+          gh issue edit "$ISSUE_NUMBER" \
+            --remove-label "patchforge/process"
+
+      - name: Comment and label on stage failure
+        if: always() && steps.result.outputs.status != 'applied' && steps.result.outputs.status != 'preflight_rejected'
         env:
           GH_TOKEN: ${{ github.token }}
           STATUS: ${{ steps.result.outputs.status }}
+          ERROR_JSON: ${{ steps.result.outputs.error_json }}
         run: |
-          ERROR=""
-          if [ -f "/tmp/pf-workspace/ci_result.json" ]; then
-            ERROR=$(python3 -c "
-          import json
-          r = json.load(open('/tmp/pf-workspace/ci_result.json'))
-          print(r.get('error', 'Unknown error'))
-          " 2>/dev/null || echo "Could not parse error")
-          fi
+          ERROR=$(python3 -c "import json, os; print(json.loads(os.environ['ERROR_JSON']))")
           gh issue comment "$ISSUE_NUMBER" \
             --body "## PatchForge Pipeline Failed
 

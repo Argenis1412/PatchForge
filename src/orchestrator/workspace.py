@@ -85,6 +85,20 @@ class WorkspaceManager:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
+    def validate_external_result_path(self, result_path: Path, target_path: Path) -> Path:
+        """Return a safe external result path without creating any workspace state."""
+        resolved_result = Path(result_path).resolve()
+        protected_roots = (
+            Path(target_path).resolve(),
+            self.runs.resolve(),
+            (self.outputs / "staging").resolve(),
+        )
+        if any(resolved_result.is_relative_to(root) for root in protected_roots):
+            raise ValueError(
+                "CI result file must be outside the target, run, and staging directories."
+            )
+        return resolved_result
+
     def cleanup_stale_workspaces(self, max_age_hours: int = 24) -> None:
         import shutil
         import time

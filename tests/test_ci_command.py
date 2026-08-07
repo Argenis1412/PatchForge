@@ -11,7 +11,12 @@ import pytest
 from typer.testing import CliRunner
 
 from orchestrator.main import app
-from orchestrator.schemas.ci_result import CiResult
+from orchestrator.schemas.ci_result import (
+    CiPreflightRejectedResult,
+    CiResult,
+    github_output_lines,
+    parse_ci_result,
+)
 
 runner = CliRunner()
 
@@ -109,10 +114,243 @@ def test_ci_credential_resolution_failure_writes_default_result(tmp_path):
 
     result = execute(target_path=target, workspace_path=workspace, env_file=env_file)
 
-    assert result.status == "scan_failed"
+    assert result.status == "preflight_rejected"
+    assert result.preflight_reason == "credential_source_rejected"
     assert str(env_file) not in result.error
-    persisted = CiResult.model_validate_json((workspace / "ci_result.json").read_text("utf-8"))
+    persisted = parse_ci_result((workspace / "ci_result.json").read_text("utf-8"))
     assert persisted == result
+
+
+def test_ci_unknown_force_provider_is_an_argument_error_without_result(tmp_path):
+    from orchestrator.commands.ci import execute
+    from orchestrator.provider_policy import InvalidForceProviderError
+
+    target = tmp_path / "target"
+    target.mkdir()
+    workspace = tmp_path / "workspace"
+
+    with pytest.raises(InvalidForceProviderError):
+        execute(target_path=target, workspace_path=workspace, force_provider="unknown")
+
+    assert not workspace.exists()
+
+
+@pytest.mark.parametrize("path_name", ["runs/result.json", "outputs/staging/result.json"])
+def test_ci_rejects_result_path_inside_protected_workspace_subtrees(tmp_path, path_name):
+    from orchestrator.commands.ci import CiResultDestinationError, execute
+
+    target = tmp_path / "target"
+    target.mkdir()
+    workspace = tmp_path / "workspace"
+
+    with pytest.raises(CiResultDestinationError):
+        execute(target_path=target, workspace_path=workspace, result_path=workspace / path_name)
+
+    assert not workspace.exists()
+
+
+def test_ci_rejects_result_path_inside_target_without_writing(tmp_path):
+    from orchestrator.commands.ci import CiResultDestinationError, execute
+
+    target = tmp_path / "target"
+    target.mkdir()
+    workspace = tmp_path / "workspace"
+
+    with pytest.raises(CiResultDestinationError):
+        execute(target_path=target, workspace_path=workspace, result_path=target / "result.json")
+
+    assert not (target / "result.json").exists()
+
+
+def test_ci_result_parser_dispatches_v1_v2_and_rejects_present_invalid_version():
+    v1 = CiResult(
+        run_id="run",
+        branch="branch",
+        status="applied",
+        risk_budget="low",
+        affected_files=[],
+        validation_passed=True,
+    )
+    v2 = CiPreflightRejectedResult(
+        risk_budget="low",
+        error="No credential-eligible provider is available for Architect.",
+        preflight_reason="no_eligible_provider",
+    )
+
+    assert parse_ci_result(v1.model_dump_json()) == v1
+    assert parse_ci_result(v2.model_dump_json()) == v2
+    with pytest.raises(ValueError, match="unsupported schema version"):
+        parse_ci_result('{"schema_version": null, "status": "applied"}')
+
+
+def test_ci_result_github_outputs_are_derived_from_validated_result():
+    result = CiPreflightRejectedResult(
+        risk_budget="low",
+        error="No credential-eligible provider is available for Architect.",
+        preflight_reason="no_eligible_provider",
+    )
+
+    assert github_output_lines(result) == [
+        "schema_version=ci_result@2",
+        "run_id=",
+        "branch=",
+        "status=preflight_rejected",
+        "risk=low",
+        "preflight_reason=no_eligible_provider",
+        'error_json="No credential-eligible provider is available for Architect."',
+        "affected_files_json=[]",
+        'triggered_by_json=""',
+    ]
+
+
+def test_ci_result_github_outputs_reject_raw_multiline_fields():
+    result = CiResult(
+        run_id="run",
+        branch="branch\nunsafe",
+        status="applied",
+        risk_budget="low",
+        affected_files=[],
+        validation_passed=True,
+    )
+
+    with pytest.raises(ValueError, match="single-line"):
+        github_output_lines(result)
+
+
+@pytest.mark.parametrize(
+    ("credential_source_rejected", "policy_status", "eligibility_status", "providers", "expected"),
+    [
+        (True, None, None, (), "credential_source_rejected"),
+        (False, "unavailable", None, (), "provider_policy_unavailable"),
+        (False, "rejected", None, (), "provider_policy_rejected"),
+        (False, "admissible", "evaluation_failed", (), "eligibility_evaluation_failed"),
+        (False, "admissible", "eligible", (), "no_eligible_provider"),
+    ],
+)
+def test_initial_preflight_classifier_precedence(
+    credential_source_rejected, policy_status, eligibility_status, providers, expected
+):
+    from orchestrator.commands.ci import _classify_initial_preflight
+    from orchestrator.provider_policy import (
+        CredentialEligibilityEvaluation,
+        ProviderPolicyEvaluation,
+    )
+
+    policy = (
+        None
+        if policy_status is None
+        else ProviderPolicyEvaluation(status=policy_status, providers=("claude",))
+    )
+    eligibility = (
+        None
+        if eligibility_status is None
+        else CredentialEligibilityEvaluation(status=eligibility_status, providers=providers)
+    )
+
+    assert (
+        _classify_initial_preflight(
+            credential_source_rejected=credential_source_rejected,
+            policy=policy,
+            eligibility=eligibility,
+        )
+        == expected
+    )
+
+
+def test_ci_no_eligible_provider_writes_only_external_preflight_result(tmp_path):
+    from orchestrator.commands.ci import execute
+
+    target = tmp_path / "target"
+    target.mkdir()
+    workspace = tmp_path / "workspace"
+    env_file = tmp_path / "operator.env"
+    env_file.write_text("", encoding="utf-8")
+
+    result = execute(target_path=target, workspace_path=workspace, env_file=env_file)
+
+    assert result.preflight_reason == "no_eligible_provider"
+    assert (workspace / "ci_result.json").exists()
+    assert not (workspace / "runs").exists()
+    assert not (workspace / "outputs").exists()
+    assert not (workspace / "logs").exists()
+
+
+def test_ci_cli_rejects_unsafe_result_destination_with_exit_code_two(tmp_path):
+    target = tmp_path / "target"
+    target.mkdir()
+    workspace = tmp_path / "workspace"
+
+    result = runner.invoke(
+        app,
+        [
+            "ci",
+            str(target),
+            "--workspace",
+            str(workspace),
+            "--result-file",
+            str(target / "result.json"),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert not (target / "result.json").exists()
+
+
+def test_ci_result_cli_emits_only_validated_outputs(tmp_path):
+    result_file = tmp_path / "result.json"
+    result_file.write_text(
+        CiPreflightRejectedResult(
+            risk_budget="low",
+            error="No credential-eligible provider is available for Architect.",
+            preflight_reason="no_eligible_provider",
+        ).model_dump_json(),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["ci-result", "github-output", str(result_file)])
+
+    assert result.exit_code == 0
+    assert "status=preflight_rejected" in result.stdout
+
+
+def test_ci_result_cli_reports_parse_errors_on_stderr(tmp_path):
+    result = runner.invoke(app, ["ci-result", "github-output", str(tmp_path / "missing.json")])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "Error:" in result.stderr
+
+
+def test_ci_result_path_rejects_target_symlink_without_writing(tmp_path):
+    from orchestrator.commands.ci import CiResultDestinationError, execute
+
+    target = tmp_path / "target"
+    target.mkdir()
+    target_link = tmp_path / "target-link"
+    try:
+        target_link.symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("Symlinks are unavailable in this test environment")
+
+    with pytest.raises(CiResultDestinationError):
+        execute(
+            target_path=target,
+            workspace_path=tmp_path / "workspace",
+            result_path=target_link / "result.json",
+        )
+
+    assert not (target / "result.json").exists()
+
+
+def test_pipeline_workflow_uses_validated_ci_result_consumer_only():
+    workflow = Path(__file__).parents[1] / ".github" / "workflows" / "patchforge-pipeline.yml"
+    content = workflow.read_text(encoding="utf-8")
+
+    assert "patchforge ci-result github-output /workspace/ci_result.json" in content
+    assert "json.load(open('/tmp/pf-workspace/ci_result.json'))" not in content
+    assert "json.loads(os.environ['AFFECTED_FILES_JSON'])" in content
+    assert "json.loads(os.environ['TRIGGERED_BY_JSON'])" in content
+    assert "json.loads(os.environ['ERROR_JSON'])" in content
 
 
 # ---------------------------------------------------------------------------
