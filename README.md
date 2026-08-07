@@ -50,12 +50,12 @@ Most AI coding tools optimize for speed. PatchForge optimizes for trust — chan
 - **Delivery:** V1 and P0–P4 are complete, including Validator Plugins
   (#282), ADR-0013, explicit credential resolution, shared provider policy,
   and invocation-scoped provider runtime migration (#302, #304, #306, and
-  #308). First-run onboarding (#310) and effect-free local Plan and Preview
-  preflight (#312) are complete. ADR-0014 specifies the remaining initial CI
-  preflight result contract (#313), whose implementation is pending.
-- **Priority:** Implement ADR-0014's initial Architect preflight result for
-  CI, then observe one external user solving a real problem. Scoped P5 items
-  are backlog, not active work.
+  #308). First-run onboarding (#310), effect-free local Plan and Preview
+  preflight (#312), and ADR-0014's initial Architect CI preflight result
+  (#318 / PR #319) are complete.
+- **Priority:** Observe one external user solving a real problem and document
+  the evidence before selecting further product work. Scoped P5 items are
+  backlog, not active work.
 - **QA:** CI verifies the full test suite, Ruff lint, and Ruff formatting on every change. See the [CI workflow](https://github.com/Argenis1412/PatchForge/actions/workflows/ci.yml) for the current result.
 - [Project context](./docs/context/CONTEXT.md) | [Development workflow](./docs/context/Workflow.md) | [Roadmap](./docs/planning/roadmap.md)
 

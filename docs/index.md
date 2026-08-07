@@ -17,6 +17,7 @@ Repository → Scan → Plan → Patch → Validation → Apply
 - [Roadmap](./planning/roadmap.md) - Scoped PatchForge Core backlog and deferred initiatives
 - [Scout Vision](./planning/scout-vision.md) - Long-term vision for Scout as a separate future product line (frozen) — not the internal Scout pipeline stage below
 - [Issue Registry](./planning/issue-registry.md) - Tracked issues with ACs, priorities, and dependencies
+- [External Pilot 001](./experiments/external-pilot-001.md) - Sanitized protocol for the next external-use evaluation
 - [ADR-0003: Product Contract](./adr/ADR-0003-product-contract.md) - Binding repository safety contract and patch lifecycle
 - [Quality Gate](./QUALITY_GATE.md) - Pre-merge checklist
 
@@ -88,11 +89,11 @@ Design and architecture decisions are documented in Architecture Decision Record
 - ADR-0013 and its credential-boundary foundations are complete: explicit
   credential resolution, shared provider policy, and invocation-scoped runtime
   migration (issues #302, #304, #306, and #308).
-- First-run onboarding (#310) and effect-free provider preflight for local
-  Plan and Preview stages (#312) are complete. ADR-0014 specifies the initial
-  CI preflight result contract (#313); its implementation is pending.
-- Current priority: implement ADR-0014's initial Architect preflight result
-  for CI, then observe one external user solving a real problem.
+- First-run onboarding (#310), effect-free provider preflight for local Plan
+  and Preview stages (#312), and ADR-0014's initial Architect CI preflight
+  result (#318 / PR #319) are complete.
+- Current priority: observe one external user solving a real problem and
+  document the evidence before selecting further product work.
 - P5 Learning Pipeline items remain scoped backlog, not active work.
 - QA: CI verifies the full test suite, Ruff lint, and Ruff formatting on every change. See the [CI workflow](https://github.com/Argenis1412/PatchForge/actions/workflows/ci.yml) for the current result.
 

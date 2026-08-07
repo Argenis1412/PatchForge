@@ -62,6 +62,17 @@
 - **Non-goals:** No `CiResult`, CI lifecycle, workflow, provider-policy, SDK,
   or ProviderRuntime change; no post-Plan Executor preflight contract.
 
+### Issue #318 - Reject initial CI provider preflight safely
+- **Priority:** Adoption safety | **Status:** Completed | **PR:** #319
+- **Goal:** Implement ADR-0014's initial Architect preflight rejection before
+  Scan or Plan starts, with a safe external result and versioned automation
+  consumer support.
+- **Scope:** Validate the result destination before effects; emit the redacted
+  `ci_result@2` rejection contract with deterministic reason precedence; and
+  keep v1 result consumers compatible.
+- **Non-goals:** No post-Plan Executor preflight contract, provider-runtime
+  change, or product workflow expansion.
+
 ---
 
 ## Legend
