@@ -35,8 +35,20 @@ decision is not a PatchForge action and must not be recorded with sensitive
 repository details.
 
 Stop immediately if any command attempts to modify the target before `apply`,
-if credentials could be exposed, if the task exceeds the agreed low-risk
-scope, or if the participant withdraws consent.
+credentials could be exposed, the task exceeds the agreed low-risk scope, or
+the participant withdraws consent. Do not collect further evidence after a
+stop condition.
+
+On consent withdrawal, delete previously captured participant-linked
+observations. Retain only the minimal non-identifying abandonment metadata
+needed for the project ledger: `outcome: abandoned`,
+`reason: consent_withdrawn`, and the sanitized stages reached or not reached.
+
+For a suspected credential exposure, notify the credential owner and revoke or
+rotate the credential. Create only a sanitized incident record with the
+`suspected_credential_exposure` category. Do not resume the task until
+containment is complete and the credential owner explicitly authorizes a new
+attempt.
 
 ## Evidence Handling
 
@@ -51,14 +63,29 @@ Record only sanitized observations. Replace the repository identity with a
 generic description, describe provider configuration without secrets, and use
 short redacted error categories rather than raw output.
 
+Use these normalized run-record values:
+
+- **Participant task and expected outcome:** one concise, redacted description
+  in the form `<task category>; expected: <observable result category>`.
+  Do not copy instructions, source code, identifiers, or repository data.
+- **Commands and stage exit outcomes:** one entry per stage in the form
+  `stage=<doctor|scan|plan|preview>; status=<succeeded|failed|abandoned|not_reached>; exit=<integer|not_run>; reason=<normalized_category|none>`.
+  Do not record raw commands, arguments, paths, URLs, identifiers, or output.
+
 ## Run Record
 
 Complete this section only after the participant consents and the run finishes
-or is abandoned.
+or is abandoned. Every field must contain `Pending` before the pilot, a
+normalized value after completion, or an explicit normalized abandonment value;
+do not leave fields blank.
 
 | Field | Sanitized record |
 | --- | --- |
 | Date and PatchForge revision | Pending |
+| Run outcome (`completed`, `abandoned`, or `not_started`) | Pending |
+| Abandonment reason (`none` for completed runs) | Pending |
+| Stop condition triggered (`none` if no stop condition triggered) | Pending |
+| Stages not reached (ordered stage names or `none`) | Pending |
 | Repository characteristics | Pending |
 | Participant task and expected outcome | Pending |
 | Commands and stage exit outcomes | Pending |
