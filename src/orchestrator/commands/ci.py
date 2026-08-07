@@ -52,6 +52,7 @@ def _classify_initial_preflight(
     eligibility: CredentialEligibilityEvaluation | None,
 ) -> str | None:
     """Classify only explicit preflight evaluation results in ADR-0014 order."""
+    # Keep public classification separate from provider calls and persistence.
     if credential_source_rejected:
         return "credential_source_rejected"
     if policy is None or policy.status == "unavailable":
