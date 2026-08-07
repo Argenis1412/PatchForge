@@ -22,6 +22,8 @@ from orchestrator.schemas.config import TargetConfig
 app = typer.Typer(
     name="patchforge", help="PatchForge - deterministic patch planning and execution."
 )
+ci_result_app = typer.Typer(help="Validate CI result files for automation consumers.")
+app.add_typer(ci_result_app, name="ci-result")
 console = Console()
 
 
@@ -183,14 +185,13 @@ def plan(
 
 
 def _validate_force_provider(force_provider: Optional[str]) -> None:
-    from orchestrator.agents.executor.providers import KNOWN_PROVIDER_NAMES
+    from orchestrator.provider_policy import InvalidForceProviderError, validate_force_provider_name
 
-    if force_provider is not None and force_provider not in KNOWN_PROVIDER_NAMES:
-        console.print(
-            f"[bold red]Error: Invalid value for --force-provider. "
-            f"Valid options are: {', '.join(KNOWN_PROVIDER_NAMES)}.[/bold red]"
-        )
-        raise typer.Exit(1)
+    try:
+        validate_force_provider_name(force_provider)
+    except InvalidForceProviderError as exc:
+        console.print(f"[bold red]Error: {exc}[/bold red]")
+        raise typer.Exit(1) from exc
 
 
 def _parse_timeout_overrides(values: List[str]) -> dict[str, int]:
@@ -306,24 +307,45 @@ def ci(
 
     _validate_force_provider(force_provider)
 
+    from orchestrator.commands.ci import CiResultDestinationError
     from orchestrator.commands.ci import execute as execute_ci
 
     timeout_overrides = _parse_timeout_overrides(timeout)
-    result = execute_ci(
-        target_path=path.resolve(),
-        workspace_path=workspace.resolve(),
-        issue_file=issue_file,
-        issue_number=issue_number,
-        risk_budget=risk_budget,
-        allow_dirty=allow_dirty,
-        result_path=result_file,
-        force_provider=force_provider,
-        env_file=env_file,
-        timeout_overrides=timeout_overrides,
-    )
+    try:
+        result = execute_ci(
+            target_path=path.resolve(),
+            workspace_path=workspace.resolve(),
+            issue_file=issue_file,
+            issue_number=issue_number,
+            risk_budget=risk_budget,
+            allow_dirty=allow_dirty,
+            result_path=result_file,
+            force_provider=force_provider,
+            env_file=env_file,
+            timeout_overrides=timeout_overrides,
+        )
+    except CiResultDestinationError as exc:
+        console.print(f"[bold red]Error: {exc}[/bold red]")
+        raise typer.Exit(code=2) from exc
 
     if result.status != "applied":
         raise typer.Exit(code=1)
+
+
+@ci_result_app.command("github-output")
+def ci_result_github_output(
+    result_file: Path = typer.Argument(..., help="Path to a CI result file"),
+) -> None:
+    """Emit validated CI result fields for GitHub Actions outputs."""
+    from orchestrator.schemas.ci_result import github_output_lines, parse_ci_result
+
+    try:
+        result = parse_ci_result(result_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        console.print(f"[bold red]Error: {exc}[/bold red]")
+        raise typer.Exit(code=2) from exc
+    for line in github_output_lines(result):
+        typer.echo(line)
 
 
 @app.command()

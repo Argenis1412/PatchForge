@@ -19,9 +19,52 @@ from pathlib import Path
 from typing import Optional
 
 from orchestrator.provenance import resolve_triggered_by
-from orchestrator.schemas.ci_result import CiResult
+from orchestrator.provider_policy import (
+    CredentialEligibilityEvaluation,
+    ProviderPolicyEvaluation,
+    evaluate_credential_eligibility,
+    evaluate_provider_policy,
+    validate_force_provider_name,
+)
+from orchestrator.schemas.ci_result import CiCommandResult, CiPreflightRejectedResult, CiResult
+from orchestrator.workspace import WorkspaceManager
 
 logger = logging.getLogger(__name__)
+
+
+class CiResultDestinationError(ValueError):
+    """Raised when CI output would be written inside a protected location."""
+
+
+_PREFLIGHT_ERRORS = {
+    "credential_source_rejected": "Provider credential source was rejected.",
+    "provider_policy_unavailable": "Provider policy could not be evaluated.",
+    "provider_policy_rejected": "Forced provider is not allowed for the Architect stage.",
+    "eligibility_evaluation_failed": "Provider credential eligibility could not be evaluated.",
+    "no_eligible_provider": "No credential-eligible provider is available for Architect.",
+}
+
+
+def _classify_initial_preflight(
+    *,
+    credential_source_rejected: bool,
+    policy: ProviderPolicyEvaluation | None,
+    eligibility: CredentialEligibilityEvaluation | None,
+) -> str | None:
+    """Classify only explicit preflight evaluation results in ADR-0014 order."""
+    if credential_source_rejected:
+        return "credential_source_rejected"
+    if policy is None or policy.status == "unavailable":
+        return "provider_policy_unavailable"
+    if policy.status == "rejected":
+        return "provider_policy_rejected"
+    if eligibility is None:
+        return None
+    if eligibility.status == "evaluation_failed":
+        return "eligibility_evaluation_failed"
+    if not eligibility.providers:
+        return "no_eligible_provider"
+    return None
 
 
 def _risk_limits(risk_budget: str) -> tuple[int, int]:
@@ -30,7 +73,7 @@ def _risk_limits(risk_budget: str) -> tuple[int, int]:
     return 2, 100
 
 
-def _write_result(result: CiResult, result_path: Path) -> None:
+def _write_result(result: CiCommandResult, result_path: Path) -> None:
     result_path.parent.mkdir(parents=True, exist_ok=True)
     result_path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
 
@@ -47,14 +90,21 @@ def execute(
     force_provider: Optional[str] = None,
     env_file: Optional[Path] = None,
     timeout_overrides: dict[str, int] | None = None,
-) -> CiResult:
-    """Run the full CI pipeline and return a :class:`CiResult`.
+) -> CiCommandResult:
+    """Run the full CI pipeline and return a versioned CI result.
 
     Does NOT call ``git push`` or any GitHub API — those are the caller's
     (workflow runner) responsibility.
     """
     if risk_budget not in ("low", "medium"):
         raise ValueError(f"Invalid risk_budget: {risk_budget!r}. Must be 'low' or 'medium'.")
+    validate_force_provider_name(force_provider)
+    workspace_mgr = WorkspaceManager(workspace_path)
+    raw_result_path = result_path or workspace_path / "ci_result.json"
+    try:
+        result_path = workspace_mgr.validate_external_result_path(raw_result_path, target_path)
+    except ValueError as exc:
+        raise CiResultDestinationError(str(exc)) from exc
     from orchestrator.agents import architect as architect_agent
     from orchestrator.agents import executor as executor_agent
     from orchestrator.clients.bootstrap import bootstrap_environment
@@ -89,10 +139,6 @@ def execute(
         create_validation_workspace,
         run_validation_in_copy,
     )
-    from orchestrator.workspace import WorkspaceManager
-
-    if result_path is None:
-        result_path = workspace_path / "ci_result.json"
 
     run_id = ""
     triggered_by = resolve_triggered_by(
@@ -123,12 +169,48 @@ def execute(
         _write_result(r, result_path)
         return r
 
+    def _preflight_rejected(reason: str) -> CiPreflightRejectedResult:
+        result = CiPreflightRejectedResult(
+            risk_budget=risk_budget,
+            error=_PREFLIGHT_ERRORS[reason],
+            issue_number=issue_number,
+            force_provider=force_provider,
+            triggered_by=triggered_by,
+            preflight_reason=reason,
+        )
+        _write_result(result, result_path)
+        return result
+
     try:
         credential_context = resolve_operator_credentials(
             target_path=target_path, env_file=env_file
         )
-    except CredentialResolutionError as exc:
-        return _fail("scan_failed", str(exc))
+    except CredentialResolutionError:
+        return _preflight_rejected("credential_source_rejected")
+    except Exception:
+        return _preflight_rejected("credential_source_rejected")
+
+    policy: ProviderPolicyEvaluation = evaluate_provider_policy(
+        "architect", force_provider=force_provider
+    )
+    reason = _classify_initial_preflight(
+        credential_source_rejected=False,
+        policy=policy,
+        eligibility=None,
+    )
+    if reason in {"provider_policy_unavailable", "provider_policy_rejected"}:
+        return _preflight_rejected(reason)
+
+    eligibility: CredentialEligibilityEvaluation = evaluate_credential_eligibility(
+        credential_context, policy.providers
+    )
+    reason = _classify_initial_preflight(
+        credential_source_rejected=False,
+        policy=policy,
+        eligibility=eligibility,
+    )
+    if reason is not None:
+        return _preflight_rejected(reason)
 
     # ── Bootstrap ──────────────────────────────────────────────────────
     try:
@@ -147,7 +229,6 @@ def execute(
             "Working tree is not clean. Commit or stash changes, or pass --allow-dirty.",
         )
 
-    workspace_mgr = WorkspaceManager(workspace_path)
     workspace_mgr.setup()
 
     run_id = generate_run_id()
