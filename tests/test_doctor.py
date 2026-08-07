@@ -327,6 +327,10 @@ class TestCheckPyproject:
         result, data = check_pyproject(tmp_path)
         assert result.status == CheckStatus.FAIL
         assert data is None
+        assert result.fix_hint == (
+            "Select the Python project directory explicitly; if it lives in a "
+            "subdirectory such as <repo>/backend, run doctor against that directory"
+        )
 
     def test_fail_invalid_toml(self, tmp_path: Path):
         _make_pyproject(tmp_path, content="@@@ invalid toml [[[\n")
@@ -339,6 +343,20 @@ class TestCheckPyproject:
         result, data = check_pyproject(tmp_path)
         assert result.status == CheckStatus.FAIL
         assert data is not None  # parsed but missing build-system
+
+
+def test_doctor_help_names_python_project_directory():
+    result = runner.invoke(app, ["doctor", "--help"])
+
+    assert result.exit_code == 0
+    assert "Target Python project directory" in result.output
+
+
+def test_scan_help_names_python_project_directory():
+    result = runner.invoke(app, ["scan", "--help"])
+
+    assert result.exit_code == 0
+    assert "Target Python project directory" in result.output
 
 
 # ---------------------------------------------------------------------------

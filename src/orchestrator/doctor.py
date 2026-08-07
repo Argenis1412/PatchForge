@@ -223,7 +223,10 @@ def check_pyproject(path: Path) -> tuple[CheckResult, Optional[dict]]:
                 status=CheckStatus.FAIL,
                 message="pyproject.toml not found",
                 detail=f"Expected at: {pyproject_path}",
-                fix_hint="Create a pyproject.toml file to define your Python project",
+                fix_hint=(
+                    "Select the Python project directory explicitly; if it lives in a "
+                    "subdirectory such as <repo>/backend, run doctor against that directory"
+                ),
             ),
             None,
         )

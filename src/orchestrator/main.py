@@ -42,7 +42,7 @@ def _load_target_config(
 
 @app.command()
 def doctor(
-    path: Path = typer.Argument(..., help="Target project path"),
+    path: Path = typer.Argument(..., help="Target Python project directory"),
     env_file: Optional[Path] = typer.Option(
         None, "--env-file", help="Path to an explicit credential file"
     ),
@@ -127,7 +127,7 @@ def run(
 
 @app.command()
 def scan(
-    path: Path = typer.Argument(..., help="Target project path"),
+    path: Path = typer.Argument(..., help="Target Python project directory"),
     env_file: Optional[Path] = typer.Option(None, "--env-file", help="Path to a custom .env file"),
     workspace: Optional[Path] = typer.Option(
         None, "--workspace", help="Path to the workspace directory"

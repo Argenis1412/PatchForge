@@ -13,8 +13,8 @@ AI-powered, safety-first code modification tool. Generates, validates, and appli
 ```bash
 # Use credentials inherited by this shell, or an operator-owned credential
 # file outside the target repository.
-patchforge doctor <target-repository> --env-file <operator-env-file>
-patchforge scan <target-repository> --workspace <workspace>
+patchforge doctor <python-project-directory> --env-file <operator-env-file>
+patchforge scan <python-project-directory> --workspace <workspace>
 # Use the run_id printed by scan for the remaining stages.
 patchforge plan <run_id> --workspace <workspace> --issue-file <issue.md> --env-file <operator-env-file>
 patchforge preview <run_id> --workspace <workspace> --env-file <operator-env-file>
@@ -27,6 +27,17 @@ target repository: it replaces inherited provider credentials for that command
 invocation. Alternatively, omit `--env-file` and use credentials inherited by
 the shell. `doctor` reports static credential eligibility only; it does not
 check provider account balance, network access, or runtime availability.
+
+In a monorepo, pass the Python project directory explicitly. For example, if
+the repository is `/path/to/repo` and the Python project is under `backend/`:
+
+```bash
+patchforge doctor /path/to/repo/backend --env-file /path/to/operator.env
+patchforge scan /path/to/repo/backend --workspace /tmp/patchforge-workspace
+```
+
+PatchForge keeps the enclosing Git repository context while using the selected
+Python directory for project checks and scanning.
 
 The internal runtime uses specialized agents, typed Pydantic contracts, and structured observability. The user-facing product is organized around repositories, plans, patches, validation, and Git review.
 
