@@ -11,7 +11,7 @@ $ARGUMENTS
 Find and list:
 
 1. **Undefined terms** — words or concepts used without explicit definition
-2. **Uncovered edge cases** — scenarios the criteria do not address
+2. **Uncovered edge cases** — scenarios the issue requirements do not address, including when no acceptance criteria exist
 3. **Unmapped interactions** — how this touches existing code that is not described
 4. **Ambiguities** — anything where two developers would implement differently
 

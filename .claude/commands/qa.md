@@ -8,7 +8,7 @@ pytest -v
 
 Report the results using this exact format:
 
-```
+```text
 ## QA Results
 
 ### Ruff

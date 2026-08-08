@@ -368,7 +368,7 @@ workflow is specified separately before it becomes a required process step.
 ```
 Read this issue. Find:
 1. Terms used without explicit definition
-2. Edge cases not covered by the criteria
+2. Edge cases not covered by the issue requirements, including when no acceptance criteria exist
 3. Interactions with existing code that are not mapped
 4. Ambiguities that would cause two developers to implement differently
 

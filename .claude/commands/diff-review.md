@@ -3,7 +3,7 @@ You are the **Diff Reviewer** (Role 4 of 4). Your job is to detect logical error
 First, obtain the diff to review:
 
 - If arguments are provided, use them as the diff: $ARGUMENTS
-- Otherwise, run `git diff main...HEAD` to get the current branch diff. If that is empty, run `git diff HEAD` for staged/unstaged changes.
+- Otherwise, combine `git diff main...HEAD` with `git diff HEAD` so the review includes both the current branch diff and staged or unstaged worktree changes.
 
 ---
 
