@@ -167,6 +167,25 @@ def test_deterministic_scanner_full_findings(valid_repo: Path):
     assert isinstance(findings.hotspots, list)
 
 
+def test_scanner_accepts_valid_pyproject_without_build_system(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    (repo / "pyproject.toml").write_text("[project]\nname = 'foo'\n")
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_example.py").write_text("def test_ok(): pass\n")
+
+    with (
+        patch("orchestrator.tool_probe.shutil.which", side_effect=_mock_which),
+        patch("orchestrator.tool_probe.subprocess.run", side_effect=_mock_tool_run),
+    ):
+        findings = scan(repo)
+
+    assert findings.v1_supported is True
+    assert findings.pyproject.valid is True
+    assert findings.unsupported_reasons == []
+
+
 # ---------------------------------------------------------------------------
 # 2. test_scan_cli_creates_findings
 # ---------------------------------------------------------------------------

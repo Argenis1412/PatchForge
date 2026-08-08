@@ -338,11 +338,12 @@ class TestCheckPyproject:
         assert result.status == CheckStatus.FAIL
         assert data is None
 
-    def test_fail_missing_build_system(self, tmp_path: Path):
+    def test_pass_without_build_system(self, tmp_path: Path):
         _make_pyproject(tmp_path, content="[project]\nname = 'foo'\n")
         result, data = check_pyproject(tmp_path)
-        assert result.status == CheckStatus.FAIL
-        assert data is not None  # parsed but missing build-system
+        assert result.status == CheckStatus.PASS
+        assert result.detail == "V1 analysis does not evaluate packaging or build configuration"
+        assert data is not None
 
 
 def test_doctor_help_names_python_project_directory():
@@ -665,6 +666,25 @@ class TestCheck:
         assert result.v1_supported is True
         assert result.git_branch in ("main", "master")
         assert result.is_dirty is False
+
+    def test_v1_supported_without_build_system(self, tmp_path: Path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _init_git_repo(repo)
+        _make_pyproject(repo, content="[project]\nname = 'foo'\n")
+        (repo / "tests").mkdir()
+
+        def fake_check(cmd):
+            return (True, "ok")
+
+        from unittest.mock import patch
+
+        with patch("orchestrator.doctor.check_command_available", fake_check):
+            result = check(repo)
+
+        assert result.v1_supported is True
+        pyproject_check = next(c for c in result.checks if c.name == "pyproject_toml")
+        assert pyproject_check.status == CheckStatus.PASS
 
     def test_v1_supported_false_when_any_required_check_fails(self, tmp_path: Path):
         repo = tmp_path / "repo"
