@@ -86,6 +86,7 @@ Scan, Plan, Patch, Validation, Apply, and Run.
 
 Design and architecture decisions are documented in Architecture Decision Records (ADRs):
 
+- [ADR-0015: Attested Independent Review Evidence](./adr/ADR-0015-attested-independent-review-evidence.md)
 - [ADR-0014: CI Preflight Rejection Result Contract](./adr/ADR-0014-ci-preflight-rejection-result-contract.md)
 - [ADR-0013: Provider Preflight and Operator Credential Boundary](./adr/ADR-0013-provider-preflight-credential-boundary.md)
 - [ADR-0005: IssueContract — Canonical Source-Agnostic Issue Schema](./adr/ADR-0005-issue-contract.md)

@@ -354,6 +354,8 @@ so its output is not independent review evidence and it is not a merge gate.
 They remain useful for disciplined local review, but they do not prove that an
 independent reviewer examined an issue or diff. The attested independent-review
 workflow is specified separately before it becomes a required process step.
+See [ADR-0015](../adr/ADR-0015-attested-independent-review-evidence.md) for
+the accepted contract and its deferred implementation boundary.
 
 ---
 
