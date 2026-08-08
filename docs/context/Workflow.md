@@ -341,6 +341,20 @@ Use the correct role at the correct step — do not mix them.
 Each AI has a distinct responsibility. No single AI has authority to design everything.
 This distributes risk: if one AI makes a mistake, subsequent ones can detect it.
 
+### Current delivery and assurance boundary
+
+The local prompt templates for these roles are versioned in
+`.claude/commands/`. In Claude Code, a clean clone discovers them as the
+matching slash commands; contributors should use the repository copies and
+must not copy them into a global configuration.
+
+These commands are advisory maintainer tooling. A slash command runs in the
+current conversation unless its caller explicitly creates an isolated context,
+so its output is not independent review evidence and it is not a merge gate.
+They remain useful for disciplined local review, but they do not prove that an
+independent reviewer examined an issue or diff. The attested independent-review
+workflow is specified separately before it becomes a required process step.
+
 ---
 
 ### Role 1 — Issue Clarifier

@@ -48,6 +48,12 @@ See [docs/context/Workflow.md](./docs/context/Workflow.md) for the full process,
 
 As part of the maintainer's internal process, changes typically pass through four review roles before and after implementation: **Issue Clarifier**, **AC Challenger**, **Adversarial Reviewer**, and **Diff Reviewer**. This is the process the maintainer runs locally to compensate for working without a second human reviewer — it is not an automated check that runs on external pull requests, and you are not required to reproduce it yourself. See [docs/context/Workflow.md](./docs/context/Workflow.md#ai-roles) for details.
 
+The role prompt templates are versioned in `.claude/commands/` and are
+discovered by Claude Code when the repository is cloned. They are advisory
+commands running in the caller's conversation by default; they are neither
+independent-review evidence nor a merge gate. Do not copy repository commands
+to a global Claude Code configuration.
+
 ### Branch Naming
 
 Use the following naming convention for branches:
