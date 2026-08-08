@@ -213,7 +213,7 @@ def check_workspace(path: Path, config: Optional[dict] = None) -> tuple[CheckRes
 
 
 def check_pyproject(path: Path) -> tuple[CheckResult, Optional[dict]]:
-    """Check pyproject.toml exists, is valid TOML, and has a build system."""
+    """Check that pyproject.toml exists and is valid for V1 analysis."""
     pyproject_path = path / "pyproject.toml"
 
     if not pyproject_path.exists():
@@ -246,29 +246,12 @@ def check_pyproject(path: Path) -> tuple[CheckResult, Optional[dict]]:
             None,
         )
 
-    build_system = data.get("build-system")
-    if not isinstance(build_system, dict):
-        return (
-            CheckResult(
-                name="pyproject_toml",
-                status=CheckStatus.FAIL,
-                message="pyproject.toml is missing [build-system]",
-                detail="A Python project must declare a build system in pyproject.toml",
-                fix_hint=(
-                    "Add a [build-system] section, e.g.:\n"
-                    '[build-system]\nrequires = ["hatchling"]\n'
-                    'build-backend = "hatchling.build"'
-                ),
-            ),
-            data,
-        )
-
     return (
         CheckResult(
             name="pyproject_toml",
             status=CheckStatus.PASS,
             message="pyproject.toml exists and is valid",
-            detail=f"Build system: {build_system.get('build-backend', 'unknown')}",
+            detail="V1 analysis does not evaluate packaging or build configuration",
         ),
         data,
     )
