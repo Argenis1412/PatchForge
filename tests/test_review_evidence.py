@@ -1,307 +1,262 @@
-import importlib.util
 from datetime import UTC, datetime
-from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 from orchestrator.review_evidence import (
     AdmissionReason,
-    AllowedOperationRule,
-    ChangedPath,
-    CommitTransition,
-    DeclarationProvenance,
-    DeclarationProvenanceKind,
-    DiffAdmissionSubject,
-    DiffReviewSubject,
+    AdmissionSubject,
+    ArtifactReceipt,
+    CanonicalChangeSet,
+    DiffReviewPacket,
+    GateCandidate,
+    GateSnapshot,
     GitOperation,
     ModelTier,
-    PlanAdmissionSubject,
     PlanReviewSubject,
     PlanScopeDeclaration,
     PlanScopePacket,
+    ProvenanceReceipt,
     ReviewPhase,
     ReviewRecord,
     ReviewStatus,
+    TreeEntry,
     UnavailableReason,
-    evaluate_mechanical_scope,
+    build_canonical_change_set,
+    canonical_json,
     parse_review_record,
-    validate_linear_admission,
+    select_gate_evidence,
 )
 
 
-def _declaration() -> PlanScopeDeclaration:
-    return PlanScopeDeclaration(
-        allowed_path_patterns=("src/**",),
-        allowed_operations={"src/**": (GitOperation.ADD, GitOperation.MODIFY)},
-        max_changed_files=1,
-        max_changed_lines=10,
-    )
+def entry(path: str, oid: str, *, mode: str = "100644", kind: str = "blob") -> TreeEntry:
+    return TreeEntry(path=path, object_id=oid, mode=mode, object_type=kind)  # type: ignore[arg-type]
 
 
-def _packet() -> PlanScopePacket:
-    return PlanScopePacket.from_declaration(_declaration(), base_sha="base", plan_head_sha="plan")
+def test_version_dispatch_rejects_historical_and_malformed_records_first():
+    for value in (
+        {"schema_version": "review-evidence@2", "status": "completed"},
+        {"schema_version": "unknown"},
+        b"[]",
+    ):
+        with pytest.raises(ValueError):
+            parse_review_record(value)
 
 
-def _record_args() -> dict[str, object]:
-    return {
-        "record_id": "r",
+def test_record_binds_its_run_identity_and_status_shape():
+    subject = AdmissionSubject(phase=ReviewPhase.PLAN, base_sha="base", head_sha="head")
+    args = {
         "phase": ReviewPhase.PLAN,
-        "workflow_name": "review-plan.yml",
-        "workflow_run_id": 1,
+        "status": ReviewStatus.ADMISSION_REJECTED,
+        "workflow_name": "descriptive",
+        "workflow_run_id": 9,
         "emitted_at": datetime.now(UTC),
+        "subject": subject,
+        "admission_reason": AdmissionReason.PLAN_TRANSITION_INVALID,
     }
+    assert ReviewRecord(record_id="9:plan_review", **args).schema_version == "review-evidence@3"
+    with pytest.raises(ValidationError, match="record_id"):
+        ReviewRecord(record_id="other", **args)
+    with pytest.raises(ValidationError, match="invalid payload"):
+        ReviewRecord(
+            record_id="9:plan_review",
+            **{
+                **args,
+                "status": ReviewStatus.UNAVAILABLE,
+                "model_tier": ModelTier.ECONOMY,
+                "unavailable_reason": UnavailableReason.TIMEOUT,
+            },
+        )
 
 
-def _runner_module():
-    runner_path = Path(__file__).parents[1] / ".github" / "scripts" / "review_runner.py"
-    spec = importlib.util.spec_from_file_location("review_runner_test", runner_path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_execution_records_require_admitted_subject_and_tier():
-    subject = PlanReviewSubject(
-        base_sha="base", plan_head_sha="plan", packet_digest=_packet().digest
+def test_rename_is_only_a_unique_same_blob_same_mode_pair():
+    changes, texts = build_canonical_change_set(
+        [entry("old.py", "a")], [entry("new.py", "a")], {"a": b"one\n"}
     )
-    record = ReviewRecord(
-        status=ReviewStatus.UNAVAILABLE,
-        model_tier=ModelTier.ECONOMY,
-        subject=subject,
-        unavailable_reason=UnavailableReason.TIMEOUT,
-        **_record_args(),
+    assert [
+        (change.operation, change.previous_path, change.path) for change in changes.changes
+    ] == [(GitOperation.RENAME, "old.py", "new.py")]
+    assert texts[0].old_text == "one\n" and texts[0].new_text == "one\n"
+    changes, _ = build_canonical_change_set(
+        [entry("a.py", "x"), entry("b.py", "x")], [entry("c.py", "x")], {"x": b"x"}
     )
-    assert record.schema_version == "review-evidence@2"
-    with pytest.raises(ValidationError, match="require model_tier"):
-        ReviewRecord(status=ReviewStatus.COMPLETED, subject=subject, **_record_args())
+    assert [change.operation for change in changes.changes] == [
+        GitOperation.DELETE,
+        GitOperation.DELETE,
+        GitOperation.ADD,
+    ]
+
+
+def test_edited_move_and_copy_are_not_renames():
+    changes, _ = build_canonical_change_set(
+        [entry("old.py", "old")], [entry("new.py", "new")], {"old": b"x", "new": b"x2"}
+    )
+    assert [change.operation for change in changes.changes] == [
+        GitOperation.ADD,
+        GitOperation.DELETE,
+    ]
+    changes, _ = build_canonical_change_set(
+        [entry("source.py", "old")],
+        [entry("source.py", "old"), entry("copy.py", "old")],
+        {"old": b"x"},
+    )
+    assert [change.operation for change in changes.changes] == [GitOperation.ADD]
 
 
 @pytest.mark.parametrize(
-    ("kind", "digest"),
+    ("old", "new", "blobs", "reason"),
     [
-        (DeclarationProvenanceKind.VALIDATED, "sha256:" + "1" * 64),
-        (DeclarationProvenanceKind.RAW, "sha256:" + "2" * 64),
-        (DeclarationProvenanceKind.ABSENT, None),
-        (DeclarationProvenanceKind.UNREADABLE, None),
+        ([entry("a", "a")], [entry("a", "b")], {"a": b"a", "b": b"\0"}, "binary"),
+        ([entry("sub", "a", kind="commit")], [entry("sub", "b", kind="commit")], {}, "submodule"),
+        ([entry("a", "a")], [entry("a", "b")], {"a": b"a", "b": b"\xff"}, "invalid_utf8"),
     ],
 )
-def test_declaration_provenance_has_exactly_the_permitted_digest_shape(kind, digest):
-    provenance = DeclarationProvenance(kind=kind, digest=digest)
-    assert provenance.digest == digest
+def test_non_text_changes_have_no_line_budget(old, new, blobs, reason):
+    changes, texts = build_canonical_change_set(old, new, blobs)
+    assert changes.changes[0].non_text_reason == reason
+    assert changes.changes[0].changed_lines is None
+    assert texts == ()
 
 
-def test_declaration_provenance_rejects_digest_mismatch():
-    with pytest.raises(ValidationError, match="must match its kind"):
-        DeclarationProvenance(kind=DeclarationProvenanceKind.ABSENT, digest="sha256:" + "0" * 64)
+def test_mode_change_is_modify_and_physical_lines_are_counted():
+    changes, texts = build_canonical_change_set(
+        [entry("a", "x", mode="100644")],
+        [entry("a", "y", mode="100755")],
+        {"x": b"a\n", "y": b"b\n\nlast"},
+    )
+    assert changes.changes[0].operation is GitOperation.MODIFY
+    assert changes.changes[0].changed_lines == 4
+    assert texts[0].old_text == "a\n" and texts[0].new_text == "b\n\nlast"
 
 
-def test_admission_record_has_no_tier_or_findings_and_binds_candidate_subject():
-    provenance = DeclarationProvenance(kind=DeclarationProvenanceKind.ABSENT)
-    subject = PlanAdmissionSubject(
-        base_sha="base", head_sha="candidate", declaration_provenance=provenance
+def test_paths_are_byte_sorted_and_unrepresentable_paths_fail_closed():
+    changes, _ = build_canonical_change_set(
+        [], [entry("z", "z"), entry("á", "a")], {"z": b"", "a": b""}
+    )
+    assert [change.path for change in changes.changes] == ["z", "á"]
+    with pytest.raises(ValidationError, match="valid string"):
+        entry("bad\ud800", "a")
+
+
+def test_packet_digest_binds_change_set_and_exact_text_sides():
+    changes, texts = build_canonical_change_set([], [entry("empty", "e")], {"e": b""})
+    packet = DiffReviewPacket(canonical_change_set=changes, text_deltas=texts)
+    assert packet.text_deltas[0].old_text is None
+    assert packet.text_deltas[0].new_text == ""
+    assert packet.digest.startswith("sha256:")
+    assert CanonicalChangeSet.model_validate(changes.model_dump()).digest == changes.digest
+
+
+def test_scope_packet_stays_declaration_bound():
+    declaration = PlanScopeDeclaration(
+        allowed_path_patterns=("src/**",),
+        allowed_operations={"src/**": (GitOperation.ADD,)},
+        max_changed_files=1,
+        max_changed_lines=2,
+    )
+    packet = PlanScopePacket.from_declaration(declaration, base_sha="base", plan_head_sha="plan")
+    assert packet.base_sha == "base" and "plan_head_sha" not in declaration.model_dump()
+
+
+def test_gate_requires_artifact_record_and_signed_run_identity():
+    snapshot = GateSnapshot(
+        pull_request_number=330, base_sha="base", plan_head_sha="plan", head_sha="head"
+    )
+    subject = PlanReviewSubject(
+        base_sha="base", plan_head_sha="plan", packet_digest="sha256:" + "0" * 64
     )
     record = ReviewRecord(
-        status=ReviewStatus.ADMISSION_REJECTED,
-        admission_reason=AdmissionReason.PLAN_TRANSITION_INVALID,
-        subject=subject,
-        **_record_args(),
-    )
-    assert record.model_tier is None
-    with pytest.raises(ValidationError, match="cannot contain tier"):
-        ReviewRecord(
-            status=ReviewStatus.ADMISSION_REJECTED,
-            admission_reason=AdmissionReason.PLAN_TRANSITION_INVALID,
-            model_tier=ModelTier.ECONOMY,
-            subject=subject,
-            **_record_args(),
-        )
-
-
-def test_declaration_rejection_reason_must_match_provenance():
-    subject = PlanAdmissionSubject(
-        base_sha="base",
-        head_sha="candidate",
-        declaration_provenance=DeclarationProvenance(
-            kind=DeclarationProvenanceKind.RAW, digest="sha256:" + "3" * 64
-        ),
-    )
-    with pytest.raises(ValidationError, match="must match declaration provenance"):
-        ReviewRecord(
-            status=ReviewStatus.ADMISSION_REJECTED,
-            admission_reason=AdmissionReason.DECLARATION_ABSENT,
-            subject=subject,
-            **_record_args(),
-        )
-
-
-def test_runner_materializes_harness_rejection_without_model_tier(monkeypatch):
-    monkeypatch.setenv("GITHUB_RUN_ID", "42")
-    monkeypatch.setenv("GITHUB_WORKFLOW_REF", "owner/repo/.github/workflows/review-plan.yml@main")
-    runner = _runner_module()
-    record = runner.materialize_admission_record(
+        record_id="7:plan_review",
         phase=ReviewPhase.PLAN,
-        base_sha="base",
-        head_sha="head",
-        reason=AdmissionReason.DECLARATION_ABSENT,
-        provenance=DeclarationProvenance(kind=DeclarationProvenanceKind.ABSENT),
-    )
-    assert record.status is ReviewStatus.ADMISSION_REJECTED
-    assert record.model_tier is None
-    assert record.findings == ()
-
-
-def test_version_dispatch_rejects_v1_before_payload_interpretation():
-    with pytest.raises(ValueError, match="unsupported review evidence schema version"):
-        parse_review_record({"schema_version": "review-evidence@1", "status": "completed"})
-
-
-@pytest.mark.parametrize("value", [b"[]", '"record"', "0", "null"])
-def test_version_dispatch_rejects_non_object_json(value):
-    with pytest.raises(ValueError, match="must be a JSON object"):
-        parse_review_record(value)
-
-
-def test_record_has_no_self_referential_attestation_reference():
-    assert "attestation_reference" not in ReviewRecord.model_fields
-
-
-def test_runner_detects_missing_credential_before_model_call(monkeypatch):
-    runner = _runner_module()
-    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
-    assert not runner._credential_available(ModelTier.ECONOMY)
-
-
-def test_runner_appends_github_output(tmp_path):
-    runner = _runner_module()
-    output = tmp_path / "github-output"
-    output.write_text("existing=value\n", encoding="utf-8")
-    record = ReviewRecord(
         status=ReviewStatus.COMPLETED,
-        model_tier=ModelTier.ECONOMY,
-        subject=PlanReviewSubject(
-            base_sha="base", plan_head_sha="plan", packet_digest=_packet().digest
-        ),
-        **_record_args(),
-    )
-    runner._append_github_output(output, record, 330)
-    assert output.read_text(encoding="utf-8").startswith("existing=value\nartifact_name=")
-
-
-def test_review_workflows_keep_history_and_binary_packets_safe():
-    root = Path(__file__).parents[1]
-    plan_workflow = (root / ".github" / "workflows" / "review-plan.yml").read_text(encoding="utf-8")
-    diff_workflow = (root / ".github" / "workflows" / "review-diff.yml").read_text(encoding="utf-8")
-    assert "fetch-depth: 0" in plan_workflow
-    assert "fetch-depth: 0" in diff_workflow
-    assert 'decode("utf-8", errors="replace")' in diff_workflow
-    assert "print binary ? 101 : sum + 0" in diff_workflow
-
-
-def test_review_workflows_install_the_harness_dependency():
-    root = Path(__file__).parents[1]
-    for workflow_name in ("review-plan.yml", "review-diff.yml"):
-        workflow = (root / ".github" / "workflows" / workflow_name).read_text(encoding="utf-8")
-        assert "actions/setup-python@v5" in workflow
-        assert 'python -m pip install "pydantic>=2.10.0"' in workflow
-
-
-def test_subject_digest_is_stable_across_retry_metadata_and_artifact_name_is_canonical():
-    subject = DiffReviewSubject(
-        base_sha="base",
-        plan_head_sha="plan",
-        head_sha="head",
-        diff_digest="sha256:" + "0" * 64,
-    )
-    first = ReviewRecord(
-        phase=ReviewPhase.DIFF,
-        status=ReviewStatus.COMPLETED,
+        workflow_name="descriptive",
+        workflow_run_id=7,
+        emitted_at=datetime.now(UTC),
         model_tier=ModelTier.ECONOMY,
         subject=subject,
-        **{key: value for key, value in _record_args().items() if key != "phase"},
     )
-    second = first.model_copy(update={"record_id": "retry", "workflow_run_id": 2})
-    assert first.subject_digest == second.subject_digest
-    assert first.digest != second.digest
-    assert first.artifact_name(330) == (
-        f"review-evidence-diff_review-330-sha256-{first.subject_digest.removeprefix('sha256:')}-1"
-    )
-
-
-def test_mechanical_scope_checks_rename_both_sides_and_binary_budget():
-    violations = evaluate_mechanical_scope(
-        _packet(),
-        current_base_sha="other",
-        changes=(
-            ChangedPath(
-                operation=GitOperation.RENAME,
-                previous_path="src/a.py",
-                path="outside.py",
-                changed_lines=None,
-                is_binary=True,
-            ),
+    receipt = ArtifactReceipt(
+        artifact_id=99,
+        workflow_run_id=7,
+        record_bytes=record.model_dump_json(exclude_none=False).encode(),
+        provenance=ProvenanceReceipt(
+            repository="owner/repo",
+            signer_path=".github/workflows/review-plan.yml",
+            github_workflow_sha="base",
+            source_repository_digest="base",
+            workflow_run_id=7,
+            verified=True,
         ),
     )
-    assert {item.kind for item in violations} == {
-        "base_sha_mismatch",
-        "path_outside_allowed_patterns",
-        "operation_not_allowed",
-        "changed_line_budget_exceeded",
-    }
+    with pytest.raises(ValidationError, match="canonical"):
+        GateCandidate(artifact=receipt, record=record)
+    receipt = receipt.model_copy(update={"record_bytes": canonical_json(record)})
+    selected = select_gate_evidence(
+        [GateCandidate(artifact=receipt, record=record)],
+        snapshot=snapshot,
+        repository="owner/repo",
+        signer_paths={
+            ReviewPhase.PLAN: ".github/workflows/review-plan.yml",
+            ReviewPhase.DIFF: ".github/workflows/review-diff.yml",
+        },
+        phase=ReviewPhase.PLAN,
+    )
+    assert selected.record_id == "7:plan_review"
 
 
-def test_linear_admission_rejects_hidden_history_and_merges():
-    errors = validate_linear_admission(
-        base_sha="base",
-        plan_head_sha="plan",
-        plan_commit=CommitTransition(
-            sha="plan", parents=("intermediate",), changed_paths=(".patchforge/review-plan.json",)
+def test_gate_rejects_non_completed_stale_and_ambiguous_evidence():
+    snapshot = GateSnapshot(
+        pull_request_number=330, base_sha="base", plan_head_sha="plan", head_sha="head"
+    )
+    subject = PlanReviewSubject(
+        base_sha="base", plan_head_sha="plan", packet_digest="sha256:" + "0" * 64
+    )
+    record = ReviewRecord(
+        record_id="8:plan_review",
+        phase=ReviewPhase.PLAN,
+        status=ReviewStatus.UNAVAILABLE,
+        workflow_name="descriptive",
+        workflow_run_id=8,
+        emitted_at=datetime.now(UTC),
+        model_tier=ModelTier.ECONOMY,
+        subject=subject,
+        unavailable_reason=UnavailableReason.TIMEOUT,
+    )
+    receipt = ArtifactReceipt(
+        artifact_id=100,
+        workflow_run_id=8,
+        record_bytes=canonical_json(record),
+        provenance=ProvenanceReceipt(
+            repository="owner/repo",
+            signer_path=".github/workflows/review-plan.yml",
+            github_workflow_sha="base",
+            source_repository_digest="base",
+            workflow_run_id=8,
+            verified=True,
         ),
-        post_plan=(CommitTransition(sha="head", parents=("plan", "main")),),
     )
-    assert "only parent" in errors[0]
-    assert "linear chain" in errors[1]
-
-
-def test_linear_admission_accepts_one_plan_transition_and_linear_implementation():
-    assert (
-        validate_linear_admission(
-            base_sha="base",
-            plan_head_sha="plan",
-            plan_commit=CommitTransition(
-                sha="plan", parents=("base",), changed_paths=(".patchforge/review-plan.json",)
-            ),
-            post_plan=(
-                CommitTransition(sha="code-1", parents=("plan",)),
-                CommitTransition(sha="head", parents=("code-1",)),
-            ),
+    with pytest.raises(ValueError, match="not completed"):
+        select_gate_evidence(
+            [GateCandidate(artifact=receipt, record=record)],
+            snapshot=snapshot,
+            repository="owner/repo",
+            signer_paths={
+                ReviewPhase.PLAN: ".github/workflows/review-plan.yml",
+                ReviewPhase.DIFF: ".github/workflows/review-diff.yml",
+            },
+            phase=ReviewPhase.PLAN,
         )
-        == ()
+    stale = receipt.model_copy(
+        update={"provenance": receipt.provenance.model_copy(update={"github_workflow_sha": "old"})}
     )
-
-
-def test_candidate_subjects_cannot_be_used_as_completed_records():
-    subject = DiffAdmissionSubject(
-        base_sha="base",
-        head_sha="head",
-        declaration_provenance=DeclarationProvenance(kind=DeclarationProvenanceKind.UNREADABLE),
-    )
-    with pytest.raises(ValidationError, match="admitted subject"):
-        ReviewRecord(
-            phase=ReviewPhase.DIFF,
-            status=ReviewStatus.COMPLETED,
-            model_tier=ModelTier.ECONOMY,
-            subject=subject,
-            **{key: value for key, value in _record_args().items() if key != "phase"},
+    with pytest.raises(ValueError, match="stale signer"):
+        select_gate_evidence(
+            [GateCandidate(artifact=stale, record=record)],
+            snapshot=snapshot,
+            repository="owner/repo",
+            signer_paths={
+                ReviewPhase.PLAN: ".github/workflows/review-plan.yml",
+                ReviewPhase.DIFF: ".github/workflows/review-diff.yml",
+            },
+            phase=ReviewPhase.PLAN,
         )
-
-
-def test_declaration_becomes_canonical_packet_only_after_trusted_shas_are_added():
-    packet = _packet()
-    assert packet.base_sha == "base"
-    assert packet.plan_head_sha == "plan"
-    assert "plan_head_sha" not in _declaration().model_dump()
-    assert packet.allowed_operations == (
-        AllowedOperationRule(pattern="src/**", operations=(GitOperation.ADD, GitOperation.MODIFY)),
-    )

@@ -1,8 +1,8 @@
-name: Attested diff review
+name: Attested diff review v3
 
 on:
   pull_request_target:
-    types: [synchronize, ready_for_review]
+    types: [opened, reopened, synchronize, ready_for_review]
 
 permissions:
   contents: read
@@ -25,108 +25,41 @@ jobs:
           python-version: "3.12"
       - name: Install review harness dependency
         run: python -m pip install "pydantic>=2.10.0"
-      - name: Classify the diff candidate
+      - name: Classify linear diff snapshot without checking out the pull request
         id: classify
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           git fetch --no-tags origin "$HEAD_SHA"
-          mkdir -p review-evidence
           mapfile -t commits < <(git rev-list --reverse "$BASE_SHA..$HEAD_SHA")
           plan_sha="${commits[0]:-}"
           reason=
-          source_sha="$HEAD_SHA"
-          if test -z "$plan_sha" \
-            || ! test "$(git rev-list --parents -n 1 "$plan_sha" | wc -w)" = "2" \
-            || ! test "$(git rev-parse "$plan_sha^")" = "$BASE_SHA" \
-            || ! test "$(git diff --name-only "$BASE_SHA" "$plan_sha")" = ".patchforge/review-plan.json"; then
-            reason=plan_transition_invalid
-          else
-            source_sha="$plan_sha"
-            expected_parent="$plan_sha"
-            for commit in "${commits[@]:1}"; do
-              if ! test "$(git rev-list --parents -n 1 "$commit" | wc -w)" = "2" \
-                || ! test "$(git rev-parse "$commit^")" = "$expected_parent"; then
-                reason=implementation_chain_invalid
-                break
-              fi
-              expected_parent="$commit"
-            done
+          if test -z "$plan_sha" || ! test "$(git rev-list --parents -n 1 "$plan_sha" | wc -w)" = "2" || ! test "$(git rev-parse "$plan_sha^")" = "$BASE_SHA" || ! test "$(git diff --name-only "$BASE_SHA" "$plan_sha")" = ".patchforge/review-plan.json"; then reason=plan_transition_invalid; fi
+          if test -z "$reason" && test "$HEAD_SHA" = "$plan_sha"; then reason=implementation_chain_invalid; fi
+          if test -z "$reason"; then
+            expected="$plan_sha"; for commit in "${commits[@]:1}"; do if ! test "$(git rev-list --parents -n 1 "$commit" | wc -w)" = "2" || ! test "$(git rev-parse "$commit^")" = "$expected"; then reason=implementation_chain_invalid; break; fi; expected="$commit"; done
           fi
-          declaration_kind=absent
-          declaration_digest=
-          if git cat-file -e "$source_sha:.patchforge/review-plan.json" 2>/dev/null; then
-            if git show "$source_sha:.patchforge/review-plan.json" > review-evidence/declaration.json; then
-              declaration_kind=raw
-              declaration_digest="sha256:$(sha256sum review-evidence/declaration.json | cut -d ' ' -f 1)"
-            else
-              declaration_kind=unreadable
-            fi
-          fi
-          if test -z "$reason" && test "$HEAD_SHA" = "$plan_sha"; then
-            mode=suppress
-          elif test -n "$reason"; then
-            mode=admission
-          elif test "$declaration_kind" = absent; then
-            reason=declaration_absent
-            mode=admission
-          elif test "$declaration_kind" = unreadable; then
-            reason=declaration_unreadable
-            mode=admission
-          elif ! PYTHONPATH=src python -c 'from pathlib import Path; from orchestrator.review_evidence import PlanScopeDeclaration, sha256_digest; declaration = PlanScopeDeclaration.model_validate_json(Path("review-evidence/declaration.json").read_text(encoding="utf-8")); Path("review-evidence/declaration.digest").write_text(sha256_digest(declaration), encoding="utf-8")'; then
-            reason=declaration_invalid
-            mode=admission
-          else
-            declaration_kind=validated
-            declaration_digest="$(cat review-evidence/declaration.digest)"
-            mode=execution
-          fi
-          {
-            echo "mode=$mode"
-            echo "reason=$reason"
-            echo "plan_sha=$plan_sha"
-            echo "declaration_kind=$declaration_kind"
-            echo "declaration_digest=$declaration_digest"
-          } >> "$GITHUB_OUTPUT"
-      - name: Materialize review record
-        if: steps.classify.outputs.mode != 'suppress'
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"; echo "plan_sha=$plan_sha" >> "$GITHUB_OUTPUT"
+      - name: Materialize canonical v3 packet and record
         id: materialize
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          MODE: ${{ steps.classify.outputs.mode }}
-          REASON: ${{ steps.classify.outputs.reason }}
           PLAN_SHA: ${{ steps.classify.outputs.plan_sha }}
-          DECLARATION_KIND: ${{ steps.classify.outputs.declaration_kind }}
-          DECLARATION_DIGEST: ${{ steps.classify.outputs.declaration_digest }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          REASON: ${{ steps.classify.outputs.reason }}
         run: |
-          args=(--phase diff_review --output review-evidence/review-record.json --base-sha "$BASE_SHA" --head-sha "$HEAD_SHA" --pr-number "$PR_NUMBER" --github-output "$GITHUB_OUTPUT")
-          if test "$MODE" = admission; then
-            args+=(--admission-reason "$REASON" --declaration-provenance "$DECLARATION_KIND")
-            if test -n "$DECLARATION_DIGEST"; then args+=(--declaration-digest "$DECLARATION_DIGEST"); fi
-          else
-            git diff --binary "$PLAN_SHA" "$HEAD_SHA" > review-evidence/actual.diff
-            python -c 'import json, pathlib; diff = pathlib.Path("review-evidence/actual.diff").read_bytes().decode("utf-8", errors="replace"); pathlib.Path("review-evidence/packet.json").write_text(json.dumps({"diff": diff}), encoding="utf-8")'
-            changed_files="$(git diff --name-only "$PLAN_SHA" "$HEAD_SHA" | wc -l)"
-            changed_lines="$(git diff --numstat "$PLAN_SHA" "$HEAD_SHA" | awk '{ if ($1 == "-" || $2 == "-") { binary = 1; exit } sum += $1 + $2 } END { print binary ? 101 : sum + 0 }')"
-            if test "$changed_files" -gt 2 || test "$changed_lines" -gt 100; then tier=high_assurance; else tier=economy; fi
-            args+=(--packet review-evidence/packet.json --plan-head-sha "$PLAN_SHA" --tier "$tier")
-          fi
+          args=(--phase diff_review --output review-record.json --base-sha "$BASE_SHA" --head-sha "$HEAD_SHA" --pr-number "$PR_NUMBER" --github-output "$GITHUB_OUTPUT")
+          if test -n "$REASON"; then args+=(--admission-reason "$REASON"); else PYTHONPATH=src python .github/scripts/review_packet.py --plan-head-sha "$PLAN_SHA" --head-sha "$HEAD_SHA" --output packet.json; args+=(--packet packet.json --plan-head-sha "$PLAN_SHA" --tier economy); fi
           PYTHONPATH=src python .github/scripts/review_runner.py "${args[@]}"
       - uses: actions/upload-artifact@v4
-        if: steps.classify.outputs.mode != 'suppress'
         with:
           name: ${{ steps.materialize.outputs.artifact_name }}
-          path: review-evidence/review-record.json
+          path: review-record.json
           retention-days: 30
       - uses: actions/attest@v4
-        if: steps.classify.outputs.mode != 'suppress'
         with:
-          subject-path: review-evidence/review-record.json
-      - name: Fail after publishing rejected admission
-        if: steps.classify.outputs.mode == 'admission'
-        run: exit 1
+          subject-path: review-record.json
