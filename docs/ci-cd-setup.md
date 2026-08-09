@@ -148,3 +148,13 @@ Each pipeline run generates a unique branch name (`patchforge/run_YYYYMMDD_HHMMS
 **UID mismatch errors on git push**: The runner step `git config --global --add safe.directory` resolves ownership mismatches between the container UID (1000) and the runner UID (1001).
 
 **No LLM API key error**: Set at least one of `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, or `OPENROUTER_API_KEY` in repository secrets.
+
+## Attested independent review evidence
+
+The independent-review workflows use the protected `PATCHFORGE_REVIEW`
+Environment. Configure `ANTHROPIC_API_KEY` and `GOOGLE_API_KEY` there, require
+the repository owner as reviewer, and retain evidence artifacts for 30 days.
+The plan and diff workflows produce separately attested records. Evidence
+production does not yet authorize a merge; a later gate rollout will verify
+the records against fixed workflow identities and fail closed on missing or
+expired evidence.

@@ -1,0 +1,60 @@
+name: Attested diff review
+
+on:
+  pull_request_target:
+    types: [synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  actions: read
+  attestations: write
+  id-token: write
+
+jobs:
+  diff-review:
+    if: "!github.event.pull_request.head.repo.fork"
+    runs-on: ubuntu-latest
+    environment: PATCHFORGE_REVIEW
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+      - name: Require a linear implementation chain from an admitted plan
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch --no-tags origin "$HEAD_SHA"
+          git show "$HEAD_SHA:.patchforge/review-plan.json" > review-plan.json
+          PLAN_SHA="$(jq -r '.plan_head_sha' review-plan.json)"
+          test "$(jq -r '.base_sha' review-plan.json)" = "$BASE_SHA"
+          git merge-base --is-ancestor "$PLAN_SHA" "$HEAD_SHA"
+          for commit in $(git rev-list --reverse "$PLAN_SHA..$HEAD_SHA"); do
+            test "$(git rev-list --parents -n 1 "$commit" | wc -w)" = "2"
+          done
+          echo "PLAN_SHA=$PLAN_SHA" >> "$GITHUB_ENV"
+      - name: Review canonical diff without tools
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          mkdir -p review-evidence
+          git diff --binary "$PLAN_SHA" "$HEAD_SHA" > actual.diff
+          python -c 'import json, pathlib; pathlib.Path("review-evidence/packet.json").write_text(json.dumps({"diff": pathlib.Path("actual.diff").read_text(encoding="utf-8")}), encoding="utf-8")'
+          changed_files="$(git diff --name-only "$PLAN_SHA" "$HEAD_SHA" | wc -l)"
+          changed_lines="$(git diff --numstat "$PLAN_SHA" "$HEAD_SHA" | awk '{ if ($1 == "-" || $2 == "-") { print 101; exit } sum += $1 + $2 } END { print sum + 0 }')"
+          if [ "$changed_files" -gt 2 ] || [ "$changed_lines" -gt 100 ]; then TIER=high_assurance; else TIER=economy; fi
+          PYTHONPATH=src python .github/scripts/review_runner.py \
+            --phase diff_review --packet review-evidence/packet.json \
+            --output review-evidence/review-record.json --base-sha "$BASE_SHA" \
+            --plan-head-sha "$PLAN_SHA" --head-sha "$HEAD_SHA" --tier "$TIER"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: review-evidence-diff_review-${{ github.event.pull_request.number }}
+          path: review-evidence/review-record.json
+          retention-days: 30
+      - uses: actions/attest@v4
+        with:
+          subject-path: review-evidence/review-record.json

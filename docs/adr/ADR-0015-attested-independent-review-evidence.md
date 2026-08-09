@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted for issue #328. Implementation is deliberately deferred to follow-up
-issues.
+Accepted for issue #328. Evidence producers are delivered first; gate
+enforcement and human-decision consumption remain follow-up work.
 
 ## Context
 
@@ -45,19 +45,40 @@ record after implementation. CI composes the selected records by phase and
 subject without modifying either artifact. Each record has:
 
 - `record_id`, `phase`, and `status` (`completed` or `unavailable`);
-- the emitting workflow name, workflow run identifier, timestamp, and
-  attestation reference;
+- the emitting workflow name, workflow run identifier, and timestamp;
 - `model_tier` (`high_assurance` or `economy`); and
 - its phase-specific canonical subject.
 
-A `plan_review` subject contains `base_sha` and the digest of one canonical
+A GitHub artifact attestation signs the exact immutable `review-record.json`
+bytes.  An evidence record does not contain an attestation reference for
+itself: consumers derive provenance by verifying those bytes against the
+repository and a fixed signer workflow.  The record digest is an external
+locator, never a mutable field added after attestation.
+
+A `plan_review` subject contains `base_sha`, `plan_head_sha`, and the digest of one canonical
 plan-scope packet. That packet contains the same `base_sha`, allowed path
 patterns, allowed Git operations (`add`, `modify`, `delete`, `rename`), and
 maximum changed-file and changed-line budgets.
 
-A `diff_review` subject contains `base_sha`, `head_sha`, and the digest of the
-canonical actual diff. A record's subject is immutable: a record for one plan
-or head cannot satisfy another.
+A `diff_review` subject contains `base_sha`, `plan_head_sha`, `head_sha`, and
+the digest of the canonical actual diff from `plan_head_sha` to `head_sha`.
+A record's subject is immutable: a record for one plan or head cannot satisfy
+another.
+
+### 2.1 Plan admission is a linear Git transition
+
+The plan packet is stored in `.patchforge/review-plan.json`.  Its attested
+`plan_head_sha` must be a non-merge commit whose sole parent is the attested
+`base_sha`; it must modify exactly that plan file.  This proves the complete
+admitted pre-implementation transition rather than merely a net tree diff.
+
+Every commit from `plan_head_sha` through the implementation `head_sha` must
+have one parent and form one linear chain beginning at `plan_head_sha`.  A
+merge, rebase, force-push, or current pull-request base SHA that differs from
+the attested `base_sha` invalidates admission and requires a new plan commit
+and `plan_review`.  The gate evaluates the implementation delta only from
+`plan_head_sha` to `head_sha`; it never folds later `main` changes into that
+delta.
 
 `completed` records contain a finding list. Every finding has a stable id,
 evidence reference, `severity` (`blocking`, `advisory`, or `informational`),
@@ -69,7 +90,7 @@ one redacted public reason code and no invented findings.
 The deterministic comparison between plan and diff is named
 `mechanical_scope_violation`. It may report only these conditions:
 
-- actual base SHA differs from the plan packet base SHA;
+- current pull-request base SHA differs from the plan packet base SHA;
 - a changed path is outside the allowed patterns;
 - a Git operation is not allowed for that path; or
 - the changed-file or changed-line budget is exceeded.
@@ -82,10 +103,14 @@ than a deterministic scope decision.
 ### 4. Phase completion, availability, and human decisions
 
 Each review workflow invocation emits exactly one attested phase record for its
-subject. CI selects one matching record for each required phase. A `completed`
-record satisfies its phase, subject to unresolved blocking findings. An
-`unavailable` record does not satisfy it alone. A retry emits a new record; it
-does not rewrite the earlier record.
+subject. CI discovers candidate artifacts by stable phase/PR/subject-digest
+name, downloads every non-expired candidate, verifies its attestation against
+the fixed signer workflow, and selects the greatest `(emitted_at,
+workflow_run_id, record_id)` tuple. A `completed` record satisfies its phase,
+subject to unresolved blocking findings. An `unavailable` record does not
+satisfy it alone. A retry emits a new record; it does not rewrite the earlier
+record. An absent, expired, malformed, or unverifiable artifact is missing
+evidence and is never an override candidate.
 
 An attested human override may satisfy only an attested `unavailable` record.
 It must reference that record id and the identical subject, identify the
@@ -124,7 +149,7 @@ from the diff.
 
 ## Follow-up verification
 
-The implementation issue must verify:
+The enforcement follow-up must verify:
 
 - plan and diff records bind only their respective canonical subjects;
 - all mechanical-scope conditions, including both sides of a rename;

@@ -353,9 +353,18 @@ current conversation unless its caller explicitly creates an isolated context,
 so its output is not independent review evidence and it is not a merge gate.
 They remain useful for disciplined local review, but they do not prove that an
 independent reviewer examined an issue or diff. The attested independent-review
-workflow is specified separately before it becomes a required process step.
+evidence contract is specified separately; its producer workflows are not a
+required merge-control step until a later gate rollout consumes their records.
 See [ADR-0015](../adr/ADR-0015-attested-independent-review-evidence.md) for
-the accepted contract and its deferred implementation boundary.
+the accepted attested-evidence contract.
+
+When the attested gate is enabled in a later rollout, its plan review is a Git admission boundary:
+`.patchforge/review-plan.json` must be the only change in one non-merge commit
+directly atop the current base. Implementation then proceeds through a linear
+chain from that commit. A changed base, merge, rebase, or force-push requires a
+new plan review; labels only trigger workflows and never authorize a phase.
+The producer workflows are first exercised in a dedicated post-merge
+dogfooding pull request, before merge authorization is enabled.
 
 ---
 

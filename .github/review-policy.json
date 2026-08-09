@@ -1,0 +1,13 @@
+{
+  "environment": "PATCHFORGE_REVIEW",
+  "authorized_actors": ["Argenis1412"],
+  "artifact_retention_days": 30,
+  "attestation_signers": {
+    "plan_review": ".github/workflows/review-plan.yml",
+    "diff_review": ".github/workflows/review-diff.yml"
+  },
+  "models": {
+    "high_assurance": {"provider": "anthropic", "model": "claude-sonnet-4-6"},
+    "economy": {"provider": "google", "model": "gemini-2.5-flash"}
+  }
+}
