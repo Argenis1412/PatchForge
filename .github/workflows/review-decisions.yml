@@ -26,9 +26,11 @@ jobs:
     environment: PATCHFORGE_REVIEW
     steps:
       - name: Emit a decision linked to one exact reviewed subject
+        env:
+          INPUTS_JSON: ${{ toJson(inputs) }}
         run: |
           mkdir -p review-decision
-          printf '%s\n' '${{ toJson(inputs) }}' > review-decision/decision.json
+          printf '%s\n' "$INPUTS_JSON" > review-decision/decision.json
       - uses: actions/upload-artifact@v4
         with:
           name: review-decision-${{ inputs.record_id }}

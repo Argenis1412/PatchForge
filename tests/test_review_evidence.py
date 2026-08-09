@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from orchestrator.review_evidence import (
+    AllowedOperationRule,
     ChangedPath,
     CommitTransition,
     DiffReviewSubject,
@@ -114,6 +115,15 @@ def test_linear_admission_accepts_one_plan_transition_and_linear_implementation(
         ),
     )
     assert errors == ()
+
+
+def test_allowed_operations_are_deeply_immutable():
+    packet = _packet()
+    assert packet.allowed_operations == (
+        AllowedOperationRule(pattern="src/**", operations=(GitOperation.ADD, GitOperation.MODIFY)),
+    )
+    with pytest.raises(ValidationError):
+        packet.allowed_operations[0].operations += (GitOperation.DELETE,)
 
 
 def test_subjects_cannot_cross_phase():

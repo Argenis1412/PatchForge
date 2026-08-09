@@ -15,7 +15,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class _ClosedModel(BaseModel):
@@ -77,13 +77,28 @@ def sha256_digest(value: object) -> str:
     return f"sha256:{hashlib.sha256(canonical_json(value)).hexdigest()}"
 
 
+class AllowedOperationRule(_ClosedModel):
+    pattern: str = Field(min_length=1)
+    operations: tuple[GitOperation, ...] = Field(min_length=1)
+
+
 class PlanScopePacket(_ClosedModel):
     base_sha: str = Field(min_length=1)
     plan_head_sha: str = Field(min_length=1)
     allowed_path_patterns: tuple[str, ...] = Field(min_length=1)
-    allowed_operations: dict[str, tuple[GitOperation, ...]] = Field(min_length=1)
+    allowed_operations: tuple[AllowedOperationRule, ...] = Field(min_length=1)
     max_changed_files: int = Field(ge=0)
     max_changed_lines: int = Field(ge=0)
+
+    @field_validator("allowed_operations", mode="before")
+    @classmethod
+    def _freeze_operations(cls, value: object) -> object:
+        if isinstance(value, dict):
+            return tuple(
+                {"pattern": pattern, "operations": operations}
+                for pattern, operations in value.items()
+            )
+        return value
 
     @property
     def digest(self) -> str:
@@ -206,9 +221,9 @@ def evaluate_mechanical_scope(
                 )
             operations = tuple(
                 operation
-                for pattern, allowed in packet.allowed_operations.items()
-                if fnmatch.fnmatchcase(path, pattern)
-                for operation in allowed
+                for rule in packet.allowed_operations
+                if fnmatch.fnmatchcase(path, rule.pattern)
+                for operation in rule.operations
             )
             if change.operation not in operations:
                 violations.append(MechanicalScopeViolation(kind="operation_not_allowed", path=path))
