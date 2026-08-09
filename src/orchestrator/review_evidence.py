@@ -11,6 +11,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import json
+from collections.abc import Mapping
 from datetime import datetime
 from enum import Enum
 from typing import Literal
@@ -30,6 +31,7 @@ class ReviewPhase(str, Enum):
 class ReviewStatus(str, Enum):
     COMPLETED = "completed"
     UNAVAILABLE = "unavailable"
+    ADMISSION_REJECTED = "admission_rejected"
 
 
 class ModelTier(str, Enum):
@@ -64,6 +66,21 @@ class UnavailableReason(str, Enum):
     TIMEOUT = "timeout"
 
 
+class AdmissionReason(str, Enum):
+    DECLARATION_ABSENT = "declaration_absent"
+    DECLARATION_UNREADABLE = "declaration_unreadable"
+    DECLARATION_INVALID = "declaration_invalid"
+    PLAN_TRANSITION_INVALID = "plan_transition_invalid"
+    IMPLEMENTATION_CHAIN_INVALID = "implementation_chain_invalid"
+
+
+class DeclarationProvenanceKind(str, Enum):
+    VALIDATED = "validated"
+    RAW = "raw"
+    ABSENT = "absent"
+    UNREADABLE = "unreadable"
+
+
 def canonical_json(value: object) -> bytes:
     """Return the only serialization used for evidence and packet digests."""
     if isinstance(value, BaseModel):
@@ -82,9 +99,7 @@ class AllowedOperationRule(_ClosedModel):
     operations: tuple[GitOperation, ...] = Field(min_length=1)
 
 
-class PlanScopePacket(_ClosedModel):
-    base_sha: str = Field(min_length=1)
-    plan_head_sha: str = Field(min_length=1)
+class _PlanScope(_ClosedModel):
     allowed_path_patterns: tuple[str, ...] = Field(min_length=1)
     allowed_operations: tuple[AllowedOperationRule, ...] = Field(min_length=1)
     max_changed_files: int = Field(ge=0)
@@ -99,6 +114,25 @@ class PlanScopePacket(_ClosedModel):
                 for pattern, operations in value.items()
             )
         return value
+
+
+class PlanScopeDeclaration(_PlanScope):
+    """Untrusted in-tree declaration; trusted Git metadata is added by the harness."""
+
+
+class PlanScopePacket(_PlanScope):
+    base_sha: str = Field(min_length=1)
+    plan_head_sha: str = Field(min_length=1)
+
+    @classmethod
+    def from_declaration(
+        cls, declaration: PlanScopeDeclaration, *, base_sha: str, plan_head_sha: str
+    ) -> "PlanScopePacket":
+        return cls(
+            base_sha=base_sha,
+            plan_head_sha=plan_head_sha,
+            **declaration.model_dump(mode="python"),
+        )
 
     @property
     def digest(self) -> str:
@@ -123,6 +157,38 @@ class DiffReviewSubject(_ClosedModel):
 ReviewSubject = PlanReviewSubject | DiffReviewSubject
 
 
+class DeclarationProvenance(_ClosedModel):
+    kind: DeclarationProvenanceKind
+    digest: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def _validate_digest(self) -> "DeclarationProvenance":
+        digest_required = self.kind in {
+            DeclarationProvenanceKind.VALIDATED,
+            DeclarationProvenanceKind.RAW,
+        }
+        if digest_required != (self.digest is not None):
+            raise ValueError("declaration provenance digest must match its kind")
+        return self
+
+
+class PlanAdmissionSubject(_ClosedModel):
+    phase: Literal[ReviewPhase.PLAN] = ReviewPhase.PLAN
+    base_sha: str = Field(min_length=1)
+    head_sha: str = Field(min_length=1)
+    declaration_provenance: DeclarationProvenance
+
+
+class DiffAdmissionSubject(_ClosedModel):
+    phase: Literal[ReviewPhase.DIFF] = ReviewPhase.DIFF
+    base_sha: str = Field(min_length=1)
+    head_sha: str = Field(min_length=1)
+    declaration_provenance: DeclarationProvenance
+
+
+AdmissionSubject = PlanAdmissionSubject | DiffAdmissionSubject
+
+
 class Finding(_ClosedModel):
     finding_id: str = Field(min_length=1)
     evidence_reference: str = Field(min_length=1)
@@ -133,35 +199,88 @@ class Finding(_ClosedModel):
 class ReviewRecord(_ClosedModel):
     """The attested subject itself; it intentionally has no attestation reference."""
 
-    schema_version: Literal["review-evidence@1"] = "review-evidence@1"
+    schema_version: Literal["review-evidence@2"] = "review-evidence@2"
     record_id: str = Field(min_length=1)
     phase: ReviewPhase
     status: ReviewStatus
     workflow_name: str = Field(min_length=1)
     workflow_run_id: int = Field(gt=0)
     emitted_at: datetime
-    model_tier: ModelTier
-    subject: ReviewSubject
+    model_tier: ModelTier | None = None
+    subject: ReviewSubject | AdmissionSubject
     findings: tuple[Finding, ...] = ()
     unavailable_reason: UnavailableReason | None = None
+    admission_reason: AdmissionReason | None = None
 
     @model_validator(mode="after")
     def _validate_status_payload(self) -> "ReviewRecord":
         if self.phase != self.subject.phase:
             raise ValueError("record phase must match subject phase")
         if self.status is ReviewStatus.COMPLETED:
-            if self.unavailable_reason is not None:
-                raise ValueError("completed records cannot contain unavailable_reason")
-        elif self.findings:
-            raise ValueError("unavailable records cannot contain findings")
-        elif self.unavailable_reason is None:
-            raise ValueError("unavailable records require unavailable_reason")
+            if not isinstance(self.subject, (PlanReviewSubject, DiffReviewSubject)):
+                raise ValueError("completed records require an admitted subject")
+            if self.model_tier is None:
+                raise ValueError("completed records require model_tier")
+            if self.unavailable_reason is not None or self.admission_reason is not None:
+                raise ValueError("completed records cannot contain a reason code")
+        elif self.status is ReviewStatus.UNAVAILABLE:
+            if not isinstance(self.subject, (PlanReviewSubject, DiffReviewSubject)):
+                raise ValueError("unavailable records require an admitted subject")
+            if self.model_tier is None or self.unavailable_reason is None:
+                raise ValueError("unavailable records require model_tier and unavailable_reason")
+            if self.findings or self.admission_reason is not None:
+                raise ValueError("unavailable records cannot contain findings or admission_reason")
+        else:
+            if not isinstance(self.subject, (PlanAdmissionSubject, DiffAdmissionSubject)):
+                raise ValueError("admission rejections require a candidate subject")
+            if self.model_tier is not None or self.findings or self.unavailable_reason is not None:
+                raise ValueError(
+                    "admission rejections cannot contain tier, findings, or unavailable_reason"
+                )
+            if self.admission_reason is None:
+                raise ValueError("admission rejections require admission_reason")
+            expected_provenance = {
+                AdmissionReason.DECLARATION_ABSENT: DeclarationProvenanceKind.ABSENT,
+                AdmissionReason.DECLARATION_UNREADABLE: DeclarationProvenanceKind.UNREADABLE,
+                AdmissionReason.DECLARATION_INVALID: DeclarationProvenanceKind.RAW,
+            }.get(self.admission_reason)
+            if (
+                expected_provenance is not None
+                and self.subject.declaration_provenance.kind is not expected_provenance
+            ):
+                raise ValueError("declaration rejection reason must match declaration provenance")
         return self
 
     @property
     def digest(self) -> str:
         """Digest of the exact bytes the workflow submits to ``actions/attest``."""
         return sha256_digest(self)
+
+    @property
+    def subject_digest(self) -> str:
+        return sha256_digest(self.subject)
+
+    def artifact_name(self, pull_request_number: int) -> str:
+        if pull_request_number <= 0:
+            raise ValueError("pull_request_number must be positive")
+        subject_hex = self.subject_digest.removeprefix("sha256:")
+        return (
+            f"review-evidence-{self.phase.value}-{pull_request_number}-"
+            f"sha256-{subject_hex}-{self.workflow_run_id}"
+        )
+
+
+def parse_review_record(value: object) -> ReviewRecord:
+    """Dispatch evidence records by version before interpreting their payload."""
+    if isinstance(value, bytes):
+        value = value.decode("utf-8")
+    if isinstance(value, str):
+        value = json.loads(value)
+    if not isinstance(value, Mapping):
+        raise ValueError("review evidence must be a JSON object")
+    if value.get("schema_version") != "review-evidence@2":
+        raise ValueError("unsupported review evidence schema version")
+    return ReviewRecord.model_validate(value)
 
 
 class ChangedPath(_ClosedModel):

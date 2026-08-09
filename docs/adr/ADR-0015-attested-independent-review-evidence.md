@@ -79,6 +79,13 @@ Only then does the harness add the trusted `plan_head_sha` and construct the
 canonical plan-scope packet. This proves the complete admitted pre-
 implementation transition without requiring a commit to contain its own OID.
 
+Producer admission validates this linear Git boundary before constructing a
+canonical plan or diff packet. A candidate that fails the boundary is an
+`admission_rejected` record, not a reviewable plan or diff subject. The current
+pull-request base SHA must equal the attested `base_sha`; when the base changes,
+the prior admission is invalid and a new plan commit and `plan_review` are
+required.
+
 Every commit from `plan_head_sha` through the implementation `head_sha` must
 have one parent and form one linear chain beginning at `plan_head_sha`.  A
 merge, rebase, force-push, or current pull-request base SHA that differs from
@@ -122,6 +129,10 @@ commit. Its producer must suppress the diff job for
 implementation candidate exists. The producer rollout implements this
 eligibility guard; this contract-only rollout does not alter the current
 workflow.
+
+The producer materializes every deterministic admission outcome before it
+fails a workflow job. Upload and attestation occur before that intentional
+failure; otherwise the result is absent evidence and fail-closed.
 
 CI discovers candidate artifacts by the stable
 `phase/PR/subject-digest/workflow-run-id` identity, downloads every
