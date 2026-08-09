@@ -19,6 +19,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
       - name: Classify the diff candidate
         id: classify
         env:
@@ -104,9 +105,9 @@ jobs:
             if test -n "$DECLARATION_DIGEST"; then args+=(--declaration-digest "$DECLARATION_DIGEST"); fi
           else
             git diff --binary "$PLAN_SHA" "$HEAD_SHA" > review-evidence/actual.diff
-            python -c 'import json, pathlib; diff = pathlib.Path("review-evidence/actual.diff").read_text(encoding="utf-8"); pathlib.Path("review-evidence/packet.json").write_text(json.dumps({"diff": diff}), encoding="utf-8")'
+            python -c 'import json, pathlib; diff = pathlib.Path("review-evidence/actual.diff").read_bytes().decode("utf-8", errors="replace"); pathlib.Path("review-evidence/packet.json").write_text(json.dumps({"diff": diff}), encoding="utf-8")'
             changed_files="$(git diff --name-only "$PLAN_SHA" "$HEAD_SHA" | wc -l)"
-            changed_lines="$(git diff --numstat "$PLAN_SHA" "$HEAD_SHA" | awk '{ if ($1 == "-" || $2 == "-") { print 101; exit } sum += $1 + $2 } END { print sum + 0 }')"
+            changed_lines="$(git diff --numstat "$PLAN_SHA" "$HEAD_SHA" | awk '{ if ($1 == "-" || $2 == "-") { binary = 1; exit } sum += $1 + $2 } END { print binary ? 101 : sum + 0 }')"
             if test "$changed_files" -gt 2 || test "$changed_lines" -gt 100; then tier=high_assurance; else tier=economy; fi
             args+=(--packet review-evidence/packet.json --plan-head-sha "$PLAN_SHA" --tier "$tier")
           fi

@@ -11,6 +11,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import json
+from collections.abc import Mapping
 from datetime import datetime
 from enum import Enum
 from typing import Literal
@@ -269,12 +270,14 @@ class ReviewRecord(_ClosedModel):
         )
 
 
-def parse_review_record(value: bytes | str | dict[str, object]) -> ReviewRecord:
+def parse_review_record(value: object) -> ReviewRecord:
     """Dispatch evidence records by version before interpreting their payload."""
     if isinstance(value, bytes):
         value = value.decode("utf-8")
     if isinstance(value, str):
         value = json.loads(value)
+    if not isinstance(value, Mapping):
+        raise ValueError("review evidence must be a JSON object")
     if value.get("schema_version") != "review-evidence@2":
         raise ValueError("unsupported review evidence schema version")
     return ReviewRecord.model_validate(value)

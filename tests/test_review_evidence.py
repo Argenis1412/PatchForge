@@ -157,8 +157,46 @@ def test_version_dispatch_rejects_v1_before_payload_interpretation():
         parse_review_record({"schema_version": "review-evidence@1", "status": "completed"})
 
 
+@pytest.mark.parametrize("value", [b"[]", '"record"', "0", "null"])
+def test_version_dispatch_rejects_non_object_json(value):
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        parse_review_record(value)
+
+
 def test_record_has_no_self_referential_attestation_reference():
     assert "attestation_reference" not in ReviewRecord.model_fields
+
+
+def test_runner_detects_missing_credential_before_model_call(monkeypatch):
+    runner = _runner_module()
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    assert not runner._credential_available(ModelTier.ECONOMY)
+
+
+def test_runner_appends_github_output(tmp_path):
+    runner = _runner_module()
+    output = tmp_path / "github-output"
+    output.write_text("existing=value\n", encoding="utf-8")
+    record = ReviewRecord(
+        status=ReviewStatus.COMPLETED,
+        model_tier=ModelTier.ECONOMY,
+        subject=PlanReviewSubject(
+            base_sha="base", plan_head_sha="plan", packet_digest=_packet().digest
+        ),
+        **_record_args(),
+    )
+    runner._append_github_output(output, record, 330)
+    assert output.read_text(encoding="utf-8").startswith("existing=value\nartifact_name=")
+
+
+def test_review_workflows_keep_history_and_binary_packets_safe():
+    root = Path(__file__).parents[1]
+    plan_workflow = (root / ".github" / "workflows" / "review-plan.yml").read_text(encoding="utf-8")
+    diff_workflow = (root / ".github" / "workflows" / "review-diff.yml").read_text(encoding="utf-8")
+    assert "fetch-depth: 0" in plan_workflow
+    assert "fetch-depth: 0" in diff_workflow
+    assert 'decode("utf-8", errors="replace")' in diff_workflow
+    assert "print binary ? 101 : sum + 0" in diff_workflow
 
 
 def test_subject_digest_is_stable_across_retry_metadata_and_artifact_name_is_canonical():

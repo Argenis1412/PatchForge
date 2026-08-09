@@ -85,6 +85,11 @@ def _model_json(packet: object, tier: ModelTier) -> dict[str, object]:
     return json.loads(text)
 
 
+def _credential_available(tier: ModelTier) -> bool:
+    credential_name = "ANTHROPIC_API_KEY" if tier is ModelTier.HIGH_ASSURANCE else "GOOGLE_API_KEY"
+    return bool(os.environ.get(credential_name))
+
+
 def _reason(error: Exception) -> UnavailableReason:
     if isinstance(error, urllib.error.HTTPError):
         if error.code in {401, 403}:
@@ -132,6 +137,11 @@ def materialize_admission_record(
         subject=subject,
         **_record_metadata(phase),
     )
+
+
+def _append_github_output(path: Path, record: ReviewRecord, pull_request_number: int) -> None:
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(f"artifact_name={record.artifact_name(pull_request_number)}\n")
 
 
 def main() -> None:
@@ -194,20 +204,31 @@ def main() -> None:
             )
             model_packet = packet
         record_args = {"model_tier": tier, "subject": subject, **_record_metadata(phase)}
-        try:
-            response = _model_json(model_packet, tier)
-            findings = tuple(Finding.model_validate(item) for item in response.get("findings", []))
-            record = ReviewRecord(status=ReviewStatus.COMPLETED, findings=findings, **record_args)
-        except Exception as error:  # the public record deliberately exposes only a reason code
+        if not _credential_available(tier):
             record = ReviewRecord(
-                status=ReviewStatus.UNAVAILABLE, unavailable_reason=_reason(error), **record_args
+                status=ReviewStatus.UNAVAILABLE,
+                unavailable_reason=UnavailableReason.AUTHENTICATION,
+                **record_args,
             )
+        else:
+            try:
+                response = _model_json(model_packet, tier)
+                findings = tuple(
+                    Finding.model_validate(item) for item in response.get("findings", [])
+                )
+                record = ReviewRecord(
+                    status=ReviewStatus.COMPLETED, findings=findings, **record_args
+                )
+            except Exception as error:  # the public record deliberately exposes only a reason code
+                record = ReviewRecord(
+                    status=ReviewStatus.UNAVAILABLE,
+                    unavailable_reason=_reason(error),
+                    **record_args,
+                )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(canonical_json(record))
     if args.github_output:
-        args.github_output.write_text(
-            f"artifact_name={record.artifact_name(args.pr_number)}\n", encoding="utf-8"
-        )
+        _append_github_output(args.github_output, record, args.pr_number)
 
 
 if __name__ == "__main__":
