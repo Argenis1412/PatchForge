@@ -2,214 +2,86 @@
 
 ## Status
 
-Accepted for issue #328. Evidence producers are delivered first; gate
-enforcement and human-decision consumption remain follow-up work.
+Accepted for issue #330. `review-evidence@2` is historical producer evidence and is not gate-recognized. The next producer and consumer migration emits and accepts only `review-evidence@3`.
 
 ## Context
 
-PatchForge's maintainer workflow uses Issue Clarifier, AC Challenger,
-Adversarial Reviewer, and Diff Reviewer prompts. The current slash commands
-are useful local discipline, but they run in the caller's conversation by
-default. Their output cannot prove independent review, cannot safely decide a
-merge, and is not reproducible evidence for a third party.
+Local review commands are advisory: they cannot prove independent review or authorize a merge. Gate evidence originates in a base-branch-controlled workflow, is stored outside the pull-request tree, and is attested as exact immutable `review-record.json` bytes.
 
-Independent review needs two distinct subjects. Plan review happens before an
-implementation diff exists; diff review happens after implementation. A single
-in-repository `review.json` cannot prove both phases without overwriting one
-record, and adding it to a reviewed commit creates a self-referential hash.
+Two subjects remain necessary: plan review before implementation and diff review after it. This development-process contract does not change PatchForge product runs, public CLI behavior, `RunMetadata`, or product artifacts.
 
-This is a development-process contract. It must not change PatchForge product
-runs, `RunMetadata`, public CLI behavior, or product artifact authorization.
+`review-evidence@2` did not make producer revision acceptance or Git-operation derivation sufficiently explicit for a deterministic consumer. A same-path workflow can evolve while retained records remain authentic, and Git rename detection is heuristic rather than a stored operation.
 
 ## Decision
 
-### 1. Trusted boundary and external evidence
+### 1. Trusted boundary
 
-Gate-recognized evidence is emitted only by a base-branch-controlled CI
-workflow and stored outside the pull-request tree as an attested external
-artifact. Local Claude Code agents and checked-in prompt templates may assist
-reviewers, but their output is advisory and never satisfies a gate.
+The trusted workflow builds packets with harness code from the PR's trusted base revision. Plan declarations, diffs, branch names, commits, comments, and repository contents are untrusted data. The remote model receives only a canonical packet and has no checkout, shell, GitHub token, provider credential, write capability, or arbitrary tools.
 
-The trusted workflow must build its packet with harness code from the trusted
-base branch. Plan text, diffs, branch names, commit messages, comments, and
-repository contents are untrusted data. A model reviewer receives only the
-canonical packet; it has no repository checkout, shell, GitHub token, provider
-credential, write capability, or arbitrary tool access.
+The consumer also executes from the trusted base revision. It may fetch named untrusted commits as Git objects, but never checks them out or executes their contents.
 
-### 2. Versioned evidence sets
+### 2. Version and producer identity
 
-`review-evidence@1` remains closed and historical: consumers must reject an
-unknown version before interpreting its status or subject. New producers emit
-`review-evidence@2`, which defines separate immutable records for the
-`plan_review` and `diff_review` phases.
+Consumers dispatch on `schema_version` before interpreting status or subject. They reject `review-evidence@1`, `review-evidence@2`, unknown versions, and malformed records. New producers emit `review-evidence@3`.
 
-An execution record has `status` `completed` or `unavailable`, a
-phase-specific admitted subject, and `model_tier` (`high_assurance` or
-`economy`). An admission record has `status` `admission_rejected`, a
-phase-specific candidate subject, one public deterministic reason code, and
-neither `model_tier` nor findings. `unavailable` represents only a
-provider/model failure after admission.
+An execution record has status `completed` or `unavailable`, an admitted phase-specific subject, and `model_tier`. `completed` contains findings; `unavailable` represents a provider or model failure after admission and contains one public redacted reason with no invented findings. An admission record has status `admission_rejected`, a candidate subject, one deterministic public reason, and no tier or findings. A successful job or uploaded artifact does not convert `unavailable` or `admission_rejected` to `completed`.
 
-A GitHub artifact attestation signs the exact immutable `review-record.json`
-bytes.  An evidence record does not contain an attestation reference for
-itself: consumers derive provenance by verifying those bytes against the
-repository and a fixed signer workflow.  The record digest is an external
-locator, never a mutable field added after attestation.
+Attestation verification is an acceptance predicate, not a record field. For each record, the consumer verifies its downloaded bytes and requires expected repository and phase-specific signer path, plus verified `githubWorkflowSHA` and `sourceRepositoryDigest` both equal to the current PR `base_sha`. `workflow_name` is descriptive and never establishes trust. A producer or harness change has a different trusted base revision; prior evidence is stale.
 
-A plan execution subject contains `base_sha`, `plan_head_sha`, and the digest
-of one canonical plan-scope packet. That packet contains the same `base_sha`,
-allowed path patterns, allowed Git operations (`add`, `modify`, `delete`,
-`rename`), and maximum changed-file and changed-line budgets.
+### 3. Plan admission and plan subject
 
-A `diff_review` subject contains `base_sha`, `plan_head_sha`, `head_sha`, and
-the digest of the canonical actual diff from `plan_head_sha` to `head_sha`.
-A record's subject is immutable: a record for one plan or head cannot satisfy
-another. An admission subject identifies the candidate base and head and uses
-exactly one declaration provenance: a validated canonical declaration digest,
-a raw candidate declaration digest, or an explicit absent/unreadable marker.
-It never asserts a digest for bytes that do not exist or could not be read.
+`.patchforge/review-plan.json` declares scope but never contains its own SHA. The harness admits it only when its commit is non-merge, has exactly current `base_sha` as parent, and changes only that declaration. It then adds trusted `plan_head_sha` to the canonical plan packet.
 
-### 2.1 Plan admission is a linear Git transition
+A v3 plan execution subject binds `base_sha`, `plan_head_sha`, and that packet digest. Changed base, merge, rebase, force-push, or non-linear post-plan history invalidates admission and requires a new plan review.
 
-`.patchforge/review-plan.json` stores a plan-scope declaration, not its own
-commit SHA. The base-branch-controlled harness reads its candidate bytes,
-verifies that the candidate head is a non-merge commit whose sole parent is
-the trusted `base_sha`, and verifies that it modifies exactly that plan file.
-Only then does the harness add the trusted `plan_head_sha` and construct the
-canonical plan-scope packet. This proves the complete admitted pre-
-implementation transition without requiring a commit to contain its own OID.
+### 4. `canonical-change-set@1`
 
-Producer admission validates this linear Git boundary before constructing a
-canonical plan or diff packet. A candidate that fails the boundary is an
-`admission_rejected` record, not a reviewable plan or diff subject. The current
-pull-request base SHA must equal the attested `base_sha`; when the base changes,
-the prior admission is invalid and a new plan commit and `plan_review` are
-required.
+The deterministic mechanical input is a versioned canonical change set derived from the trees at `plan_head_sha` and `head_sha`, not from Git rename or copy heuristics. Each tree entry is exactly `(path, object_type, mode, object_id)`. Every path must be valid UTF-8; an invalid path fails closed. Entries are ordered by their UTF-8 path bytes.
 
-Every commit from `plan_head_sha` through the implementation `head_sha` must
-have one parent and form one linear chain beginning at `plan_head_sha`.  A
-merge, rebase, force-push, or current pull-request base SHA that differs from
-the attested `base_sha` invalidates admission and requires a new plan commit
-and `plan_review`.  The gate evaluates the implementation delta only from
-`plan_head_sha` to `head_sha`; it never folds later `main` changes into that
-delta.
+- A path only in head is `add`; only in plan is `delete`; present in both with unequal entries is `modify`.
+- A `rename` exists only for an exactly one-to-one removed/added pair with equal non-tree blob object ID and mode. An edited move remains `delete` plus `add`. A copy remains `add`. Duplicate candidate blob pairs remain independent add and delete operations.
+- Gitlinks/submodules, blobs containing NUL, and blobs not valid UTF-8 are explicit non-text changes. They have no text line count and exceed the line budget fail-closed.
+- A physical line is a maximal UTF-8 byte sequence terminated by `LF`, plus a final non-empty unterminated sequence. Adds count head lines, deletes count plan lines, and modifications count both. This is content accounting, not a diff-hunk algorithm.
 
-`completed` records contain a finding list. Every finding has a stable id,
-evidence reference, `severity` (`blocking`, `advisory`, or `informational`),
-and `confidence` (`high`, `medium`, or `low`). `unavailable` records contain
-one redacted public reason code and no invented findings.
+The canonical change set serializes with the repository's canonical JSON function and includes its version, ordered entries, operations, tree metadata, and line counts. A canonical rename consumes one file-budget entry; every add, delete, and modify consumes one; an edited move or ambiguous pair consumes two. It is the sole input to `mechanical_scope_violation`.
 
-### 3. Mechanical scope is intentionally narrow
+### 5. Diff subject and review packet
 
-The deterministic comparison between plan and diff is named
-`mechanical_scope_violation`. It may report only these conditions:
+`diff_review` binds `base_sha`, `plan_head_sha`, `head_sha`, and the digest of the v3 canonical diff-review packet. That packet contains `canonical-change-set@1` and, for each text change, deterministically ordered old/new UTF-8 contents. Both text fields are always present: a missing side is JSON `null`, while an empty file is `""`. Non-text changes contain explicit metadata only. Its digest binds model review input and mechanical evaluation to the same trees.
 
-- current pull-request base SHA differs from the plan packet base SHA;
-- a changed path is outside the allowed patterns;
-- a Git operation is not allowed for that path; or
-- the changed-file or changed-line budget is exceeded.
+The phase is eligible only when `head_sha` differs from, and is a linear descendant of, `plan_head_sha`. The producer suppresses an empty post-plan chain.
 
-For a rename, both the source and destination path must be allowed. The check
-does not decide whether a behavior implements the plan. Functional
-contradictions remain diff-review findings, subject to human assessment rather
-than a deterministic scope decision.
+### 6. Scope and evidence acceptance
 
-### 4. Publication, phase eligibility, and human decisions
+`mechanical_scope_violation` may report only base mismatch, path outside the declared patterns, operation not allowed, changed-file budget exceeded, or changed-line budget exceeded. Rename evaluates both paths; the check never judges functional intent.
 
-Once the trusted harness runs, every deterministic admission outcome is
-materialized as an execution or admission record. It becomes evidence only
-when its artifact upload and attestation both succeed. A cancellation, runner
-failure, upload failure, or attestation failure leaves evidence absent and
-fail-closed; it must not be represented as an attested rejection.
+Artifact upload and attestation verification must both succeed before a record is evidence. An uploaded artifact whose attestation fails is artifact-present but evidence unavailable. Cancellation, runner failure, upload failure, unavailable verifier, or attestation failure fails closed.
 
-The v2 diff phase is eligible only when `head_sha` differs from and is a linear
-descendant of `plan_head_sha`, with at least one intervening implementation
-commit. Its producer must suppress the diff job for
-`head_sha == plan_head_sha`; this is not an admission rejection because no
-implementation candidate exists. The producer rollout implements this
-eligibility guard; this contract-only rollout does not alter the current
-workflow.
+The consumer enumerates every non-expired artifact whose phase, PR, and expected subject digest match. GitHub artifact ID is the immutable discovery identity; the published name is only a locator and may collide across retries. For every candidate it verifies artifact metadata, exact bytes, attestation, record version, phase, and subject. It selects the greatest `(emitted_at, workflow_run_id, record_id)` record; an equal ordering tuple with different bytes is ambiguous and fails closed.
 
-The diff producer attests only its own admitted linear Git subject. It does
-not attest that a predecessor plan record was published or verified. A
-consumer must independently discover and verify attested plan and diff records
-from their fixed signer workflows. Plan evidence is stale when its `base_sha`
-or `plan_head_sha` differs from the current pull request base or current
-admitted plan commit. Diff evidence is stale when its `base_sha`,
-`plan_head_sha`, or `head_sha` differs from the current pull request base,
-current admitted plan commit, or current pull request head, respectively. A
-plan and diff pair is mismatched when their `base_sha` or `plan_head_sha`
-differs. The consumer fails closed when either phase is absent, expired,
-invalid, stale, or mismatched. A diff record cannot override absent plan
-evidence.
+Plan evidence is stale when base or plan SHA differs from the current PR. Diff evidence is stale when base, plan, or head SHA differs. Missing, expired, malformed, unverifiable, stale, mismatched, or ambiguous evidence fails closed. A diff record never substitutes for plan evidence.
 
-The producer materializes every deterministic admission outcome before it
-fails a workflow job. Upload and attestation occur before that intentional
-failure; otherwise the result is absent evidence and fail-closed.
+### 7. Human decisions and findings
 
-CI discovers candidate artifacts by the stable
-`phase/PR/subject-digest/workflow-run-id` identity, downloads every
-non-expired candidate, verifies its attestation against the fixed signer
-workflow, and selects the greatest `(emitted_at, workflow_run_id, record_id)`
-tuple among records for the same subject. A retry preserves the subject digest
-and publishes a new workflow-run identity. An absent, expired, malformed, or
-unverifiable artifact is missing evidence and is never an override candidate.
+An attested override may satisfy only an attested `unavailable` record with the same subject and record ID, authorized actor, timestamp, rationale, accepted risk, and protected-environment approval. Missing evidence is never overridable. Medium/high-confidence blocking findings require an attested resolution; low-confidence blocking findings require human triage without automatic block. Advisory and informational findings do not automatically block.
 
-An attested human override may satisfy only an attested `unavailable` record.
-It must reference that record id and the identical subject, identify the
-authorized actor, timestamp, rationale, accepted risk, and protected-environment
-approval reference. A missing phase record is never overridable; the workflow
-must be re-run until it emits `completed` or `unavailable`.
+### 8. Risk tiers
 
-Medium- or high-confidence `blocking` findings require an attested human
-resolution tied to the finding and subject. Low-confidence blocking findings
-require human triage but do not automatically block. Advisory and informational
-findings never block automatically.
-
-### 5. Risk tiers and timing
-
-The plan gate evaluates the canonical plan-scope packet before implementation.
-The diff gate evaluates the actual diff only after implementation. A protected path,
-more than two changed files, or more than 100 changed lines selects the
-`high_assurance` tier; other changes select the `economy` tier. Both tiers use
-the same no-tools isolation boundary; they differ only in the configured model
-cost tier.
-
-If the actual diff produces `mechanical_scope_violation`, implementation must
-return to plan review. CI must not infer a retroactive semantic plan review
-from the diff.
+The canonical change set selects `high_assurance` for a protected path, more than two changed files, or more than 100 changed lines; otherwise it selects `economy`. Both tiers retain the same no-tools boundary.
 
 ## Consequences
 
-- Review evidence is auditable without modifying the reviewed pull-request
-  tree or certifying its own commit.
-- A provider or model failure is represented honestly as `unavailable`, not as
-  an empty successful review.
-- Deterministic admission rejection is externally distinguishable from absent
-  evidence only after successful artifact publication and attestation.
-- Automated checks can enforce mechanical boundaries while leaving semantic
-  disagreement to a reviewer and documented human decision.
-- Follow-up implementation needs repository configuration for CI credentials,
-  artifact attestation, authorized override actors, and protected environments.
+- Verified immutable producer data is bound to the current PR base.
+- Mechanical scope is reproducible from tree objects without environment-dependent rename/copy inference.
+- v2 records remain historical observations, not credentials for the v3 gate.
+- Existing product safety and public APIs remain unchanged.
 
 ## Follow-up verification
 
-The enforcement follow-up must verify:
-
-- plan and diff records bind only their respective canonical subjects;
-- version-first rejection of unsupported evidence schemas;
-- declaration provenance for valid, raw, absent, and unreadable candidates;
-- suppression of diff review before an implementation commit; and
-- all mechanical-scope conditions, including both sides of a rename;
-- rejection of subject mismatches, absent records, malformed enum values, and
-  overrides that do not reference an attested unavailable record;
-- blocking-finding resolution and low-confidence triage behavior; and
-- base-branch harness use and no-tools handling of hostile review input.
+Before implementation, challenge and adversarially review the v3 criteria. Implementation must test version-first rejection, signer/base binding, every canonical change-set operation and ambiguity, binary/submodule/invalid-UTF-8 budget behavior, packet digest binding, stale/mismatched evidence, retry collisions, unavailable evidence, and hostile review input.
 
 ## Non-goals
 
-- Adding Claude agents, GitHub Actions workflows, provider secrets, CI gates,
-  hooks, or runtime validators.
-- Changing PatchForge product pipeline behavior, public APIs, schemas,
-  `RunMetadata`, or product run artifacts.
-- Treating advisory local review output as trusted or merge-authorizing.
+- Changing the PatchForge product pipeline, public API, `RunMetadata`, or product artifacts.
+- Adding provider secrets, branch protection, local hooks, or fork access to protected Environment credentials in this contract phase.
+- Implementing producers, consumer gate, overrides, or finding-resolution workflows before the required design reviews approve an implementation plan.
