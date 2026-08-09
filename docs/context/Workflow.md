@@ -373,9 +373,10 @@ dogfooding pull request, before merge authorization is enabled.
 Each diff producer record attests only its admitted linear Git subject; it
 does not attest publication or verification of a predecessor plan record. The
 future consumer must independently discover and verify plan and diff evidence
-from their fixed signer workflows, require identical `base_sha` and
-`plan_head_sha`, and fail closed if either phase is absent, expired, invalid,
-stale, or mismatched. A diff record cannot override absent plan evidence.
+from their fixed signer workflows and apply ADR-0015's stale-evidence and
+subject-pair matching rules. It fails closed when either phase violates those
+evidence-validity requirements. A diff record cannot override absent plan
+evidence.
 
 ---
 
