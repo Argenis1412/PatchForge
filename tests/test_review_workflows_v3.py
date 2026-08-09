@@ -38,8 +38,6 @@ def test_consumer_is_pr_exclusive_and_never_checks_out_pr_head():
     assert "review-record.json" in gate
     assert 'print("blocking review finding", file=sys.stderr)' in gate
     assert "head_sha={head_sha}&per_page=100" in gate
-    run_lookup = gate.split("for workflow_name, head_sha", 1)[1].split("artifacts", 1)[0]
-    assert '"--paginate"' not in run_lookup
 
 
 def test_consumer_trigger_names_match_v3_producers():

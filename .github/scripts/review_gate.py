@@ -117,15 +117,16 @@ def _artifact_candidates(*, repository: str, snapshot: GateSnapshot) -> list[Gat
         ("review-plan.yml", snapshot.plan_head_sha),
         ("review-diff.yml", snapshot.head_sha),
     ):
-        page = json.loads(
+        pages = json.loads(
             _gh(
                 "api",
+                "--paginate",
+                "--slurp",
                 f"repos/{repository}/actions/workflows/{workflow_name}/runs"
                 f"?event=pull_request_target&head_sha={head_sha}&per_page=100",
             )
         )
-        if isinstance(page, dict):
-            runs.extend(page.get("workflow_runs", []))
+        runs.extend(run for page in pages for run in page.get("workflow_runs", []))
     artifacts: list[object] = []
     for run in runs:
         if not isinstance(run, dict) or not any(
