@@ -172,15 +172,21 @@ class CanonicalChange(_ClosedModel):
 
     @model_validator(mode="after")
     def _validate_change(self) -> "CanonicalChange":
-        if self.operation is GitOperation.ADD and self.old_entry is not None:
-            raise ValueError("add cannot contain old_entry")
-        if self.operation is GitOperation.DELETE and self.new_entry is not None:
-            raise ValueError("delete cannot contain new_entry")
+        if self.operation is GitOperation.ADD:
+            if self.old_entry is not None or self.new_entry is None:
+                raise ValueError("add requires new_entry and cannot contain old_entry")
+        elif self.operation is GitOperation.DELETE:
+            if self.old_entry is None or self.new_entry is not None:
+                raise ValueError("delete requires old_entry and cannot contain new_entry")
+        elif self.old_entry is None or self.new_entry is None:
+            raise ValueError("modify and rename require both entries")
         if self.operation is GitOperation.RENAME:
             if self.previous_path is None:
                 raise ValueError("rename requires previous_path")
         elif self.previous_path is not None:
             raise ValueError("only rename has previous_path")
+        if self.non_text_reason is None and self.changed_lines is None:
+            raise ValueError("text changes require a line count")
         if self.non_text_reason is not None and self.changed_lines is not None:
             raise ValueError("non-text changes have no line count")
         return self

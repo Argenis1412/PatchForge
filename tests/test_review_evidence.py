@@ -162,7 +162,7 @@ def test_packet_digest_binds_change_set_and_exact_text_sides():
 def test_canonical_change_rejects_operation_entry_mismatches():
     old_entry = entry("old", "old")
     new_entry = entry("new", "new")
-    with pytest.raises(ValidationError, match="add cannot contain old_entry"):
+    with pytest.raises(ValidationError, match="add requires new_entry"):
         CanonicalChange(
             operation=GitOperation.ADD,
             path="new",
@@ -170,13 +170,31 @@ def test_canonical_change_rejects_operation_entry_mismatches():
             new_entry=new_entry,
             changed_lines=2,
         )
-    with pytest.raises(ValidationError, match="delete cannot contain new_entry"):
+    with pytest.raises(ValidationError, match="delete requires old_entry"):
         CanonicalChange(
             operation=GitOperation.DELETE,
             path="old",
             old_entry=old_entry,
             new_entry=new_entry,
             changed_lines=2,
+        )
+    with pytest.raises(ValidationError, match="add requires new_entry"):
+        CanonicalChange(operation=GitOperation.ADD, path="new", changed_lines=1)
+    with pytest.raises(ValidationError, match="delete requires old_entry"):
+        CanonicalChange(operation=GitOperation.DELETE, path="old", changed_lines=1)
+    with pytest.raises(ValidationError, match="modify and rename require both entries"):
+        CanonicalChange(
+            operation=GitOperation.MODIFY,
+            path="changed",
+            old_entry=old_entry,
+            changed_lines=1,
+        )
+    with pytest.raises(ValidationError, match="text changes require a line count"):
+        CanonicalChange(
+            operation=GitOperation.MODIFY,
+            path="changed",
+            old_entry=old_entry,
+            new_entry=new_entry,
         )
 
 

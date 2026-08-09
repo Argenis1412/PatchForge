@@ -14,6 +14,8 @@ from orchestrator.review_evidence import (
     canonical_json,
 )
 
+GIT_TIMEOUT_SECONDS = 60
+
 
 def _git(*args: str) -> bytes:
     return subprocess.run(["git", *args], check=True, stdout=subprocess.PIPE).stdout
@@ -59,7 +61,16 @@ def _blobs(object_ids: tuple[str, ...]) -> dict[str, bytes]:
         stdout=subprocess.PIPE,
     )
     request = "".join(f"{object_id}\n" for object_id in object_ids).encode("ascii")
-    output, _ = process.communicate(request)
+    try:
+        output, _ = process.communicate(request, timeout=GIT_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        try:
+            process.communicate(timeout=GIT_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
+        raise
     if process.returncode != 0:
         raise subprocess.CalledProcessError(process.returncode, process.args)
     stream = io.BytesIO(output)

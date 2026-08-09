@@ -10,6 +10,7 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 import tempfile
 import zipfile
 from pathlib import Path
@@ -112,17 +113,19 @@ def _verified_provenance(
 def _artifact_candidates(*, repository: str, snapshot: GateSnapshot) -> list[GateCandidate]:
     candidates: list[GateCandidate] = []
     runs: list[object] = []
-    for workflow_name in ("review-plan.yml", "review-diff.yml"):
-        pages = json.loads(
+    for workflow_name, head_sha in (
+        ("review-plan.yml", snapshot.plan_head_sha),
+        ("review-diff.yml", snapshot.head_sha),
+    ):
+        page = json.loads(
             _gh(
                 "api",
-                "--paginate",
-                "--slurp",
                 f"repos/{repository}/actions/workflows/{workflow_name}/runs"
-                "?event=pull_request_target&per_page=100",
+                f"?event=pull_request_target&head_sha={head_sha}&per_page=100",
             )
         )
-        runs.extend(run for page in pages for run in page.get("workflow_runs", []))
+        if isinstance(page, dict):
+            runs.extend(page.get("workflow_runs", []))
     artifacts: list[object] = []
     for run in runs:
         if not isinstance(run, dict) or not any(
@@ -225,7 +228,7 @@ def main() -> None:
         phase=ReviewPhase.DIFF,
     )
     if not gate_accepts(plan, diff):
-        print("blocking review finding")
+        print("blocking review finding", file=sys.stderr)
         raise SystemExit(BLOCKING_FINDING_EXIT)
     print(canonical_json({"result": "accepted", "snapshot": snapshot}).decode("utf-8"))
 
