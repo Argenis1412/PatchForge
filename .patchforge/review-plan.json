@@ -1,0 +1,13 @@
+{
+  "allowed_path_patterns": [
+    "docs/experiments/dogfooding-014-attested-review-evidence.md"
+  ],
+  "allowed_operations": [
+    {
+      "pattern": "docs/experiments/dogfooding-014-attested-review-evidence.md",
+      "operations": ["add", "modify"]
+    }
+  ],
+  "max_changed_files": 1,
+  "max_changed_lines": 100
+}
