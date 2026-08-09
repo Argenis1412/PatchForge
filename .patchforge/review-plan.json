@@ -1,23 +1,13 @@
 {
   "allowed_path_patterns": [
-    ".github/workflows/review-evidence-gate.yml",
-    "docs/adr/ADR-0015-attested-independent-review-evidence.md",
-    "tests/test_review_workflows_v3.py"
+    "docs/experiments/dogfooding-016-attested-review-evidence-v3.md"
   ],
   "allowed_operations": [
     {
-      "pattern": ".github/workflows/review-evidence-gate.yml",
-      "operations": ["modify"]
-    },
-    {
-      "pattern": "docs/adr/ADR-0015-attested-independent-review-evidence.md",
-      "operations": ["modify"]
-    },
-    {
-      "pattern": "tests/test_review_workflows_v3.py",
-      "operations": ["modify"]
+      "pattern": "docs/experiments/dogfooding-016-attested-review-evidence-v3.md",
+      "operations": ["add"]
     }
   ],
-  "max_changed_files": 3,
-  "max_changed_lines": 100
+  "max_changed_files": 1,
+  "max_changed_lines": 40
 }
