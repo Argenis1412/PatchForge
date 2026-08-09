@@ -20,6 +20,11 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install review harness dependency
+        run: python -m pip install "pydantic>=2.10.0"
       - name: Classify the diff candidate
         id: classify
         env:

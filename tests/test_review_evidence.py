@@ -199,6 +199,14 @@ def test_review_workflows_keep_history_and_binary_packets_safe():
     assert "print binary ? 101 : sum + 0" in diff_workflow
 
 
+def test_review_workflows_install_the_harness_dependency():
+    root = Path(__file__).parents[1]
+    for workflow_name in ("review-plan.yml", "review-diff.yml"):
+        workflow = (root / ".github" / "workflows" / workflow_name).read_text(encoding="utf-8")
+        assert "actions/setup-python@v5" in workflow
+        assert 'python -m pip install "pydantic>=2.10.0"' in workflow
+
+
 def test_subject_digest_is_stable_across_retry_metadata_and_artifact_name_is_canonical():
     subject = DiffReviewSubject(
         base_sha="base",
