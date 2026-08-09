@@ -26,10 +26,17 @@ from orchestrator.review_evidence import (
     select_gate_evidence,
 )
 
+GH_TIMEOUT_SECONDS = 60
+BLOCKING_FINDING_EXIT = 2
+
 
 def _gh(*args: str) -> bytes:
     return subprocess.run(
-        ["gh", *args], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ["gh", *args],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=GH_TIMEOUT_SECONDS,
     ).stdout
 
 
@@ -103,18 +110,41 @@ def _verified_provenance(
 
 
 def _artifact_candidates(*, repository: str, snapshot: GateSnapshot) -> list[GateCandidate]:
-    pages = json.loads(
-        _gh("api", "--paginate", "--slurp", f"repos/{repository}/actions/artifacts?per_page=100")
-    )
     candidates: list[GateCandidate] = []
-    artifacts = [artifact for page in pages for artifact in page.get("artifacts", [])]
+    runs: list[object] = []
+    for workflow_name in ("review-plan.yml", "review-diff.yml"):
+        pages = json.loads(
+            _gh(
+                "api",
+                "--paginate",
+                "--slurp",
+                f"repos/{repository}/actions/workflows/{workflow_name}/runs"
+                "?event=pull_request_target&per_page=100",
+            )
+        )
+        runs.extend(run for page in pages for run in page.get("workflow_runs", []))
+    artifacts: list[object] = []
+    for run in runs:
+        if not isinstance(run, dict) or not any(
+            pull.get("number") == snapshot.pull_request_number
+            for pull in run.get("pull_requests", [])
+        ):
+            continue
+        pages = json.loads(
+            _gh(
+                "api",
+                "--paginate",
+                "--slurp",
+                f"repos/{repository}/actions/runs/{run['id']}/artifacts?per_page=100",
+            )
+        )
+        artifacts.extend(artifact for page in pages for artifact in page.get("artifacts", []))
     for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
         if not str(artifact.get("name", "")).startswith("review-evidence-"):
             continue
-        if (
-            artifact.get("expired")
-            or artifact.get("workflow_run", {}).get("head_sha") != snapshot.head_sha
-        ):
+        if artifact.get("expired"):
             continue
         artifact_id, run_id = int(artifact["id"]), int(artifact["workflow_run"]["id"])
         with tempfile.TemporaryDirectory() as directory:
@@ -127,7 +157,13 @@ def _artifact_candidates(*, repository: str, snapshot: GateSnapshot) -> list[Gat
                 if names != ["review-record.json"]:
                     raise ValueError("evidence artifact must contain exactly review-record.json")
                 record_bytes = bundle.read("review-record.json")
-            record = parse_review_record(record_bytes)
+            raw_record = json.loads(record_bytes)
+            if isinstance(raw_record, dict) and raw_record.get("schema_version") in {
+                "review-evidence@1",
+                "review-evidence@2",
+            }:
+                continue
+            record = parse_review_record(raw_record)
             record_path = Path(directory) / "review-record.json"
             record_path.write_bytes(record_bytes)
             provenance = _verified_provenance(
@@ -189,7 +225,8 @@ def main() -> None:
         phase=ReviewPhase.DIFF,
     )
     if not gate_accepts(plan, diff):
-        raise SystemExit("blocking review finding")
+        print("blocking review finding")
+        raise SystemExit(BLOCKING_FINDING_EXIT)
     print(canonical_json({"result": "accepted", "snapshot": snapshot}).decode("utf-8"))
 
 

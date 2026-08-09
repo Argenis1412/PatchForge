@@ -73,8 +73,8 @@ and contracts at the certified `base_sha`; it never checks out or executes the
 pull-request tree. It may fetch named untrusted Git objects for tree reading.
 
 The consumer re-reads the live PR before publishing a terminal result. A
-changed identity is `superseded`, which certifies neither the old nor new
-snapshot. It waits for both producer records in 30-second intervals for at
+changed identity is `superseded`, produces a non-passing advisory check, and
+certifies neither the old nor new snapshot. It waits for both producer records in 30-second intervals for at
 most 15 minutes. At expiry it returns `evidence_incomplete` and fails closed.
 
 The v3 producer and consumer deployment is one protocol migration. The first
@@ -105,4 +105,4 @@ Before implementation, challenge and adversarially review the v3 criteria. Imple
 
 - Changing the PatchForge product pipeline, public API, `RunMetadata`, or product artifacts.
 - Adding provider secrets, branch protection, local hooks, or fork access to protected Environment credentials in this contract phase.
-- Implementing producers, consumer gate, overrides, or finding-resolution workflows before the required design reviews approve an implementation plan.
+- Overrides and finding-resolution workflows remain separate work. The required design reviews approved the v3 producer/consumer implementation plan for issue #330.

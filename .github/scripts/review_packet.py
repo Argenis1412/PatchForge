@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import subprocess
 from pathlib import Path
 
@@ -35,12 +36,46 @@ def _tree(commit: str) -> tuple[TreeEntry, ...]:
     return tuple(entries)
 
 
-def _blobs(entries: tuple[TreeEntry, ...]) -> dict[str, bytes]:
-    return {
-        entry.object_id: _git("cat-file", "blob", entry.object_id)
+def _changed_blob_ids(
+    plan_tree: tuple[TreeEntry, ...], head_tree: tuple[TreeEntry, ...]
+) -> tuple[str, ...]:
+    plan = {entry.path: entry for entry in plan_tree}
+    head = {entry.path: entry for entry in head_tree}
+    changed = {
+        entry.object_id
+        for entries, other in ((plan_tree, head), (head_tree, plan))
         for entry in entries
-        if entry.object_type == "blob"
+        if entry.object_type == "blob" and other.get(entry.path) != entry
     }
+    return tuple(sorted(changed))
+
+
+def _blobs(object_ids: tuple[str, ...]) -> dict[str, bytes]:
+    if not object_ids:
+        return {}
+    process = subprocess.Popen(
+        ["git", "cat-file", "--batch"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+    )
+    request = "".join(f"{object_id}\n" for object_id in object_ids).encode("ascii")
+    output, _ = process.communicate(request)
+    if process.returncode != 0:
+        raise subprocess.CalledProcessError(process.returncode, process.args)
+    stream = io.BytesIO(output)
+    blobs: dict[str, bytes] = {}
+    for requested_id in object_ids:
+        header = stream.readline().decode("ascii").rstrip("\n")
+        parts = header.split(" ")
+        if len(parts) != 3 or parts[1] != "blob":
+            raise ValueError("missing blob bytes")
+        actual_id, _, size_text = parts
+        size = int(size_text)
+        content = stream.read(size)
+        if actual_id != requested_id or len(content) != size or stream.read(1) != b"\n":
+            raise ValueError("missing blob bytes")
+        blobs[requested_id] = content
+    return blobs
 
 
 def main() -> None:
@@ -50,8 +85,9 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     plan_tree, head_tree = _tree(args.plan_head_sha), _tree(args.head_sha)
-    blobs = _blobs(plan_tree) | _blobs(head_tree)
+    blobs = _blobs(_changed_blob_ids(plan_tree, head_tree))
     changes, texts = build_canonical_change_set(plan_tree, head_tree, blobs)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(
         canonical_json(DiffReviewPacket(canonical_change_set=changes, text_deltas=texts))
     )

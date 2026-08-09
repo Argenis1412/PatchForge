@@ -7,6 +7,7 @@ from orchestrator.review_evidence import (
     AdmissionReason,
     AdmissionSubject,
     ArtifactReceipt,
+    CanonicalChange,
     CanonicalChangeSet,
     DiffReviewPacket,
     GateCandidate,
@@ -65,6 +66,16 @@ def test_record_binds_its_run_identity_and_status_shape():
                 "status": ReviewStatus.UNAVAILABLE,
                 "model_tier": ModelTier.ECONOMY,
                 "unavailable_reason": UnavailableReason.TIMEOUT,
+            },
+        )
+    with pytest.raises(ValidationError, match="phase"):
+        ReviewRecord(
+            record_id="9:plan_review",
+            **{
+                **args,
+                "subject": AdmissionSubject(
+                    phase=ReviewPhase.DIFF, base_sha="base", head_sha="head"
+                ),
             },
         )
 
@@ -129,7 +140,7 @@ def test_mode_change_is_modify_and_physical_lines_are_counted():
     assert texts[0].old_text == "a\n" and texts[0].new_text == "b\n\nlast"
 
 
-def test_paths_are_byte_sorted_and_unrepresentable_paths_fail_closed():
+def test_paths_use_normative_utf8_byte_order_and_fail_closed():
     changes, _ = build_canonical_change_set(
         [], [entry("z", "z"), entry("á", "a")], {"z": b"", "a": b""}
     )
@@ -145,6 +156,28 @@ def test_packet_digest_binds_change_set_and_exact_text_sides():
     assert packet.text_deltas[0].new_text == ""
     assert packet.digest.startswith("sha256:")
     assert CanonicalChangeSet.model_validate(changes.model_dump()).digest == changes.digest
+    assert canonical_json({"packet": packet})
+
+
+def test_canonical_change_rejects_operation_entry_mismatches():
+    old_entry = entry("old", "old")
+    new_entry = entry("new", "new")
+    with pytest.raises(ValidationError, match="add cannot contain old_entry"):
+        CanonicalChange(
+            operation=GitOperation.ADD,
+            path="new",
+            old_entry=old_entry,
+            new_entry=new_entry,
+            changed_lines=2,
+        )
+    with pytest.raises(ValidationError, match="delete cannot contain new_entry"):
+        CanonicalChange(
+            operation=GitOperation.DELETE,
+            path="old",
+            old_entry=old_entry,
+            new_entry=new_entry,
+            changed_lines=2,
+        )
 
 
 def test_scope_packet_stays_declaration_bound():
@@ -156,6 +189,10 @@ def test_scope_packet_stays_declaration_bound():
     )
     packet = PlanScopePacket.from_declaration(declaration, base_sha="base", plan_head_sha="plan")
     assert packet.base_sha == "base" and "plan_head_sha" not in declaration.model_dump()
+    assert packet.allowed_path_patterns == declaration.allowed_path_patterns
+    assert packet.allowed_operations == declaration.allowed_operations
+    assert packet.max_changed_files == declaration.max_changed_files
+    assert packet.max_changed_lines == declaration.max_changed_lines
 
 
 def test_gate_requires_artifact_record_and_signed_run_identity():
@@ -204,7 +241,7 @@ def test_gate_requires_artifact_record_and_signed_run_identity():
     assert selected.record_id == "7:plan_review"
 
 
-def test_gate_rejects_non_completed_stale_and_ambiguous_evidence():
+def test_gate_rejects_non_completed_evidence():
     snapshot = GateSnapshot(
         pull_request_number=330, base_sha="base", plan_head_sha="plan", head_sha="head"
     )
@@ -246,13 +283,202 @@ def test_gate_rejects_non_completed_stale_and_ambiguous_evidence():
             },
             phase=ReviewPhase.PLAN,
         )
-    stale = receipt.model_copy(
-        update={"provenance": receipt.provenance.model_copy(update={"github_workflow_sha": "old"})}
+
+
+def _completed_plan_candidate(
+    *, artifact_id: int, plan_head_sha: str, emitted_at: datetime, workflow_name: str
+) -> GateCandidate:
+    record = ReviewRecord(
+        record_id="10:plan_review",
+        phase=ReviewPhase.PLAN,
+        status=ReviewStatus.COMPLETED,
+        workflow_name=workflow_name,
+        workflow_run_id=10,
+        emitted_at=emitted_at,
+        model_tier=ModelTier.ECONOMY,
+        subject=PlanReviewSubject(
+            base_sha="base",
+            plan_head_sha=plan_head_sha,
+            packet_digest="sha256:" + "1" * 64,
+        ),
+    )
+    return GateCandidate(
+        artifact=ArtifactReceipt(
+            artifact_id=artifact_id,
+            workflow_run_id=10,
+            record_bytes=canonical_json(record),
+            provenance=ProvenanceReceipt(
+                repository="owner/repo",
+                signer_path=".github/workflows/review-plan.yml",
+                github_workflow_sha="base",
+                source_repository_digest="base",
+                workflow_run_id=10,
+                verified=True,
+            ),
+        ),
+        record=record,
+    )
+
+
+def test_gate_skips_superseded_subject_when_current_candidate_exists():
+    emitted_at = datetime.now(UTC)
+    stale = _completed_plan_candidate(
+        artifact_id=101,
+        plan_head_sha="old-plan",
+        emitted_at=emitted_at,
+        workflow_name="stale",
+    )
+    current = _completed_plan_candidate(
+        artifact_id=102,
+        plan_head_sha="plan",
+        emitted_at=emitted_at,
+        workflow_name="current",
+    )
+    selected = select_gate_evidence(
+        [stale, current],
+        snapshot=GateSnapshot(
+            pull_request_number=330,
+            base_sha="base",
+            plan_head_sha="plan",
+            head_sha="head",
+        ),
+        repository="owner/repo",
+        signer_paths={
+            ReviewPhase.PLAN: ".github/workflows/review-plan.yml",
+            ReviewPhase.DIFF: ".github/workflows/review-diff.yml",
+        },
+        phase=ReviewPhase.PLAN,
+    )
+    assert selected.workflow_name == "current"
+
+
+def test_gate_selects_newer_completed_evidence_over_older_unavailable_retry():
+    emitted_at = datetime.now(UTC)
+    completed = _completed_plan_candidate(
+        artifact_id=106,
+        plan_head_sha="plan",
+        emitted_at=emitted_at,
+        workflow_name="completed",
+    )
+    unavailable_record = ReviewRecord.model_validate(
+        {
+            **completed.record.model_dump(),
+            "status": ReviewStatus.UNAVAILABLE,
+            "findings": (),
+            "unavailable_reason": UnavailableReason.TIMEOUT,
+            "emitted_at": datetime.min.replace(tzinfo=UTC),
+        }
+    )
+    unavailable = GateCandidate(
+        artifact=completed.artifact.model_copy(
+            update={
+                "artifact_id": 107,
+                "record_bytes": canonical_json(unavailable_record),
+            }
+        ),
+        record=unavailable_record,
+    )
+    selected = select_gate_evidence(
+        [unavailable, completed],
+        snapshot=GateSnapshot(
+            pull_request_number=330,
+            base_sha="base",
+            plan_head_sha="plan",
+            head_sha="head",
+        ),
+        repository="owner/repo",
+        signer_paths={
+            ReviewPhase.PLAN: ".github/workflows/review-plan.yml",
+            ReviewPhase.DIFF: ".github/workflows/review-diff.yml",
+        },
+        phase=ReviewPhase.PLAN,
+    )
+    assert selected.status is ReviewStatus.COMPLETED
+    newer_unavailable_record = ReviewRecord.model_validate(
+        {
+            **unavailable_record.model_dump(),
+            "emitted_at": datetime.max.replace(tzinfo=UTC),
+        }
+    )
+    newer_unavailable = GateCandidate(
+        artifact=unavailable.artifact.model_copy(
+            update={"record_bytes": canonical_json(newer_unavailable_record)}
+        ),
+        record=newer_unavailable_record,
+    )
+    with pytest.raises(ValueError, match="not completed"):
+        select_gate_evidence(
+            [completed, newer_unavailable],
+            snapshot=GateSnapshot(
+                pull_request_number=330,
+                base_sha="base",
+                plan_head_sha="plan",
+                head_sha="head",
+            ),
+            repository="owner/repo",
+            signer_paths={
+                ReviewPhase.PLAN: ".github/workflows/review-plan.yml",
+                ReviewPhase.DIFF: ".github/workflows/review-diff.yml",
+            },
+            phase=ReviewPhase.PLAN,
+        )
+
+
+def test_gate_rejects_equal_selection_tuple_with_different_bytes():
+    emitted_at = datetime.now(UTC)
+    first = _completed_plan_candidate(
+        artifact_id=103,
+        plan_head_sha="plan",
+        emitted_at=emitted_at,
+        workflow_name="first",
+    )
+    second = _completed_plan_candidate(
+        artifact_id=104,
+        plan_head_sha="plan",
+        emitted_at=emitted_at,
+        workflow_name="second",
+    )
+    with pytest.raises(ValueError, match="ambiguous"):
+        select_gate_evidence(
+            [first, second],
+            snapshot=GateSnapshot(
+                pull_request_number=330,
+                base_sha="base",
+                plan_head_sha="plan",
+                head_sha="head",
+            ),
+            repository="owner/repo",
+            signer_paths={
+                ReviewPhase.PLAN: ".github/workflows/review-plan.yml",
+                ReviewPhase.DIFF: ".github/workflows/review-diff.yml",
+            },
+            phase=ReviewPhase.PLAN,
+        )
+
+
+def test_gate_rejects_stale_signer_provenance():
+    candidate = _completed_plan_candidate(
+        artifact_id=105,
+        plan_head_sha="plan",
+        emitted_at=datetime.now(UTC),
+        workflow_name="current",
+    )
+    stale_receipt = candidate.artifact.model_copy(
+        update={
+            "provenance": candidate.artifact.provenance.model_copy(
+                update={"github_workflow_sha": "old"}
+            )
+        }
     )
     with pytest.raises(ValueError, match="stale signer"):
         select_gate_evidence(
-            [GateCandidate(artifact=stale, record=record)],
-            snapshot=snapshot,
+            [GateCandidate(artifact=stale_receipt, record=candidate.record)],
+            snapshot=GateSnapshot(
+                pull_request_number=330,
+                base_sha="base",
+                plan_head_sha="plan",
+                head_sha="head",
+            ),
             repository="owner/repo",
             signer_paths={
                 ReviewPhase.PLAN: ".github/workflows/review-plan.yml",

@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
@@ -61,14 +61,16 @@ def _model_json(packet: object, tier: ModelTier) -> dict[str, object]:
         )
         return json.loads(str(response["content"][0]["text"]))
     response = _request(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?"
-        + urllib.parse.urlencode({"key": os.environ["GOOGLE_API_KEY"]}),
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
         {
             "systemInstruction": {"parts": [{"text": instructions}]},
             "contents": [{"parts": [{"text": content}]}],
             "generationConfig": {"responseMimeType": "application/json"},
         },
-        {"content-type": "application/json"},
+        {
+            "content-type": "application/json",
+            "x-goog-api-key": os.environ["GOOGLE_API_KEY"],
+        },
     )
     return json.loads(str(response["candidates"][0]["content"]["parts"][0]["text"]))
 
@@ -143,17 +145,29 @@ def materialize_execution_record(
             unavailable_reason=UnavailableReason.AUTHENTICATION,
             **args,
         )
-    try:
-        response = _model_json(model_packet, tier)
-        return ReviewRecord(
-            status=ReviewStatus.COMPLETED,
-            findings=tuple(Finding.model_validate(item) for item in response.get("findings", [])),
-            **args,
-        )
-    except Exception as error:  # public evidence deliberately exposes only a reason code
-        return ReviewRecord(
-            status=ReviewStatus.UNAVAILABLE, unavailable_reason=_reason(error), **args
-        )
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            response = _model_json(model_packet, tier)
+            return ReviewRecord(
+                status=ReviewStatus.COMPLETED,
+                findings=tuple(
+                    Finding.model_validate(item) for item in response.get("findings", [])
+                ),
+                **args,
+            )
+        except Exception as error:  # public evidence deliberately exposes only a reason code
+            last_error = error
+            retryable = isinstance(error, urllib.error.HTTPError) and (
+                error.code == 429 or 500 <= error.code < 600
+            )
+            if not retryable or attempt == 2:
+                break
+            time.sleep(2**attempt)
+    assert last_error is not None
+    return ReviewRecord(
+        status=ReviewStatus.UNAVAILABLE, unavailable_reason=_reason(last_error), **args
+    )
 
 
 def main() -> None:
@@ -191,9 +205,8 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(canonical_json(record))
     if args.github_output:
-        args.github_output.open("a", encoding="utf-8").write(
-            f"artifact_name={record.artifact_name(args.pr_number)}\n"
-        )
+        with args.github_output.open("a", encoding="utf-8") as handle:
+            handle.write(f"artifact_name={record.artifact_name(args.pr_number)}\n")
 
 
 if __name__ == "__main__":

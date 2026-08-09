@@ -27,9 +27,19 @@ def canonical_json(value: object) -> bytes:
     """Return the sole JSON serialization used by packets and records."""
     if isinstance(value, BaseModel):
         value = value.model_dump(mode="json", exclude_none=False)
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
-        "utf-8"
-    )
+
+    def _serialize_nested(item: object) -> object:
+        if isinstance(item, BaseModel):
+            return item.model_dump(mode="json", exclude_none=False)
+        raise TypeError(f"cannot canonically serialize {type(item).__name__}")
+
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        default=_serialize_nested,
+    ).encode("utf-8")
 
 
 def sha256_digest(value: object) -> str:
@@ -162,6 +172,10 @@ class CanonicalChange(_ClosedModel):
 
     @model_validator(mode="after")
     def _validate_change(self) -> "CanonicalChange":
+        if self.operation is GitOperation.ADD and self.old_entry is not None:
+            raise ValueError("add cannot contain old_entry")
+        if self.operation is GitOperation.DELETE and self.new_entry is not None:
+            raise ValueError("delete cannot contain new_entry")
         if self.operation is GitOperation.RENAME:
             if self.previous_path is None:
                 raise ValueError("rename requires previous_path")
@@ -423,6 +437,7 @@ def evaluate_mechanical_scope(
     if len(changes) > packet.max_changed_files:
         violations.append(MechanicalScopeViolation(kind="changed_file_budget_exceeded"))
     total_lines = 0
+    has_non_text_change = False
     for change in changes:
         paths = (
             (change.previous_path, change.path)
@@ -445,12 +460,11 @@ def evaluate_mechanical_scope(
             }
             if change.operation not in permitted:
                 violations.append(MechanicalScopeViolation(kind="operation_not_allowed", path=path))
-        total_lines = (
-            packet.max_changed_lines + 1
-            if change.changed_lines is None
-            else total_lines + change.changed_lines
-        )
-    if total_lines > packet.max_changed_lines:
+        if change.changed_lines is None:
+            has_non_text_change = True
+        else:
+            total_lines += change.changed_lines
+    if has_non_text_change or total_lines > packet.max_changed_lines:
         violations.append(MechanicalScopeViolation(kind="changed_line_budget_exceeded"))
     return tuple(violations)
 
@@ -513,6 +527,18 @@ def select_gate_evidence(
         provenance = candidate.artifact.provenance
         if record.phase is not phase:
             continue
+        if phase is ReviewPhase.PLAN:
+            if not isinstance(record.subject, PlanReviewSubject) or (
+                record.subject.base_sha,
+                record.subject.plan_head_sha,
+            ) != (snapshot.base_sha, snapshot.plan_head_sha):
+                continue
+        elif not isinstance(record.subject, DiffReviewSubject) or (
+            record.subject.base_sha,
+            record.subject.plan_head_sha,
+            record.subject.head_sha,
+        ) != (snapshot.base_sha, snapshot.plan_head_sha, snapshot.head_sha):
+            continue
         if provenance.repository != repository or provenance.signer_path != signer_paths[phase]:
             raise ValueError("unexpected signer provenance")
         if (
@@ -520,21 +546,6 @@ def select_gate_evidence(
             or provenance.source_repository_digest != snapshot.base_sha
         ):
             raise ValueError("stale signer provenance")
-        if record.status is not ReviewStatus.COMPLETED:
-            raise ValueError("review evidence is not completed")
-        if phase is ReviewPhase.PLAN:
-            if not isinstance(record.subject, PlanReviewSubject) or (
-                record.subject.base_sha,
-                record.subject.plan_head_sha,
-            ) != (snapshot.base_sha, snapshot.plan_head_sha):
-                raise ValueError("plan subject does not match snapshot")
-        else:
-            if not isinstance(record.subject, DiffReviewSubject) or (
-                record.subject.base_sha,
-                record.subject.plan_head_sha,
-                record.subject.head_sha,
-            ) != (snapshot.base_sha, snapshot.plan_head_sha, snapshot.head_sha):
-                raise ValueError("diff subject does not match snapshot")
         matching.append(candidate)
     if not matching:
         raise ValueError("missing matching review evidence")
@@ -559,6 +570,8 @@ def select_gate_evidence(
         for item in ordered[1:]
     ):
         raise ValueError("ambiguous review evidence selection")
+    if winner.record.status is not ReviewStatus.COMPLETED:
+        raise ValueError("review evidence is not completed")
     return winner.record
 
 
