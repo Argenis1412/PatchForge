@@ -19,12 +19,34 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.base.sha }}
-      - name: Require a linear implementation chain from an admitted plan
+      - name: Detect a plan-review candidate
+        id: eligibility
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           git fetch --no-tags origin "$HEAD_SHA"
+          if ! git cat-file -e "$HEAD_SHA:.patchforge/review-plan.json"; then
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git show "$HEAD_SHA:.patchforge/review-plan.json" > review-plan.json
+          PLAN_SHA="$(jq -r '.plan_head_sha' review-plan.json)"
+          if ! test "$(jq -r '.base_sha' review-plan.json)" = "$BASE_SHA" \
+            || ! test "$(git rev-list --count "$BASE_SHA..$PLAN_SHA")" = "1" \
+            || ! test "$(git rev-list --parents -n 1 "$PLAN_SHA" | wc -w)" = "2" \
+            || ! test "$(git rev-parse "$PLAN_SHA^")" = "$BASE_SHA" \
+            || ! test "$(git diff --name-only "$BASE_SHA" "$PLAN_SHA")" = ".patchforge/review-plan.json"; then
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "eligible=true" >> "$GITHUB_OUTPUT"
+      - name: Require a linear implementation chain from an admitted plan
+        if: steps.eligibility.outputs.eligible == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
           git show "$HEAD_SHA:.patchforge/review-plan.json" > review-plan.json
           PLAN_SHA="$(jq -r '.plan_head_sha' review-plan.json)"
           test "$(jq -r '.base_sha' review-plan.json)" = "$BASE_SHA"
@@ -34,6 +56,7 @@ jobs:
           done
           echo "PLAN_SHA=$PLAN_SHA" >> "$GITHUB_ENV"
       - name: Review canonical diff without tools
+        if: steps.eligibility.outputs.eligible == 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
@@ -51,10 +74,12 @@ jobs:
             --output review-evidence/review-record.json --base-sha "$BASE_SHA" \
             --plan-head-sha "$PLAN_SHA" --head-sha "$HEAD_SHA" --tier "$TIER"
       - uses: actions/upload-artifact@v4
+        if: steps.eligibility.outputs.eligible == 'true'
         with:
           name: review-evidence-diff_review-${{ github.event.pull_request.number }}
           path: review-evidence/review-record.json
           retention-days: 30
       - uses: actions/attest@v4
+        if: steps.eligibility.outputs.eligible == 'true'
         with:
           subject-path: review-evidence/review-record.json
