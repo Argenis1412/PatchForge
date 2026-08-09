@@ -15,7 +15,7 @@ consumer gate and does not establish merge eligibility.
 
 | Observation | Initial run | Rerun |
 | --- | --- | --- |
-| Run URL | `.../actions/runs/31298550204` | same run URL |
+| Run URL | `https://github.com/Argenis1412/PatchForge/actions/runs/31298550204` | same run URL |
 | Run identity | `31298550204`, attempt `1`, `pull_request_target` | `31298550204`, attempt `2` |
 | Base / head | `68127c5` / `0b6043c` | same |
 | Job conclusion | `success` | `success` |
