@@ -1,13 +1,13 @@
 {
   "allowed_path_patterns": [
-    "docs/experiments/dogfooding-014-attested-review-evidence.md"
+    "docs/adr/ADR-0015-attested-independent-review-evidence.md"
   ],
   "allowed_operations": [
     {
-      "pattern": "docs/experiments/dogfooding-014-attested-review-evidence.md",
-      "operations": ["add", "modify"]
+      "pattern": "docs/adr/ADR-0015-attested-independent-review-evidence.md",
+      "operations": ["modify"]
     }
   ],
   "max_changed_files": 1,
-  "max_changed_lines": 100
+  "max_changed_lines": 300
 }
