@@ -362,6 +362,9 @@ When the attested gate is enabled, its plan review is a Git admission boundary:
 directly atop the current base. Implementation then proceeds through a linear
 chain from that commit. A changed base, merge, rebase, or force-push requires a
 new plan review; labels only trigger workflows and never authorize a phase.
+The pull request that first introduces the gate is a one-time bootstrap and
+requires manual review, because no base-branch-controlled gate exists until it
+is merged. All later pull requests run the gate from the trusted base branch.
 
 ---
 
