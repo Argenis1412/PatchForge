@@ -40,7 +40,17 @@ separate conditions.
 
 ## Diff review A
 
-The next linear commit will trigger diff observation A for this report head.
-After the following report commit, A will be stale because its `head_sha` and
-diff digest bind this revision rather than the final PR head. Final diff B
-evidence is recorded in the PR description to avoid creating another subject.
+**Run:** `31298793591`, attempt `1`, `pull_request_target`
+**Run URL:** `https://github.com/Argenis1412/PatchForge/actions/runs/31298793591`
+**Base / plan / head:** `68127c5` / `0b6043c` / `f535aef`
+**Job conclusion:** `success`
+**Artifact:** ID `9033827284`; download succeeded
+**Record:** `31298793591:diff_review`, `unavailable(authentication)`, tier
+`economy`; its exact SHA/digest subject matched this report revision.
+**Attestation:** verified against
+`Argenis1412/PatchForge/.github/workflows/review-diff.yml`.
+
+This commit makes A stale: its `head_sha` and diff digest bind `f535aef`, not
+the final PR head. Final diff B evidence is recorded in the PR description to
+avoid creating another diff subject. A valid diff record does not discover or
+verify predecessor plan evidence and does not establish gate eligibility.
