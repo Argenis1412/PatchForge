@@ -77,6 +77,12 @@ changed identity is `superseded`, produces a non-passing advisory check, and
 certifies neither the old nor new snapshot. It waits for both producer records in 30-second intervals for at
 most 15 minutes. At expiry it returns `evidence_incomplete` and fails closed.
 
+When verified plan evidence exists for a plan-only snapshot (`head_sha == plan_head_sha`),
+`pending_diff` is an observable internal wait state, not a terminal result or acceptance. A
+later push cancels that PR-exclusive evaluation and starts one for the new snapshot. For a
+stable snapshot, the only terminal consumer results are `accepted`, `triage_required`,
+`blocking_pending`, `superseded`, and `evidence_incomplete`.
+
 The v3 producer and consumer deployment is one protocol migration. The first
 real v3 observation is a mandatory post-merge dogfooding PR; no decision gate
 may be enabled until it records independently verified completed plan and diff
@@ -84,7 +90,7 @@ records for one snapshot.
 
 ### 7. Human decisions and findings
 
-An attested override may satisfy only an attested `unavailable` record with the same subject and record ID, authorized actor, timestamp, rationale, accepted risk, and protected-environment approval. Missing evidence is never overridable. Medium/high-confidence blocking findings require an attested resolution; low-confidence blocking findings require human triage without automatic block. Advisory and informational findings do not automatically block.
+An attested override may satisfy only an attested `unavailable` record with the same subject and record ID, authorized actor, timestamp, rationale, accepted risk, and protected-environment approval. Missing evidence is never overridable. A completed plan or diff record with a low-confidence blocking finding produces terminal `triage_required`: it is neither acceptance nor an automatic block. A medium- or high-confidence blocking finding produces terminal `blocking_pending`; it cannot become `accepted` until a separately specified attested-resolution protocol binds a resolution to the same snapshot and finding. No such resolution protocol is recognized by v3. Advisory and informational findings do not automatically block.
 
 ### 8. Risk tiers
 

@@ -9,8 +9,12 @@ from orchestrator.review_evidence import (
     ArtifactReceipt,
     CanonicalChange,
     CanonicalChangeSet,
+    Confidence,
     DiffReviewPacket,
+    DiffReviewSubject,
+    Finding,
     GateCandidate,
+    GateResult,
     GateSnapshot,
     GitOperation,
     ModelTier,
@@ -25,6 +29,7 @@ from orchestrator.review_evidence import (
     UnavailableReason,
     build_canonical_change_set,
     canonical_json,
+    evaluate_gate_evidence,
     parse_review_record,
     select_gate_evidence,
 )
@@ -304,7 +309,12 @@ def test_gate_rejects_non_completed_evidence():
 
 
 def _completed_plan_candidate(
-    *, artifact_id: int, plan_head_sha: str, emitted_at: datetime, workflow_name: str
+    *,
+    artifact_id: int,
+    plan_head_sha: str,
+    emitted_at: datetime,
+    workflow_name: str,
+    findings: tuple[Finding, ...] = (),
 ) -> GateCandidate:
     record = ReviewRecord(
         record_id="10:plan_review",
@@ -314,6 +324,7 @@ def _completed_plan_candidate(
         workflow_run_id=10,
         emitted_at=emitted_at,
         model_tier=ModelTier.ECONOMY,
+        findings=findings,
         subject=PlanReviewSubject(
             base_sha="base",
             plan_head_sha=plan_head_sha,
@@ -336,6 +347,143 @@ def _completed_plan_candidate(
         ),
         record=record,
     )
+
+
+def _completed_diff_candidate(
+    *,
+    artifact_id: int,
+    plan_head_sha: str,
+    head_sha: str,
+    findings: tuple[Finding, ...] = (),
+) -> GateCandidate:
+    record = ReviewRecord(
+        record_id="11:diff_review",
+        phase=ReviewPhase.DIFF,
+        status=ReviewStatus.COMPLETED,
+        workflow_name="diff",
+        workflow_run_id=11,
+        emitted_at=datetime.now(UTC),
+        model_tier=ModelTier.ECONOMY,
+        findings=findings,
+        subject=DiffReviewSubject(
+            base_sha="base",
+            plan_head_sha=plan_head_sha,
+            head_sha=head_sha,
+            diff_digest="sha256:" + "2" * 64,
+        ),
+    )
+    return GateCandidate(
+        artifact=ArtifactReceipt(
+            artifact_id=artifact_id,
+            workflow_run_id=11,
+            record_bytes=canonical_json(record),
+            provenance=ProvenanceReceipt(
+                repository="owner/repo",
+                signer_path=".github/workflows/review-diff.yml",
+                github_workflow_sha="base",
+                source_repository_digest="base",
+                workflow_run_id=11,
+                verified=True,
+            ),
+        ),
+        record=record,
+    )
+
+
+def test_gate_evaluation_keeps_a_verified_plan_only_snapshot_pending_diff():
+    snapshot = GateSnapshot(
+        pull_request_number=330, base_sha="base", plan_head_sha="plan", head_sha="plan"
+    )
+    decision = evaluate_gate_evidence(
+        [
+            _completed_plan_candidate(
+                artifact_id=108,
+                plan_head_sha="plan",
+                emitted_at=datetime.now(UTC),
+                workflow_name="plan",
+            )
+        ],
+        snapshot=snapshot,
+        repository="owner/repo",
+        signer_paths={
+            ReviewPhase.PLAN: ".github/workflows/review-plan.yml",
+            ReviewPhase.DIFF: ".github/workflows/review-diff.yml",
+        },
+    )
+    assert decision.result is GateResult.PENDING_DIFF
+
+
+@pytest.mark.parametrize(
+    ("confidence", "expected", "finding_phase"),
+    [
+        (Confidence.LOW, GateResult.TRIAGE_REQUIRED, ReviewPhase.PLAN),
+        (Confidence.MEDIUM, GateResult.BLOCKING_PENDING, ReviewPhase.PLAN),
+        (Confidence.HIGH, GateResult.BLOCKING_PENDING, ReviewPhase.PLAN),
+        (Confidence.LOW, GateResult.TRIAGE_REQUIRED, ReviewPhase.DIFF),
+        (Confidence.MEDIUM, GateResult.BLOCKING_PENDING, ReviewPhase.DIFF),
+        (Confidence.HIGH, GateResult.BLOCKING_PENDING, ReviewPhase.DIFF),
+    ],
+)
+def test_gate_evaluation_classifies_blocking_findings_by_confidence(
+    confidence, expected, finding_phase
+):
+    snapshot = GateSnapshot(
+        pull_request_number=330, base_sha="base", plan_head_sha="plan", head_sha="head"
+    )
+    finding = Finding(
+        finding_id="finding",
+        evidence_reference="packet",
+        severity="blocking",
+        confidence=confidence,
+    )
+    decision = evaluate_gate_evidence(
+        [
+            _completed_plan_candidate(
+                artifact_id=109,
+                plan_head_sha="plan",
+                emitted_at=datetime.now(UTC),
+                workflow_name="plan",
+                findings=(finding,) if finding_phase is ReviewPhase.PLAN else (),
+            ),
+            _completed_diff_candidate(
+                artifact_id=110,
+                plan_head_sha="plan",
+                head_sha="head",
+                findings=(finding,) if finding_phase is ReviewPhase.DIFF else (),
+            ),
+        ],
+        snapshot=snapshot,
+        repository="owner/repo",
+        signer_paths={
+            ReviewPhase.PLAN: ".github/workflows/review-plan.yml",
+            ReviewPhase.DIFF: ".github/workflows/review-diff.yml",
+        },
+    )
+    assert decision.result is expected
+
+
+def test_gate_evaluation_accepts_when_completed_evidence_has_no_blocking_findings():
+    snapshot = GateSnapshot(
+        pull_request_number=330, base_sha="base", plan_head_sha="plan", head_sha="head"
+    )
+    decision = evaluate_gate_evidence(
+        [
+            _completed_plan_candidate(
+                artifact_id=111,
+                plan_head_sha="plan",
+                emitted_at=datetime.now(UTC),
+                workflow_name="plan",
+            ),
+            _completed_diff_candidate(artifact_id=112, plan_head_sha="plan", head_sha="head"),
+        ],
+        snapshot=snapshot,
+        repository="owner/repo",
+        signer_paths={
+            ReviewPhase.PLAN: ".github/workflows/review-plan.yml",
+            ReviewPhase.DIFF: ".github/workflows/review-diff.yml",
+        },
+    )
+    assert decision.result is GateResult.ACCEPTED
 
 
 def test_gate_skips_superseded_subject_when_current_candidate_exists():

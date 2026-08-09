@@ -22,7 +22,10 @@ def test_consumer_is_pr_exclusive_and_never_checks_out_pr_head():
     root = Path(__file__).parents[1]
     workflow = (root / ".github/workflows/review-evidence-gate.yml").read_text(encoding="utf-8")
     gate = (root / ".github/scripts/review_gate.py").read_text(encoding="utf-8")
-    blocking_exit = runpy.run_path(root / ".github/scripts/review_gate.py")["BLOCKING_FINDING_EXIT"]
+    gate_globals = runpy.run_path(root / ".github/scripts/review_gate.py")
+    blocking_exit = gate_globals["BLOCKING_PENDING_EXIT"]
+    triage_exit = gate_globals["TRIAGE_REQUIRED_EXIT"]
+    pending_exit = gate_globals["PENDING_DIFF_EXIT"]
     assert "workflow_run" in workflow
     assert (
         "review-evidence-gate-${{ github.event.workflow_run.pull_requests[0].number }}" in workflow
@@ -32,11 +35,17 @@ def test_consumer_is_pr_exclusive_and_never_checks_out_pr_head():
     assert "persist-credentials: false" in workflow
     assert "!github.event.workflow_run.pull_requests[0].head.repo.fork" in workflow
     assert 'git fetch --no-tags origin "$HEAD_SHA"' in workflow
-    assert f'if test "$gate_status" = {blocking_exit}; then exit {blocking_exit}; fi' in workflow
-    assert "echo superseded >&2; exit 1" in workflow
+    assert f'test "$gate_status" = {blocking_exit}' in workflow
+    assert f'test "$gate_status" = {triage_exit}' in workflow
+    assert f'test "$gate_status" = {pending_exit}' in workflow
+    assert "assert_live_snapshot" in workflow
+    assert "emit_terminal superseded" in workflow
+    assert "emit_terminal evidence_incomplete" in workflow
     assert "sleep 30" in workflow and "seq 1 30" in workflow
     assert "review-record.json" in gate
-    assert 'print("blocking review finding", file=sys.stderr)' in gate
+    assert "GateResult.PENDING_DIFF" in gate
+    assert "GateResult.TRIAGE_REQUIRED" in gate
+    assert "GateResult.BLOCKING_PENDING" in gate
     assert "head_sha={head_sha}&per_page=100" in gate
 
 
