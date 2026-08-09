@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     concurrency:
       group: review-evidence-gate-${{ github.event.workflow_run.pull_requests[0].number }}
-      cancel-in-progress: true
+      cancel-in-progress: false
     steps:
       - name: Read the live pull request snapshot
         id: snapshot

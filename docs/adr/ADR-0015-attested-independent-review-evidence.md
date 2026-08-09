@@ -67,7 +67,7 @@ Plan evidence is stale when base or plan SHA differs from the current PR. Diff e
 
 The certified identity is `(pr_number, base_sha, plan_head_sha, head_sha)`. The
 advisory consumer has exclusive concurrency by `pr_number`, not by snapshot,
-so a new PR event cancels an older evaluation. The workflow itself is defined
+so a new PR event queues behind the older evaluation. The workflow itself is defined
 by the default branch, but it explicitly checks out and executes the consumer
 and contracts at the certified `base_sha`; it never checks out or executes the
 pull-request tree. It may fetch named untrusted Git objects for tree reading.
@@ -79,8 +79,9 @@ most 15 minutes. At expiry it returns `evidence_incomplete` and fails closed.
 
 When verified plan evidence exists for a plan-only snapshot (`head_sha == plan_head_sha`),
 `pending_diff` is an observable internal wait state, not a terminal result or acceptance. A
-later push cancels that PR-exclusive evaluation and starts one for the new snapshot. For a
-stable snapshot, the only terminal consumer results are `accepted`, `triage_required`,
+later push queues a new evaluation; the older evaluation rereads the live PR, emits
+`superseded`, and certifies neither snapshot before the queued evaluation starts. For a stable
+snapshot, the only terminal consumer results are `accepted`, `triage_required`,
 `blocking_pending`, `superseded`, and `evidence_incomplete`.
 
 The v3 producer and consumer deployment is one protocol migration. The first
