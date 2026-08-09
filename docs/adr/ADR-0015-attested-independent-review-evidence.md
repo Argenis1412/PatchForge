@@ -130,6 +130,13 @@ implementation candidate exists. The producer rollout implements this
 eligibility guard; this contract-only rollout does not alter the current
 workflow.
 
+The diff producer attests only its own admitted linear Git subject. It does
+not attest that a predecessor plan record was published or verified. A
+consumer must independently discover and verify attested plan and diff records
+from their fixed signer workflows, require identical `base_sha` and
+`plan_head_sha`, and fail closed when either phase is absent, expired, invalid,
+stale, or mismatched. A diff record cannot override absent plan evidence.
+
 The producer materializes every deterministic admission outcome before it
 fails a workflow job. Upload and attestation occur before that intentional
 failure; otherwise the result is absent evidence and fail-closed.
