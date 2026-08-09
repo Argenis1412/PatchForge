@@ -80,34 +80,20 @@ def _verified_provenance(
         raise ValueError("artifact must have exactly one verified attestation")
     statement = _value(verified[0], "verificationResult", "statement")
     predicate = _value(statement, "predicate")
+    workflow = _value(predicate, "buildDefinition", "externalParameters", "workflow")
+    repository_uri = str(_value(workflow, "repository"))
+    repository = repository_uri.removeprefix("https://github.com/").rstrip("/")
+    certificate = _value(verified[0], "verificationResult", "signature", "certificate")
     invocation_id = str(_value(predicate, "runDetails", "metadata", "invocationId"))
     match = re.search(r"/runs/(\d+)(?:/|$)", invocation_id)
     if match is None:
         raise ValueError("attestation invocation does not contain a workflow run")
     run_id = int(match.group(1))
     return ProvenanceReceipt(
-        repository=str(_value(predicate, "buildDefinition", "externalParameters", "repository")),
-        signer_path=str(_value(predicate, "buildDefinition", "externalParameters", "workflow")),
-        github_workflow_sha=str(
-            _value(
-                predicate,
-                "buildDefinition",
-                "resolvedDependencies",
-                "githubWorkflowSHA",
-                "digest",
-                "gitCommit",
-            )
-        ),
-        source_repository_digest=str(
-            _value(
-                predicate,
-                "buildDefinition",
-                "resolvedDependencies",
-                "sourceRepository",
-                "digest",
-                "gitCommit",
-            )
-        ),
+        repository=repository,
+        signer_path=str(_value(workflow, "path")),
+        github_workflow_sha=str(_value(certificate, "githubWorkflowSHA")),
+        source_repository_digest=str(_value(certificate, "sourceRepositoryDigest")),
         workflow_run_id=run_id,
         verified=True,
     )
