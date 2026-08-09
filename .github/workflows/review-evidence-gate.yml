@@ -1,0 +1,65 @@
+name: Review evidence v3 advisory gate
+
+on:
+  workflow_run:
+    workflows: ["Attested plan review v3", "Attested diff review v3"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  attestations: read
+
+jobs:
+  consume:
+    if: github.event.workflow_run.event == 'pull_request_target' && github.event.workflow_run.pull_requests[0] && !github.event.workflow_run.pull_requests[0].head.repo.fork
+    runs-on: ubuntu-latest
+    concurrency:
+      group: review-evidence-gate-${{ github.event.workflow_run.pull_requests[0].number }}
+      cancel-in-progress: true
+    steps:
+      - name: Read the live pull request snapshot
+        id: snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          pr="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER")"
+          echo "base_sha=$(jq -r .base.sha <<<"$pr")" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$(jq -r .head.sha <<<"$pr")" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.snapshot.outputs.base_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install trusted consumer dependency
+        run: python -m pip install "pydantic>=2.10.0"
+      - name: Wait for evidence and consume the current snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          BASE_SHA: ${{ steps.snapshot.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.snapshot.outputs.head_sha }}
+        run: |
+          git fetch --no-tags origin "$HEAD_SHA"
+          for attempt in $(seq 1 30); do
+            plan_sha="$(git rev-list --reverse "$BASE_SHA..$HEAD_SHA" | head -n 1)"
+            if test -n "$plan_sha"; then
+              set +e
+              PYTHONPATH=src python .github/scripts/review_gate.py --repository "$REPOSITORY" --pr-number "$PR_NUMBER" --base-sha "$BASE_SHA" --plan-head-sha "$plan_sha" --head-sha "$HEAD_SHA"
+              gate_status=$?
+              set -e
+              if test "$gate_status" = 0; then exit 0; fi
+              if test "$gate_status" = 2; then exit 2; fi
+            fi
+            live="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER")"
+            if test "$(jq -r .base.sha <<<"$live")" != "$BASE_SHA" || test "$(jq -r .head.sha <<<"$live")" != "$HEAD_SHA"; then echo superseded >&2; exit 1; fi
+            sleep 30
+          done
+          echo evidence_incomplete >&2
+          exit 1

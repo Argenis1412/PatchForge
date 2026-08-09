@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for issue #330. `review-evidence@2` is historical producer evidence and is not gate-recognized. The next producer and consumer migration emits and accepts only `review-evidence@3`.
+Accepted for issue #330. `review-evidence@2` is historical producer evidence and is not gate-recognized. Producers and consumer deploy as one `review-evidence@3` protocol boundary.
 
 ## Context
 
@@ -27,6 +27,8 @@ Consumers dispatch on `schema_version` before interpreting status or subject. Th
 An execution record has status `completed` or `unavailable`, an admitted phase-specific subject, and `model_tier`. `completed` contains findings; `unavailable` represents a provider or model failure after admission and contains one public redacted reason with no invented findings. An admission record has status `admission_rejected`, a candidate subject, one deterministic public reason, and no tier or findings. A successful job or uploaded artifact does not convert `unavailable` or `admission_rejected` to `completed`.
 
 Attestation verification is an acceptance predicate, not a record field. For each record, the consumer verifies its downloaded bytes and requires expected repository and phase-specific signer path, plus verified `githubWorkflowSHA` and `sourceRepositoryDigest` both equal to the current PR `base_sha`. `workflow_name` is descriptive and never establishes trust. A producer or harness change has a different trusted base revision; prior evidence is stale.
+
+The immutable discovered artifact ID is retained in the consumer receipt. Before a candidate is ordered, `artifact.workflow_run.id`, `record.workflow_run_id`, and the attestation's normalized invocation workflow-run ID must be equal, and `record_id` must equal `{workflow_run_id}:{phase}`. No value declared by the record can establish this binding.
 
 ### 3. Plan admission and plan subject
 
@@ -61,6 +63,25 @@ The consumer enumerates every non-expired artifact whose phase, PR, and expected
 
 Plan evidence is stale when base or plan SHA differs from the current PR. Diff evidence is stale when base, plan, or head SHA differs. Missing, expired, malformed, unverifiable, stale, mismatched, or ambiguous evidence fails closed. A diff record never substitutes for plan evidence.
 
+### 6.1 Snapshot-bound advisory aggregation
+
+The certified identity is `(pr_number, base_sha, plan_head_sha, head_sha)`. The
+advisory consumer has exclusive concurrency by `pr_number`, not by snapshot,
+so a new PR event cancels an older evaluation. The workflow itself is defined
+by the default branch, but it explicitly checks out and executes the consumer
+and contracts at the certified `base_sha`; it never checks out or executes the
+pull-request tree. It may fetch named untrusted Git objects for tree reading.
+
+The consumer re-reads the live PR before publishing a terminal result. A
+changed identity is `superseded`, produces a non-passing advisory check, and
+certifies neither the old nor new snapshot. It waits for both producer records in 30-second intervals for at
+most 15 minutes. At expiry it returns `evidence_incomplete` and fails closed.
+
+The v3 producer and consumer deployment is one protocol migration. The first
+real v3 observation is a mandatory post-merge dogfooding PR; no decision gate
+may be enabled until it records independently verified completed plan and diff
+records for one snapshot.
+
 ### 7. Human decisions and findings
 
 An attested override may satisfy only an attested `unavailable` record with the same subject and record ID, authorized actor, timestamp, rationale, accepted risk, and protected-environment approval. Missing evidence is never overridable. Medium/high-confidence blocking findings require an attested resolution; low-confidence blocking findings require human triage without automatic block. Advisory and informational findings do not automatically block.
@@ -84,4 +105,4 @@ Before implementation, challenge and adversarially review the v3 criteria. Imple
 
 - Changing the PatchForge product pipeline, public API, `RunMetadata`, or product artifacts.
 - Adding provider secrets, branch protection, local hooks, or fork access to protected Environment credentials in this contract phase.
-- Implementing producers, consumer gate, overrides, or finding-resolution workflows before the required design reviews approve an implementation plan.
+- Overrides and finding-resolution workflows remain separate work. The required design reviews approved the v3 producer/consumer implementation plan for issue #330.

@@ -1,9 +1,8 @@
-"""Pure contracts for attested independent-review evidence.
+"""Deterministic contracts for attested independent-review evidence v3.
 
-This module deliberately has no PatchForge pipeline, filesystem, network, or
-GitHub dependency.  Workflows construct its inputs from trusted Git and
-Actions metadata; callers must verify the external artifact attestation before
-accepting a ``ReviewRecord``.
+This module is deliberately pure: GitHub discovery, artifact download and
+attestation verification are adapters.  A caller must not turn an artifact
+into evidence until it has supplied a verified provenance receipt.
 """
 
 from __future__ import annotations
@@ -11,7 +10,8 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import json
-from collections.abc import Mapping
+from collections import defaultdict
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from enum import Enum
 from typing import Literal
@@ -21,6 +21,29 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 class _ClosedModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+def canonical_json(value: object) -> bytes:
+    """Return the sole JSON serialization used by packets and records."""
+    if isinstance(value, BaseModel):
+        value = value.model_dump(mode="json", exclude_none=False)
+
+    def _serialize_nested(item: object) -> object:
+        if isinstance(item, BaseModel):
+            return item.model_dump(mode="json", exclude_none=False)
+        raise TypeError(f"cannot canonically serialize {type(item).__name__}")
+
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        default=_serialize_nested,
+    ).encode("utf-8")
+
+
+def sha256_digest(value: object) -> str:
+    return f"sha256:{hashlib.sha256(canonical_json(value)).hexdigest()}"
 
 
 class ReviewPhase(str, Enum):
@@ -74,26 +97,6 @@ class AdmissionReason(str, Enum):
     IMPLEMENTATION_CHAIN_INVALID = "implementation_chain_invalid"
 
 
-class DeclarationProvenanceKind(str, Enum):
-    VALIDATED = "validated"
-    RAW = "raw"
-    ABSENT = "absent"
-    UNREADABLE = "unreadable"
-
-
-def canonical_json(value: object) -> bytes:
-    """Return the only serialization used for evidence and packet digests."""
-    if isinstance(value, BaseModel):
-        value = value.model_dump(mode="json", exclude_none=False)
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
-        "utf-8"
-    )
-
-
-def sha256_digest(value: object) -> str:
-    return f"sha256:{hashlib.sha256(canonical_json(value)).hexdigest()}"
-
-
 class AllowedOperationRule(_ClosedModel):
     pattern: str = Field(min_length=1)
     operations: tuple[GitOperation, ...] = Field(min_length=1)
@@ -110,14 +113,13 @@ class _PlanScope(_ClosedModel):
     def _freeze_operations(cls, value: object) -> object:
         if isinstance(value, dict):
             return tuple(
-                {"pattern": pattern, "operations": operations}
-                for pattern, operations in value.items()
+                {"pattern": key, "operations": operations} for key, operations in value.items()
             )
         return value
 
 
 class PlanScopeDeclaration(_PlanScope):
-    """Untrusted in-tree declaration; trusted Git metadata is added by the harness."""
+    """Untrusted declaration; only a trusted harness adds Git identities."""
 
 
 class PlanScopePacket(_PlanScope):
@@ -129,10 +131,182 @@ class PlanScopePacket(_PlanScope):
         cls, declaration: PlanScopeDeclaration, *, base_sha: str, plan_head_sha: str
     ) -> "PlanScopePacket":
         return cls(
-            base_sha=base_sha,
-            plan_head_sha=plan_head_sha,
-            **declaration.model_dump(mode="python"),
+            base_sha=base_sha, plan_head_sha=plan_head_sha, **declaration.model_dump(mode="python")
         )
+
+    @property
+    def digest(self) -> str:
+        return sha256_digest(self)
+
+
+class TreeEntry(_ClosedModel):
+    path: str = Field(min_length=1)
+    object_type: Literal["blob", "commit", "tree"]
+    mode: str = Field(min_length=1)
+    object_id: str = Field(min_length=1)
+
+    @field_validator("path")
+    @classmethod
+    def _path_is_utf8(cls, value: str) -> str:
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError as error:
+            raise ValueError("tree path is not UTF-8 representable") from error
+        return value
+
+
+class TextDelta(_ClosedModel):
+    path: str
+    old_text: str | None
+    new_text: str | None
+
+
+class CanonicalChange(_ClosedModel):
+    operation: GitOperation
+    path: str
+    previous_path: str | None = None
+    old_entry: TreeEntry | None = None
+    new_entry: TreeEntry | None = None
+    changed_lines: int | None = Field(default=None, ge=0)
+    non_text_reason: Literal["binary", "invalid_utf8", "submodule"] | None = None
+
+    @model_validator(mode="after")
+    def _validate_change(self) -> "CanonicalChange":
+        if self.operation is GitOperation.ADD:
+            if self.old_entry is not None or self.new_entry is None:
+                raise ValueError("add requires new_entry and cannot contain old_entry")
+        elif self.operation is GitOperation.DELETE:
+            if self.old_entry is None or self.new_entry is not None:
+                raise ValueError("delete requires old_entry and cannot contain new_entry")
+        elif self.old_entry is None or self.new_entry is None:
+            raise ValueError("modify and rename require both entries")
+        if self.operation is GitOperation.RENAME:
+            if self.previous_path is None:
+                raise ValueError("rename requires previous_path")
+        elif self.previous_path is not None:
+            raise ValueError("only rename has previous_path")
+        if self.non_text_reason is None and self.changed_lines is None:
+            raise ValueError("text changes require a line count")
+        if self.non_text_reason is not None and self.changed_lines is not None:
+            raise ValueError("non-text changes have no line count")
+        return self
+
+
+class CanonicalChangeSet(_ClosedModel):
+    schema_version: Literal["canonical-change-set@1"] = "canonical-change-set@1"
+    plan_tree: tuple[TreeEntry, ...]
+    head_tree: tuple[TreeEntry, ...]
+    changes: tuple[CanonicalChange, ...]
+
+    @property
+    def digest(self) -> str:
+        return sha256_digest(self)
+
+
+def _physical_lines(value: str) -> int:
+    if not value:
+        return 0
+    return value.count("\n") + (0 if value.endswith("\n") else 1)
+
+
+def _text_or_reason(
+    entry: TreeEntry | None, blobs: Mapping[str, bytes]
+) -> tuple[str | None, str | None]:
+    if entry is None:
+        return None, None
+    if entry.object_type == "commit":
+        return None, "submodule"
+    if entry.object_type != "blob":
+        return None, "binary"
+    raw = blobs.get(entry.object_id)
+    if raw is None:
+        raise ValueError("missing blob bytes")
+    if b"\0" in raw:
+        return None, "binary"
+    try:
+        return raw.decode("utf-8"), None
+    except UnicodeDecodeError:
+        return None, "invalid_utf8"
+
+
+def build_canonical_change_set(
+    plan_tree: Sequence[TreeEntry], head_tree: Sequence[TreeEntry], blobs: Mapping[str, bytes]
+) -> tuple[CanonicalChangeSet, tuple[TextDelta, ...]]:
+    """Derive ADR-0015 operations from exact tree entries, never Git heuristics."""
+    plan = {entry.path: entry for entry in plan_tree}
+    head = {entry.path: entry for entry in head_tree}
+    if len(plan) != len(plan_tree) or len(head) != len(head_tree):
+        raise ValueError("tree contains duplicate paths")
+    ordered_paths = sorted(set(plan) | set(head), key=lambda path: path.encode("utf-8"))
+    removed = [plan[path] for path in ordered_paths if path in plan and path not in head]
+    added = [head[path] for path in ordered_paths if path in head and path not in plan]
+    removed_by_blob: dict[tuple[str, str], list[TreeEntry]] = defaultdict(list)
+    added_by_blob: dict[tuple[str, str], list[TreeEntry]] = defaultdict(list)
+    for entry in removed:
+        if entry.object_type == "blob":
+            removed_by_blob[(entry.object_id, entry.mode)].append(entry)
+    for entry in added:
+        if entry.object_type == "blob":
+            added_by_blob[(entry.object_id, entry.mode)].append(entry)
+    renames = {
+        old.path: new
+        for key, old_values in removed_by_blob.items()
+        for new_values in [added_by_blob.get(key, [])]
+        if len(old_values) == len(new_values) == 1
+        for old in old_values
+        for new in new_values
+    }
+    renamed_new = {entry.path for entry in renames.values()}
+    changes: list[CanonicalChange] = []
+    texts: list[TextDelta] = []
+    for path in ordered_paths:
+        old, new = plan.get(path), head.get(path)
+        if old is not None and new is not None:
+            if old == new:
+                continue
+            operation = GitOperation.MODIFY
+        elif old is not None:
+            if path in renames:
+                new = renames[path]
+                operation = GitOperation.RENAME
+            else:
+                operation = GitOperation.DELETE
+        else:
+            assert new is not None
+            if path in renamed_new:
+                continue
+            operation = GitOperation.ADD
+        old_text, old_reason = _text_or_reason(old, blobs)
+        new_text, new_reason = _text_or_reason(new, blobs)
+        reason = old_reason or new_reason
+        lines = (
+            None if reason else _physical_lines(old_text or "") + _physical_lines(new_text or "")
+        )
+        change = CanonicalChange(
+            operation=operation,
+            path=new.path if operation is GitOperation.RENAME else path,
+            previous_path=old.path if operation is GitOperation.RENAME else None,
+            old_entry=old,
+            new_entry=new,
+            changed_lines=lines,
+            non_text_reason=reason,
+        )
+        changes.append(change)
+        if reason is None:
+            texts.append(TextDelta(path=change.path, old_text=old_text, new_text=new_text))
+    return (
+        CanonicalChangeSet(
+            plan_tree=tuple(sorted(plan_tree, key=lambda entry: entry.path.encode("utf-8"))),
+            head_tree=tuple(sorted(head_tree, key=lambda entry: entry.path.encode("utf-8"))),
+            changes=tuple(changes),
+        ),
+        tuple(texts),
+    )
+
+
+class DiffReviewPacket(_ClosedModel):
+    canonical_change_set: CanonicalChangeSet
+    text_deltas: tuple[TextDelta, ...]
 
     @property
     def digest(self) -> str:
@@ -154,39 +328,13 @@ class DiffReviewSubject(_ClosedModel):
     diff_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
 
-ReviewSubject = PlanReviewSubject | DiffReviewSubject
-
-
-class DeclarationProvenance(_ClosedModel):
-    kind: DeclarationProvenanceKind
-    digest: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
-
-    @model_validator(mode="after")
-    def _validate_digest(self) -> "DeclarationProvenance":
-        digest_required = self.kind in {
-            DeclarationProvenanceKind.VALIDATED,
-            DeclarationProvenanceKind.RAW,
-        }
-        if digest_required != (self.digest is not None):
-            raise ValueError("declaration provenance digest must match its kind")
-        return self
-
-
-class PlanAdmissionSubject(_ClosedModel):
-    phase: Literal[ReviewPhase.PLAN] = ReviewPhase.PLAN
+class AdmissionSubject(_ClosedModel):
+    phase: ReviewPhase
     base_sha: str = Field(min_length=1)
     head_sha: str = Field(min_length=1)
-    declaration_provenance: DeclarationProvenance
 
 
-class DiffAdmissionSubject(_ClosedModel):
-    phase: Literal[ReviewPhase.DIFF] = ReviewPhase.DIFF
-    base_sha: str = Field(min_length=1)
-    head_sha: str = Field(min_length=1)
-    declaration_provenance: DeclarationProvenance
-
-
-AdmissionSubject = PlanAdmissionSubject | DiffAdmissionSubject
+ReviewSubject = PlanReviewSubject | DiffReviewSubject | AdmissionSubject
 
 
 class Finding(_ClosedModel):
@@ -197,9 +345,7 @@ class Finding(_ClosedModel):
 
 
 class ReviewRecord(_ClosedModel):
-    """The attested subject itself; it intentionally has no attestation reference."""
-
-    schema_version: Literal["review-evidence@2"] = "review-evidence@2"
+    schema_version: Literal["review-evidence@3"] = "review-evidence@3"
     record_id: str = Field(min_length=1)
     phase: ReviewPhase
     status: ReviewStatus
@@ -207,53 +353,47 @@ class ReviewRecord(_ClosedModel):
     workflow_run_id: int = Field(gt=0)
     emitted_at: datetime
     model_tier: ModelTier | None = None
-    subject: ReviewSubject | AdmissionSubject
+    subject: ReviewSubject
     findings: tuple[Finding, ...] = ()
     unavailable_reason: UnavailableReason | None = None
     admission_reason: AdmissionReason | None = None
 
     @model_validator(mode="after")
-    def _validate_status_payload(self) -> "ReviewRecord":
+    def _validate_status(self) -> "ReviewRecord":
         if self.phase != self.subject.phase:
             raise ValueError("record phase must match subject phase")
+        if self.record_id != f"{self.workflow_run_id}:{self.phase.value}":
+            raise ValueError("record_id must be derived from workflow_run_id and phase")
+        admitted = isinstance(self.subject, (PlanReviewSubject, DiffReviewSubject))
         if self.status is ReviewStatus.COMPLETED:
-            if not isinstance(self.subject, (PlanReviewSubject, DiffReviewSubject)):
-                raise ValueError("completed records require an admitted subject")
-            if self.model_tier is None:
-                raise ValueError("completed records require model_tier")
-            if self.unavailable_reason is not None or self.admission_reason is not None:
-                raise ValueError("completed records cannot contain a reason code")
-        elif self.status is ReviewStatus.UNAVAILABLE:
-            if not isinstance(self.subject, (PlanReviewSubject, DiffReviewSubject)):
-                raise ValueError("unavailable records require an admitted subject")
-            if self.model_tier is None or self.unavailable_reason is None:
-                raise ValueError("unavailable records require model_tier and unavailable_reason")
-            if self.findings or self.admission_reason is not None:
-                raise ValueError("unavailable records cannot contain findings or admission_reason")
-        else:
-            if not isinstance(self.subject, (PlanAdmissionSubject, DiffAdmissionSubject)):
-                raise ValueError("admission rejections require a candidate subject")
-            if self.model_tier is not None or self.findings or self.unavailable_reason is not None:
-                raise ValueError(
-                    "admission rejections cannot contain tier, findings, or unavailable_reason"
-                )
-            if self.admission_reason is None:
-                raise ValueError("admission rejections require admission_reason")
-            expected_provenance = {
-                AdmissionReason.DECLARATION_ABSENT: DeclarationProvenanceKind.ABSENT,
-                AdmissionReason.DECLARATION_UNREADABLE: DeclarationProvenanceKind.UNREADABLE,
-                AdmissionReason.DECLARATION_INVALID: DeclarationProvenanceKind.RAW,
-            }.get(self.admission_reason)
             if (
-                expected_provenance is not None
-                and self.subject.declaration_provenance.kind is not expected_provenance
+                not admitted
+                or self.model_tier is None
+                or self.unavailable_reason
+                or self.admission_reason
             ):
-                raise ValueError("declaration rejection reason must match declaration provenance")
+                raise ValueError("completed record has invalid payload")
+        elif self.status is ReviewStatus.UNAVAILABLE:
+            if (
+                not admitted
+                or self.model_tier is None
+                or self.unavailable_reason is None
+                or self.findings
+                or self.admission_reason
+            ):
+                raise ValueError("unavailable record has invalid payload")
+        elif (
+            admitted
+            or self.model_tier is not None
+            or self.findings
+            or self.unavailable_reason
+            or self.admission_reason is None
+        ):
+            raise ValueError("admission rejection has invalid payload")
         return self
 
     @property
     def digest(self) -> str:
-        """Digest of the exact bytes the workflow submits to ``actions/attest``."""
         return sha256_digest(self)
 
     @property
@@ -265,40 +405,22 @@ class ReviewRecord(_ClosedModel):
             raise ValueError("pull_request_number must be positive")
         subject_hex = self.subject_digest.removeprefix("sha256:")
         return (
-            f"review-evidence-{self.phase.value}-{pull_request_number}-"
-            f"sha256-{subject_hex}-{self.workflow_run_id}"
+            f"review-evidence-{self.phase.value}-{pull_request_number}-sha256-"
+            f"{subject_hex}-{self.workflow_run_id}"
         )
 
 
 def parse_review_record(value: object) -> ReviewRecord:
-    """Dispatch evidence records by version before interpreting their payload."""
+    """Version dispatch precedes every status or subject interpretation."""
     if isinstance(value, bytes):
         value = value.decode("utf-8")
     if isinstance(value, str):
         value = json.loads(value)
     if not isinstance(value, Mapping):
         raise ValueError("review evidence must be a JSON object")
-    if value.get("schema_version") != "review-evidence@2":
+    if value.get("schema_version") != "review-evidence@3":
         raise ValueError("unsupported review evidence schema version")
     return ReviewRecord.model_validate(value)
-
-
-class ChangedPath(_ClosedModel):
-    operation: GitOperation
-    path: str | None = None
-    previous_path: str | None = None
-    changed_lines: int | None = Field(default=None, ge=0)
-    is_binary: bool = False
-    is_submodule: bool = False
-
-    @model_validator(mode="after")
-    def _validate_paths(self) -> "ChangedPath":
-        if self.operation is GitOperation.RENAME:
-            if not self.path or not self.previous_path:
-                raise ValueError("rename requires path and previous_path")
-        elif not self.path or self.previous_path is not None:
-            raise ValueError("non-rename requires only path")
-        return self
 
 
 class MechanicalScopeViolation(_ClosedModel):
@@ -312,20 +434,16 @@ class MechanicalScopeViolation(_ClosedModel):
     path: str | None = None
 
 
-def _matches(path: str, patterns: tuple[str, ...]) -> bool:
-    return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
-
-
 def evaluate_mechanical_scope(
-    packet: PlanScopePacket, *, current_base_sha: str, changes: tuple[ChangedPath, ...]
+    packet: PlanScopePacket, *, current_base_sha: str, changes: Sequence[CanonicalChange]
 ) -> tuple[MechanicalScopeViolation, ...]:
-    """Return only the four ADR-authorized mechanical failure categories."""
     violations: list[MechanicalScopeViolation] = []
     if current_base_sha != packet.base_sha:
         violations.append(MechanicalScopeViolation(kind="base_sha_mismatch"))
     if len(changes) > packet.max_changed_files:
         violations.append(MechanicalScopeViolation(kind="changed_file_budget_exceeded"))
-    line_count = 0
+    total_lines = 0
+    has_non_text_change = False
     for change in changes:
         paths = (
             (change.previous_path, change.path)
@@ -334,52 +452,139 @@ def evaluate_mechanical_scope(
         )
         for path in paths:
             assert path is not None
-            if not _matches(path, packet.allowed_path_patterns):
+            if not any(
+                fnmatch.fnmatchcase(path, pattern) for pattern in packet.allowed_path_patterns
+            ):
                 violations.append(
                     MechanicalScopeViolation(kind="path_outside_allowed_patterns", path=path)
                 )
-            operations = tuple(
+            permitted = {
                 operation
                 for rule in packet.allowed_operations
                 if fnmatch.fnmatchcase(path, rule.pattern)
                 for operation in rule.operations
-            )
-            if change.operation not in operations:
+            }
+            if change.operation not in permitted:
                 violations.append(MechanicalScopeViolation(kind="operation_not_allowed", path=path))
-        if change.is_binary or change.is_submodule or change.changed_lines is None:
-            line_count = packet.max_changed_lines + 1
+        if change.changed_lines is None:
+            has_non_text_change = True
         else:
-            line_count += change.changed_lines
-    if line_count > packet.max_changed_lines:
+            total_lines += change.changed_lines
+    if has_non_text_change or total_lines > packet.max_changed_lines:
         violations.append(MechanicalScopeViolation(kind="changed_line_budget_exceeded"))
     return tuple(violations)
 
 
-class CommitTransition(_ClosedModel):
-    sha: str = Field(min_length=1)
-    parents: tuple[str, ...]
-    changed_paths: tuple[str, ...] = ()
+class GateSnapshot(_ClosedModel):
+    pull_request_number: int = Field(gt=0)
+    base_sha: str = Field(min_length=1)
+    plan_head_sha: str = Field(min_length=1)
+    head_sha: str = Field(min_length=1)
 
 
-def validate_linear_admission(
+class ProvenanceReceipt(_ClosedModel):
+    repository: str = Field(min_length=1)
+    signer_path: str = Field(min_length=1)
+    github_workflow_sha: str = Field(min_length=1)
+    source_repository_digest: str = Field(min_length=1)
+    workflow_run_id: int = Field(gt=0)
+    verified: bool
+
+
+class ArtifactReceipt(_ClosedModel):
+    artifact_id: int = Field(gt=0)
+    workflow_run_id: int = Field(gt=0)
+    expired: bool = False
+    record_bytes: bytes = Field(min_length=1)
+    provenance: ProvenanceReceipt
+
+
+class GateCandidate(_ClosedModel):
+    artifact: ArtifactReceipt
+    record: ReviewRecord
+
+    @model_validator(mode="after")
+    def _bind_execution_identities(self) -> "GateCandidate":
+        if self.artifact.expired:
+            raise ValueError("artifact is expired")
+        if not self.artifact.provenance.verified:
+            raise ValueError("attestation is not verified")
+        if self.artifact.workflow_run_id != self.record.workflow_run_id:
+            raise ValueError("artifact run does not match record run")
+        if self.artifact.provenance.workflow_run_id != self.record.workflow_run_id:
+            raise ValueError("attestation run does not match record run")
+        if canonical_json(self.record) != self.artifact.record_bytes:
+            raise ValueError("artifact bytes are not canonical record bytes")
+        return self
+
+
+def select_gate_evidence(
+    candidates: Sequence[GateCandidate],
     *,
-    base_sha: str,
-    plan_head_sha: str,
-    plan_commit: CommitTransition,
-    post_plan: tuple[CommitTransition, ...],
-) -> tuple[str, ...]:
-    """Validate the complete admitted chain, not merely a net tree diff."""
-    errors: list[str] = []
-    if plan_commit.sha != plan_head_sha:
-        errors.append("plan commit sha does not match plan_head_sha")
-    if plan_commit.parents != (base_sha,):
-        errors.append("plan commit must have base_sha as its only parent")
-    if set(plan_commit.changed_paths) != {".patchforge/review-plan.json"}:
-        errors.append("plan commit may modify only .patchforge/review-plan.json")
-    expected_parent = plan_head_sha
-    for commit in post_plan:
-        if len(commit.parents) != 1 or commit.parents[0] != expected_parent:
-            errors.append("post-plan commits must form one linear chain from plan_head_sha")
-            break
-        expected_parent = commit.sha
-    return tuple(errors)
+    snapshot: GateSnapshot,
+    repository: str,
+    signer_paths: Mapping[ReviewPhase, str],
+    phase: ReviewPhase,
+) -> ReviewRecord:
+    """Return exactly one completed, provenance-bound record or fail closed."""
+    matching: list[GateCandidate] = []
+    for candidate in candidates:
+        record = candidate.record
+        provenance = candidate.artifact.provenance
+        if record.phase is not phase:
+            continue
+        if phase is ReviewPhase.PLAN:
+            if not isinstance(record.subject, PlanReviewSubject) or (
+                record.subject.base_sha,
+                record.subject.plan_head_sha,
+            ) != (snapshot.base_sha, snapshot.plan_head_sha):
+                continue
+        elif not isinstance(record.subject, DiffReviewSubject) or (
+            record.subject.base_sha,
+            record.subject.plan_head_sha,
+            record.subject.head_sha,
+        ) != (snapshot.base_sha, snapshot.plan_head_sha, snapshot.head_sha):
+            continue
+        if provenance.repository != repository or provenance.signer_path != signer_paths[phase]:
+            raise ValueError("unexpected signer provenance")
+        if (
+            provenance.github_workflow_sha != snapshot.base_sha
+            or provenance.source_repository_digest != snapshot.base_sha
+        ):
+            raise ValueError("stale signer provenance")
+        matching.append(candidate)
+    if not matching:
+        raise ValueError("missing matching review evidence")
+    ordered = sorted(
+        matching,
+        key=lambda item: (
+            item.record.emitted_at,
+            item.record.workflow_run_id,
+            item.record.record_id,
+        ),
+        reverse=True,
+    )
+    winner = ordered[0]
+    winner_tuple = (
+        winner.record.emitted_at,
+        winner.record.workflow_run_id,
+        winner.record.record_id,
+    )
+    if any(
+        (item.record.emitted_at, item.record.workflow_run_id, item.record.record_id) == winner_tuple
+        and item.artifact.record_bytes != winner.artifact.record_bytes
+        for item in ordered[1:]
+    ):
+        raise ValueError("ambiguous review evidence selection")
+    if winner.record.status is not ReviewStatus.COMPLETED:
+        raise ValueError("review evidence is not completed")
+    return winner.record
+
+
+def gate_accepts(plan: ReviewRecord, diff: ReviewRecord) -> bool:
+    """Findings need no resolution protocol to reject a blocking review."""
+    return not any(
+        finding.severity is Severity.BLOCKING
+        for record in (plan, diff)
+        for finding in record.findings
+    )
