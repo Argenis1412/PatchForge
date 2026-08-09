@@ -96,6 +96,54 @@ def test_trusted_consumer_emits_typed_superseded_terminal():
     }
 
 
+def test_consumer_extracts_github_attestation_provenance_shape(tmp_path):
+    root = Path(__file__).parents[1]
+    gate_globals = runpy.run_path(root / ".github/scripts/review_gate.py")
+    attestation = {
+        "verificationResult": {
+            "signature": {
+                "certificate": {
+                    "githubWorkflowSHA": "base",
+                    "sourceRepositoryDigest": "base",
+                }
+            },
+            "statement": {
+                "predicate": {
+                    "buildDefinition": {
+                        "externalParameters": {
+                            "workflow": {
+                                "repository": "https://github.com/owner/repo",
+                                "path": ".github/workflows/review-diff.yml",
+                            }
+                        }
+                    },
+                    "runDetails": {
+                        "metadata": {
+                            "invocationId": "https://github.com/owner/repo/actions/runs/123/attempts/1"
+                        }
+                    },
+                }
+            },
+        }
+    }
+    gate_globals["_verified_provenance"].__globals__["_gh"] = lambda *args: json.dumps(
+        [attestation]
+    ).encode("utf-8")
+
+    receipt = gate_globals["_verified_provenance"](
+        tmp_path / "review-record.json",
+        repository="owner/repo",
+        signer_path=".github/workflows/review-diff.yml",
+        base_sha="base",
+    )
+
+    assert receipt.repository == "owner/repo"
+    assert receipt.signer_path == ".github/workflows/review-diff.yml"
+    assert receipt.github_workflow_sha == "base"
+    assert receipt.source_repository_digest == "base"
+    assert receipt.workflow_run_id == 123
+
+
 def test_consumer_trigger_names_match_v3_producers():
     root = Path(__file__).parents[1]
     plan = (root / ".github/workflows/review-plan.yml").read_text(encoding="utf-8")
