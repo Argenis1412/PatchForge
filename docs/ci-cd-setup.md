@@ -151,10 +151,15 @@ Each pipeline run generates a unique branch name (`patchforge/run_YYYYMMDD_HHMMS
 
 ## Attested independent review evidence
 
+<!-- Review-bot trigger: second review window requested; contract documentation only. -->
 The independent-review workflows use the protected `PATCHFORGE_REVIEW`
 Environment. Configure `ANTHROPIC_API_KEY` and `GOOGLE_API_KEY` there, require
 the repository owner as reviewer, and retain evidence artifacts for 30 days.
-The plan and diff workflows produce separately attested records. Evidence
-production does not yet authorize a merge; a later gate rollout will verify
-the records against fixed workflow identities and fail closed on missing or
-expired evidence.
+The plan and diff workflows produce separately attested `review-evidence@2`
+records. A successful upload and attestation are required before a record is
+evidence; missing, expired, malformed, or unverifiable evidence fails closed.
+The v2 diff workflow will run only after an implementation commit follows an
+admitted plan and will reject `head_sha == plan_head_sha`. That producer guard
+lands with the v2 workflow rollout. Evidence production does not yet authorize
+a merge; a later gate rollout will verify records against fixed workflow
+identities.

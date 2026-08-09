@@ -359,10 +359,14 @@ See [ADR-0015](../adr/ADR-0015-attested-independent-review-evidence.md) for
 the accepted attested-evidence contract.
 
 When the attested gate is enabled in a later rollout, its plan review is a Git admission boundary:
-`.patchforge/review-plan.json` must be the only change in one non-merge commit
-directly atop the current base. Implementation then proceeds through a linear
-chain from that commit. A changed base, merge, rebase, or force-push requires a
-new plan review; labels only trigger workflows and never authorize a phase.
+`.patchforge/review-plan.json` declares scope and must be the only change in
+one non-merge commit directly atop the current base. The trusted workflow, not
+the declaration, binds that commit's SHA into the canonical review packet.
+Implementation then proceeds through a linear chain from that commit. A changed
+base, merge, rebase, or force-push requires a new plan review; labels only
+trigger workflows and never authorize a phase. Diff review is not eligible
+until a commit exists after the admitted plan commit: the v2 producer must
+reject `head_sha == plan_head_sha` rather than review an empty chain.
 The producer workflows are first exercised in a dedicated post-merge
 dogfooding pull request, before merge authorization is enabled.
 
