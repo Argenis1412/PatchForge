@@ -51,9 +51,10 @@ adding implementation or documentation changes.
 
 After the plan commit, add the approved work as a linear chain of single-parent
 commits. Do not merge, rebase, or force-push the branch. If `base_sha` changes,
-restart with a new plan-only commit directly on the new base. Diff review is
-valid only when the branch contains at least one commit after the plan commit;
-an empty post-plan chain is rejected.
+create a new branch from the new base and make a new plan-only commit there
+before adding the subsequent approved work. Diff review is valid only when the
+branch contains at least one commit after that new plan commit; an empty
+post-plan chain is rejected.
 
 `.patchforge/review-plan.json` declares the scope but must not contain its own
 `plan_head_sha`. The trusted workflow derives and binds that SHA when it builds
