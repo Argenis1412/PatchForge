@@ -1,17 +1,10 @@
 {
   "allowed_path_patterns": [
-    ".github/scripts/review_gate.py",
     ".github/workflows/review-evidence-gate.yml",
     "docs/adr/ADR-0015-attested-independent-review-evidence.md",
-    "src/orchestrator/review_evidence.py",
-    "tests/test_review_evidence.py",
     "tests/test_review_workflows_v3.py"
   ],
   "allowed_operations": [
-    {
-      "pattern": ".github/scripts/review_gate.py",
-      "operations": ["modify"]
-    },
     {
       "pattern": ".github/workflows/review-evidence-gate.yml",
       "operations": ["modify"]
@@ -21,18 +14,10 @@
       "operations": ["modify"]
     },
     {
-      "pattern": "src/orchestrator/review_evidence.py",
-      "operations": ["modify"]
-    },
-    {
-      "pattern": "tests/test_review_evidence.py",
-      "operations": ["modify"]
-    },
-    {
       "pattern": "tests/test_review_workflows_v3.py",
       "operations": ["modify"]
     }
   ],
-  "max_changed_files": 6,
-  "max_changed_lines": 300
+  "max_changed_files": 3,
+  "max_changed_lines": 100
 }

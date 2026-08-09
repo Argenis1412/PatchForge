@@ -1,4 +1,8 @@
+import json
+import os
 import runpy
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -30,7 +34,7 @@ def test_consumer_is_pr_exclusive_and_never_checks_out_pr_head():
     assert (
         "review-evidence-gate-${{ github.event.workflow_run.pull_requests[0].number }}" in workflow
     )
-    assert "cancel-in-progress: true" in workflow
+    assert "cancel-in-progress: false" in workflow
     assert "ref: ${{ steps.snapshot.outputs.base_sha }}" in workflow
     assert "persist-credentials: false" in workflow
     assert "!github.event.workflow_run.pull_requests[0].head.repo.fork" in workflow
@@ -41,12 +45,55 @@ def test_consumer_is_pr_exclusive_and_never_checks_out_pr_head():
     assert "assert_live_snapshot" in workflow
     assert "emit_terminal superseded" in workflow
     assert "emit_terminal evidence_incomplete" in workflow
+    assert workflow.count("emit_terminal superseded") == 3
+    for branch in workflow.split("emit_terminal superseded")[1:]:
+        assert "exit 1" in branch
     assert "sleep 30" in workflow and "seq 1 30" in workflow
     assert "review-record.json" in gate
     assert "GateResult.PENDING_DIFF" in gate
     assert "GateResult.TRIAGE_REQUIRED" in gate
     assert "GateResult.BLOCKING_PENDING" in gate
     assert "head_sha={head_sha}&per_page=100" in gate
+
+
+def test_trusted_consumer_emits_typed_superseded_terminal():
+    root = Path(__file__).parents[1]
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = os.pathsep.join(
+        [str(root / "src"), str(root), environment.get("PYTHONPATH", "")]
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(root / ".github/scripts/review_gate.py"),
+            "--repository",
+            "owner/repo",
+            "--pr-number",
+            "330",
+            "--base-sha",
+            "base",
+            "--plan-head-sha",
+            "plan",
+            "--head-sha",
+            "head",
+            "--terminal-result",
+            "superseded",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    decision = json.loads(result.stdout)
+    assert decision == {
+        "result": "superseded",
+        "snapshot": {
+            "base_sha": "base",
+            "head_sha": "head",
+            "plan_head_sha": "plan",
+            "pull_request_number": 330,
+        },
+    }
 
 
 def test_consumer_trigger_names_match_v3_producers():
