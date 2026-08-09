@@ -151,7 +151,7 @@ Each pipeline run generates a unique branch name (`patchforge/run_YYYYMMDD_HHMMS
 
 ## Attested independent review evidence
 
-<!-- Review-bot trigger: contract documentation only; no executable code changed. -->
+<!-- Review-bot trigger: second review window requested; contract documentation only. -->
 The independent-review workflows use the protected `PATCHFORGE_REVIEW`
 Environment. Configure `ANTHROPIC_API_KEY` and `GOOGLE_API_KEY` there, require
 the repository owner as reviewer, and retain evidence artifacts for 30 days.
