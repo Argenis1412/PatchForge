@@ -158,6 +158,8 @@ the repository owner as reviewer, and retain evidence artifacts for 30 days.
 The plan and diff workflows produce separately attested `review-evidence@2`
 records. A successful upload and attestation are required before a record is
 evidence; missing, expired, malformed, or unverifiable evidence fails closed.
-The diff workflow runs only after an implementation commit follows an admitted
-plan. Evidence production does not yet authorize a merge; a later gate rollout
-will verify records against fixed workflow identities.
+The v2 diff workflow will run only after an implementation commit follows an
+admitted plan and will reject `head_sha == plan_head_sha`. That producer guard
+lands with the v2 workflow rollout. Evidence production does not yet authorize
+a merge; a later gate rollout will verify records against fixed workflow
+identities.

@@ -365,7 +365,8 @@ the declaration, binds that commit's SHA into the canonical review packet.
 Implementation then proceeds through a linear chain from that commit. A changed
 base, merge, rebase, or force-push requires a new plan review; labels only
 trigger workflows and never authorize a phase. Diff review is not eligible
-until a commit exists after the admitted plan commit.
+until a commit exists after the admitted plan commit: the v2 producer must
+reject `head_sha == plan_head_sha` rather than review an empty chain.
 The producer workflows are first exercised in a dedicated post-merge
 dogfooding pull request, before merge authorization is enabled.
 

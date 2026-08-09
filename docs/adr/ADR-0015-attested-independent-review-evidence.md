@@ -115,10 +115,13 @@ when its artifact upload and attestation both succeed. A cancellation, runner
 failure, upload failure, or attestation failure leaves evidence absent and
 fail-closed; it must not be represented as an attested rejection.
 
-The diff phase is eligible only when `head_sha` is a linear descendant of
-`plan_head_sha` with at least one intervening implementation commit. The
-workflow suppresses the diff job for `head_sha == plan_head_sha`; this is not
-an admission rejection because no implementation candidate exists.
+The v2 diff phase is eligible only when `head_sha` differs from and is a linear
+descendant of `plan_head_sha`, with at least one intervening implementation
+commit. Its producer must suppress the diff job for
+`head_sha == plan_head_sha`; this is not an admission rejection because no
+implementation candidate exists. The producer rollout implements this
+eligibility guard; this contract-only rollout does not alter the current
+workflow.
 
 CI discovers candidate artifacts by the stable
 `phase/PR/subject-digest/workflow-run-id` identity, downloads every
