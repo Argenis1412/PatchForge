@@ -130,6 +130,19 @@ implementation candidate exists. The producer rollout implements this
 eligibility guard; this contract-only rollout does not alter the current
 workflow.
 
+The diff producer attests only its own admitted linear Git subject. It does
+not attest that a predecessor plan record was published or verified. A
+consumer must independently discover and verify attested plan and diff records
+from their fixed signer workflows. Plan evidence is stale when its `base_sha`
+or `plan_head_sha` differs from the current pull request base or current
+admitted plan commit. Diff evidence is stale when its `base_sha`,
+`plan_head_sha`, or `head_sha` differs from the current pull request base,
+current admitted plan commit, or current pull request head, respectively. A
+plan and diff pair is mismatched when their `base_sha` or `plan_head_sha`
+differs. The consumer fails closed when either phase is absent, expired,
+invalid, stale, or mismatched. A diff record cannot override absent plan
+evidence.
+
 The producer materializes every deterministic admission outcome before it
 fails a workflow job. Upload and attestation occur before that intentional
 failure; otherwise the result is absent evidence and fail-closed.

@@ -370,6 +370,14 @@ reject `head_sha == plan_head_sha` rather than review an empty chain.
 The producer workflows are first exercised in a dedicated post-merge
 dogfooding pull request, before merge authorization is enabled.
 
+Each diff producer record attests only its admitted linear Git subject; it
+does not attest publication or verification of a predecessor plan record. The
+future consumer must independently discover and verify plan and diff evidence
+from their fixed signer workflows and apply ADR-0015's stale-evidence and
+subject-pair matching rules. It fails closed when either phase violates those
+evidence-validity requirements. A diff record cannot override absent plan
+evidence.
+
 ---
 
 ### Role 1 — Issue Clarifier
