@@ -74,6 +74,21 @@ class Confidence(str, Enum):
     LOW = "low"
 
 
+class GateResult(str, Enum):
+    """Consumer outcomes for one snapshot.
+
+    ``PENDING_DIFF`` is observable while the plan-only snapshot waits for a
+    post-plan commit.  It is deliberately not terminal.
+    """
+
+    PENDING_DIFF = "pending_diff"
+    ACCEPTED = "accepted"
+    TRIAGE_REQUIRED = "triage_required"
+    BLOCKING_PENDING = "blocking_pending"
+    SUPERSEDED = "superseded"
+    EVIDENCE_INCOMPLETE = "evidence_incomplete"
+
+
 class GitOperation(str, Enum):
     ADD = "add"
     MODIFY = "modify"
@@ -482,6 +497,11 @@ class GateSnapshot(_ClosedModel):
     head_sha: str = Field(min_length=1)
 
 
+class GateDecision(_ClosedModel):
+    result: GateResult
+    snapshot: GateSnapshot
+
+
 class ProvenanceReceipt(_ClosedModel):
     repository: str = Field(min_length=1)
     signer_path: str = Field(min_length=1)
@@ -581,10 +601,38 @@ def select_gate_evidence(
     return winner.record
 
 
-def gate_accepts(plan: ReviewRecord, diff: ReviewRecord) -> bool:
-    """Findings need no resolution protocol to reject a blocking review."""
-    return not any(
-        finding.severity is Severity.BLOCKING
+def evaluate_gate_evidence(
+    candidates: Sequence[GateCandidate],
+    *,
+    snapshot: GateSnapshot,
+    repository: str,
+    signer_paths: Mapping[ReviewPhase, str],
+) -> GateDecision:
+    """Evaluate one verified snapshot without treating a plan-only wait as terminal."""
+    plan = select_gate_evidence(
+        candidates,
+        snapshot=snapshot,
+        repository=repository,
+        signer_paths=signer_paths,
+        phase=ReviewPhase.PLAN,
+    )
+    if snapshot.head_sha == snapshot.plan_head_sha:
+        return GateDecision(result=GateResult.PENDING_DIFF, snapshot=snapshot)
+    diff = select_gate_evidence(
+        candidates,
+        snapshot=snapshot,
+        repository=repository,
+        signer_paths=signer_paths,
+        phase=ReviewPhase.DIFF,
+    )
+    blocking = tuple(
+        finding
         for record in (plan, diff)
         for finding in record.findings
+        if finding.severity is Severity.BLOCKING
     )
+    if any(finding.confidence in {Confidence.MEDIUM, Confidence.HIGH} for finding in blocking):
+        return GateDecision(result=GateResult.BLOCKING_PENDING, snapshot=snapshot)
+    if any(finding.confidence is Confidence.LOW for finding in blocking):
+        return GateDecision(result=GateResult.TRIAGE_REQUIRED, snapshot=snapshot)
+    return GateDecision(result=GateResult.ACCEPTED, snapshot=snapshot)

@@ -18,17 +18,20 @@ from pathlib import Path
 from orchestrator.review_evidence import (
     ArtifactReceipt,
     GateCandidate,
+    GateDecision,
+    GateResult,
     GateSnapshot,
     ProvenanceReceipt,
     ReviewPhase,
     canonical_json,
-    gate_accepts,
+    evaluate_gate_evidence,
     parse_review_record,
-    select_gate_evidence,
 )
 
 GH_TIMEOUT_SECONDS = 60
-BLOCKING_FINDING_EXIT = 2
+BLOCKING_PENDING_EXIT = 2
+TRIAGE_REQUIRED_EXIT = 3
+PENDING_DIFF_EXIT = 4
 
 
 def _gh(*args: str) -> bytes:
@@ -202,6 +205,11 @@ def main() -> None:
     parser.add_argument("--base-sha", required=True)
     parser.add_argument("--plan-head-sha", required=True)
     parser.add_argument("--head-sha", required=True)
+    parser.add_argument(
+        "--terminal-result",
+        choices=["superseded", "evidence_incomplete"],
+        help="Emit a trusted workflow-level terminal result without discovering evidence.",
+    )
     args = parser.parse_args()
     snapshot = GateSnapshot(
         pull_request_number=args.pr_number,
@@ -209,29 +217,34 @@ def main() -> None:
         plan_head_sha=args.plan_head_sha,
         head_sha=args.head_sha,
     )
+    if args.terminal_result:
+        print(
+            canonical_json(
+                GateDecision(result=GateResult(args.terminal_result), snapshot=snapshot)
+            ).decode("utf-8")
+        )
+        return
     candidates = _artifact_candidates(repository=args.repository, snapshot=snapshot)
     signers = {
         ReviewPhase.PLAN: ".github/workflows/review-plan.yml",
         ReviewPhase.DIFF: ".github/workflows/review-diff.yml",
     }
-    plan = select_gate_evidence(
+    decision = evaluate_gate_evidence(
         candidates,
         snapshot=snapshot,
         repository=args.repository,
         signer_paths=signers,
-        phase=ReviewPhase.PLAN,
     )
-    diff = select_gate_evidence(
-        candidates,
-        snapshot=snapshot,
-        repository=args.repository,
-        signer_paths=signers,
-        phase=ReviewPhase.DIFF,
-    )
-    if not gate_accepts(plan, diff):
-        print("blocking review finding", file=sys.stderr)
-        raise SystemExit(BLOCKING_FINDING_EXIT)
-    print(canonical_json({"result": "accepted", "snapshot": snapshot}).decode("utf-8"))
+    print(canonical_json(decision).decode("utf-8"))
+    if decision.result is GateResult.BLOCKING_PENDING:
+        print("blocking review finding pending attested resolution", file=sys.stderr)
+        raise SystemExit(BLOCKING_PENDING_EXIT)
+    if decision.result is GateResult.TRIAGE_REQUIRED:
+        print("blocking low-confidence finding requires human triage", file=sys.stderr)
+        raise SystemExit(TRIAGE_REQUIRED_EXIT)
+    if decision.result is GateResult.PENDING_DIFF:
+        print("pending diff evidence", file=sys.stderr)
+        raise SystemExit(PENDING_DIFF_EXIT)
 
 
 if __name__ == "__main__":

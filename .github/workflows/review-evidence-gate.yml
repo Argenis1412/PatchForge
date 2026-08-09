@@ -47,19 +47,39 @@ jobs:
           HEAD_SHA: ${{ steps.snapshot.outputs.head_sha }}
         run: |
           git fetch --no-tags origin "$HEAD_SHA"
+          emit_terminal() {
+            PYTHONPATH=src python .github/scripts/review_gate.py --repository "$REPOSITORY" --pr-number "$PR_NUMBER" --base-sha "$BASE_SHA" --plan-head-sha "$plan_sha" --head-sha "$HEAD_SHA" --terminal-result "$1"
+          }
+          assert_live_snapshot() {
+            live="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER")"
+            test "$(jq -r .base.sha <<<"$live")" = "$BASE_SHA" && test "$(jq -r .head.sha <<<"$live")" = "$HEAD_SHA"
+          }
           for attempt in $(seq 1 30); do
             plan_sha="$(git rev-list --reverse "$BASE_SHA..$HEAD_SHA" | head -n 1)"
             if test -n "$plan_sha"; then
               set +e
-              PYTHONPATH=src python .github/scripts/review_gate.py --repository "$REPOSITORY" --pr-number "$PR_NUMBER" --base-sha "$BASE_SHA" --plan-head-sha "$plan_sha" --head-sha "$HEAD_SHA"
+              gate_result="$(PYTHONPATH=src python .github/scripts/review_gate.py --repository "$REPOSITORY" --pr-number "$PR_NUMBER" --base-sha "$BASE_SHA" --plan-head-sha "$plan_sha" --head-sha "$HEAD_SHA")"
               gate_status=$?
               set -e
-              if test "$gate_status" = 0; then exit 0; fi
-              if test "$gate_status" = 2; then exit 2; fi
+              if test "$gate_status" = 0 || test "$gate_status" = 2 || test "$gate_status" = 3; then
+                if assert_live_snapshot; then
+                  printf '%s\n' "$gate_result"
+                  exit "$gate_status"
+                fi
+                emit_terminal superseded
+                exit 1
+              fi
+              if test "$gate_status" = 4; then printf '%s\n' "$gate_result"; fi
             fi
-            live="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER")"
-            if test "$(jq -r .base.sha <<<"$live")" != "$BASE_SHA" || test "$(jq -r .head.sha <<<"$live")" != "$HEAD_SHA"; then echo superseded >&2; exit 1; fi
+            if ! assert_live_snapshot; then
+              emit_terminal superseded
+              exit 1
+            fi
             sleep 30
           done
-          echo evidence_incomplete >&2
+          if ! assert_live_snapshot; then
+            emit_terminal superseded
+            exit 1
+          fi
+          emit_terminal evidence_incomplete
           exit 1
