@@ -1,0 +1,55 @@
+name: Attested plan review
+
+on:
+  pull_request_target:
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+  actions: read
+  attestations: write
+  id-token: write
+
+jobs:
+  plan-review:
+    if: contains(github.event.pull_request.labels.*.name, 'review:plan') && !github.event.pull_request.head.repo.fork
+    runs-on: ubuntu-latest
+    environment: PATCHFORGE_REVIEW
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+      - name: Verify one admitted plan transition
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PLAN_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch --no-tags origin "$PLAN_SHA"
+          test "$(git rev-list --count "$BASE_SHA..$PLAN_SHA")" = "1"
+          test "$(git rev-list --parents -n 1 "$PLAN_SHA" | wc -w)" = "2"
+          test "$(git rev-parse "$PLAN_SHA^")" = "$BASE_SHA"
+          test "$(git diff --name-only "$BASE_SHA" "$PLAN_SHA")" = ".patchforge/review-plan.json"
+      - name: Review canonical packet without tools
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PLAN_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          mkdir -p review-evidence
+          git show "$PLAN_SHA:.patchforge/review-plan.json" > review-evidence/packet.json
+          PYTHONPATH=src python .github/scripts/review_runner.py \
+            --phase plan_review --packet review-evidence/packet.json \
+            --output review-evidence/review-record.json --base-sha "$BASE_SHA" \
+            --plan-head-sha "$PLAN_SHA" --tier economy
+      - name: Require a valid completed or unavailable record
+        run: |
+          test -s review-evidence/review-record.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: review-evidence-plan_review-${{ github.event.pull_request.number }}
+          path: review-evidence/review-record.json
+          retention-days: 30
+      - uses: actions/attest@v4
+        with:
+          subject-path: review-evidence/review-record.json

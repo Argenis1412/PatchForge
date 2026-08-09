@@ -355,7 +355,13 @@ They remain useful for disciplined local review, but they do not prove that an
 independent reviewer examined an issue or diff. The attested independent-review
 workflow is specified separately before it becomes a required process step.
 See [ADR-0015](../adr/ADR-0015-attested-independent-review-evidence.md) for
-the accepted contract and its deferred implementation boundary.
+the accepted attested-evidence contract.
+
+When the attested gate is enabled, its plan review is a Git admission boundary:
+`.patchforge/review-plan.json` must be the only change in one non-merge commit
+directly atop the current base. Implementation then proceeds through a linear
+chain from that commit. A changed base, merge, rebase, or force-push requires a
+new plan review; labels only trigger workflows and never authorize a phase.
 
 ---
 

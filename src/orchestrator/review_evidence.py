@@ -1,0 +1,251 @@
+"""Pure contracts for attested independent-review evidence.
+
+This module deliberately has no PatchForge pipeline, filesystem, network, or
+GitHub dependency.  Workflows construct its inputs from trusted Git and
+Actions metadata; callers must verify the external artifact attestation before
+accepting a ``ReviewRecord``.
+"""
+
+from __future__ import annotations
+
+import fnmatch
+import hashlib
+import json
+from datetime import datetime
+from enum import Enum
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class _ClosedModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class ReviewPhase(str, Enum):
+    PLAN = "plan_review"
+    DIFF = "diff_review"
+
+
+class ReviewStatus(str, Enum):
+    COMPLETED = "completed"
+    UNAVAILABLE = "unavailable"
+
+
+class ModelTier(str, Enum):
+    HIGH_ASSURANCE = "high_assurance"
+    ECONOMY = "economy"
+
+
+class Severity(str, Enum):
+    BLOCKING = "blocking"
+    ADVISORY = "advisory"
+    INFORMATIONAL = "informational"
+
+
+class Confidence(str, Enum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class GitOperation(str, Enum):
+    ADD = "add"
+    MODIFY = "modify"
+    DELETE = "delete"
+    RENAME = "rename"
+
+
+class UnavailableReason(str, Enum):
+    AUTHENTICATION = "authentication"
+    MALFORMED_OUTPUT = "malformed_output"
+    PROVIDER_FAILURE = "provider_failure"
+    QUOTA = "quota"
+    TIMEOUT = "timeout"
+
+
+def canonical_json(value: object) -> bytes:
+    """Return the only serialization used for evidence and packet digests."""
+    if isinstance(value, BaseModel):
+        value = value.model_dump(mode="json", exclude_none=False)
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+        "utf-8"
+    )
+
+
+def sha256_digest(value: object) -> str:
+    return f"sha256:{hashlib.sha256(canonical_json(value)).hexdigest()}"
+
+
+class PlanScopePacket(_ClosedModel):
+    base_sha: str = Field(min_length=1)
+    plan_head_sha: str = Field(min_length=1)
+    allowed_path_patterns: tuple[str, ...] = Field(min_length=1)
+    allowed_operations: dict[str, tuple[GitOperation, ...]] = Field(min_length=1)
+    max_changed_files: int = Field(ge=0)
+    max_changed_lines: int = Field(ge=0)
+
+    @property
+    def digest(self) -> str:
+        return sha256_digest(self)
+
+
+class PlanReviewSubject(_ClosedModel):
+    phase: Literal[ReviewPhase.PLAN] = ReviewPhase.PLAN
+    base_sha: str = Field(min_length=1)
+    plan_head_sha: str = Field(min_length=1)
+    packet_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
+class DiffReviewSubject(_ClosedModel):
+    phase: Literal[ReviewPhase.DIFF] = ReviewPhase.DIFF
+    base_sha: str = Field(min_length=1)
+    plan_head_sha: str = Field(min_length=1)
+    head_sha: str = Field(min_length=1)
+    diff_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
+ReviewSubject = PlanReviewSubject | DiffReviewSubject
+
+
+class Finding(_ClosedModel):
+    finding_id: str = Field(min_length=1)
+    evidence_reference: str = Field(min_length=1)
+    severity: Severity
+    confidence: Confidence
+
+
+class ReviewRecord(_ClosedModel):
+    """The attested subject itself; it intentionally has no attestation reference."""
+
+    schema_version: Literal["review-evidence@1"] = "review-evidence@1"
+    record_id: str = Field(min_length=1)
+    phase: ReviewPhase
+    status: ReviewStatus
+    workflow_name: str = Field(min_length=1)
+    workflow_run_id: int = Field(gt=0)
+    emitted_at: datetime
+    model_tier: ModelTier
+    subject: ReviewSubject
+    findings: tuple[Finding, ...] = ()
+    unavailable_reason: UnavailableReason | None = None
+
+    @model_validator(mode="after")
+    def _validate_status_payload(self) -> "ReviewRecord":
+        if self.phase != self.subject.phase:
+            raise ValueError("record phase must match subject phase")
+        if self.status is ReviewStatus.COMPLETED:
+            if self.unavailable_reason is not None:
+                raise ValueError("completed records cannot contain unavailable_reason")
+        elif self.findings:
+            raise ValueError("unavailable records cannot contain findings")
+        elif self.unavailable_reason is None:
+            raise ValueError("unavailable records require unavailable_reason")
+        return self
+
+    @property
+    def digest(self) -> str:
+        """Digest of the exact bytes the workflow submits to ``actions/attest``."""
+        return sha256_digest(self)
+
+
+class ChangedPath(_ClosedModel):
+    operation: GitOperation
+    path: str | None = None
+    previous_path: str | None = None
+    changed_lines: int | None = Field(default=None, ge=0)
+    is_binary: bool = False
+    is_submodule: bool = False
+
+    @model_validator(mode="after")
+    def _validate_paths(self) -> "ChangedPath":
+        if self.operation is GitOperation.RENAME:
+            if not self.path or not self.previous_path:
+                raise ValueError("rename requires path and previous_path")
+        elif not self.path or self.previous_path is not None:
+            raise ValueError("non-rename requires only path")
+        return self
+
+
+class MechanicalScopeViolation(_ClosedModel):
+    kind: Literal[
+        "base_sha_mismatch",
+        "path_outside_allowed_patterns",
+        "operation_not_allowed",
+        "changed_file_budget_exceeded",
+        "changed_line_budget_exceeded",
+    ]
+    path: str | None = None
+
+
+def _matches(path: str, patterns: tuple[str, ...]) -> bool:
+    return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
+
+
+def evaluate_mechanical_scope(
+    packet: PlanScopePacket, *, current_base_sha: str, changes: tuple[ChangedPath, ...]
+) -> tuple[MechanicalScopeViolation, ...]:
+    """Return only the four ADR-authorized mechanical failure categories."""
+    violations: list[MechanicalScopeViolation] = []
+    if current_base_sha != packet.base_sha:
+        violations.append(MechanicalScopeViolation(kind="base_sha_mismatch"))
+    if len(changes) > packet.max_changed_files:
+        violations.append(MechanicalScopeViolation(kind="changed_file_budget_exceeded"))
+    line_count = 0
+    for change in changes:
+        paths = (
+            (change.previous_path, change.path)
+            if change.operation is GitOperation.RENAME
+            else (change.path,)
+        )
+        for path in paths:
+            assert path is not None
+            if not _matches(path, packet.allowed_path_patterns):
+                violations.append(
+                    MechanicalScopeViolation(kind="path_outside_allowed_patterns", path=path)
+                )
+            operations = tuple(
+                operation
+                for pattern, allowed in packet.allowed_operations.items()
+                if fnmatch.fnmatchcase(path, pattern)
+                for operation in allowed
+            )
+            if change.operation not in operations:
+                violations.append(MechanicalScopeViolation(kind="operation_not_allowed", path=path))
+        if change.is_binary or change.is_submodule or change.changed_lines is None:
+            line_count = packet.max_changed_lines + 1
+        else:
+            line_count += change.changed_lines
+    if line_count > packet.max_changed_lines:
+        violations.append(MechanicalScopeViolation(kind="changed_line_budget_exceeded"))
+    return tuple(violations)
+
+
+class CommitTransition(_ClosedModel):
+    sha: str = Field(min_length=1)
+    parents: tuple[str, ...]
+    changed_paths: tuple[str, ...] = ()
+
+
+def validate_linear_admission(
+    *,
+    base_sha: str,
+    plan_head_sha: str,
+    plan_commit: CommitTransition,
+    post_plan: tuple[CommitTransition, ...],
+) -> tuple[str, ...]:
+    """Validate the complete admitted chain, not merely a net tree diff."""
+    errors: list[str] = []
+    if plan_commit.sha != plan_head_sha:
+        errors.append("plan commit sha does not match plan_head_sha")
+    if plan_commit.parents != (base_sha,):
+        errors.append("plan commit must have base_sha as its only parent")
+    if set(plan_commit.changed_paths) != {".patchforge/review-plan.json"}:
+        errors.append("plan commit may modify only .patchforge/review-plan.json")
+    expected_parent = plan_head_sha
+    for commit in post_plan:
+        if len(commit.parents) != 1 or commit.parents[0] != expected_parent:
+            errors.append("post-plan commits must form one linear chain from plan_head_sha")
+            break
+        expected_parent = commit.sha
+    return tuple(errors)

@@ -1,0 +1,23 @@
+name: Independent review gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  actions: read
+  attestations: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require review evidence artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh api --paginate "/repos/$REPOSITORY/actions/artifacts?name=review-evidence-plan_review-$PR" --jq '.artifacts[] | select(.expired == false) | .id' | grep -q .
+          gh api --paginate "/repos/$REPOSITORY/actions/artifacts?name=review-evidence-diff_review-$PR" --jq '.artifacts[] | select(.expired == false) | .id' | grep -q .
