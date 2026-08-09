@@ -16,10 +16,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from orchestrator.review_evidence import (
+    AdmissionReason,
+    DeclarationProvenance,
+    DeclarationProvenanceKind,
+    DiffAdmissionSubject,
     DiffReviewSubject,
     Finding,
     ModelTier,
+    PlanAdmissionSubject,
     PlanReviewSubject,
+    PlanScopeDeclaration,
     PlanScopePacket,
     ReviewPhase,
     ReviewRecord,
@@ -92,59 +98,116 @@ def _reason(error: Exception) -> UnavailableReason:
     return UnavailableReason.PROVIDER_FAILURE
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--phase", choices=[phase.value for phase in ReviewPhase], required=True)
-    parser.add_argument("--packet", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--base-sha", required=True)
-    parser.add_argument("--plan-head-sha", required=True)
-    parser.add_argument("--head-sha")
-    parser.add_argument("--tier", choices=[tier.value for tier in ModelTier], required=True)
-    args = parser.parse_args()
-    phase = ReviewPhase(args.phase)
-    tier = ModelTier(args.tier)
-    packet = json.loads(args.packet.read_text(encoding="utf-8"))
-    if phase is ReviewPhase.PLAN:
-        scope_packet = PlanScopePacket.model_validate(packet)
-        if (
-            scope_packet.base_sha != args.base_sha
-            or scope_packet.plan_head_sha != args.plan_head_sha
-        ):
-            parser.error("plan packet SHA values must match the trusted workflow inputs")
-        subject = PlanReviewSubject(
-            base_sha=args.base_sha,
-            plan_head_sha=args.plan_head_sha,
-            packet_digest=scope_packet.digest,
-        )
-    else:
-        if not args.head_sha:
-            parser.error("--head-sha is required for diff_review")
-        subject = DiffReviewSubject(
-            base_sha=args.base_sha,
-            plan_head_sha=args.plan_head_sha,
-            head_sha=args.head_sha,
-            diff_digest=sha256_digest(packet),
-        )
-    record_args = {
+def _record_metadata(phase: ReviewPhase) -> dict[str, object]:
+    return {
         "record_id": f"{os.environ['GITHUB_RUN_ID']}:{phase.value}",
         "phase": phase,
         "workflow_name": os.environ["GITHUB_WORKFLOW_REF"],
         "workflow_run_id": int(os.environ["GITHUB_RUN_ID"]),
         "emitted_at": datetime.now(UTC),
-        "model_tier": tier,
-        "subject": subject,
     }
-    try:
-        response = _model_json(packet, tier)
-        findings = tuple(Finding.model_validate(item) for item in response.get("findings", []))
-        record = ReviewRecord(status=ReviewStatus.COMPLETED, findings=findings, **record_args)
-    except Exception as error:  # the public record deliberately exposes only a reason code
-        record = ReviewRecord(
-            status=ReviewStatus.UNAVAILABLE, unavailable_reason=_reason(error), **record_args
+
+
+def materialize_admission_record(
+    *,
+    phase: ReviewPhase,
+    base_sha: str,
+    head_sha: str,
+    reason: AdmissionReason,
+    provenance: DeclarationProvenance,
+) -> ReviewRecord:
+    """Materialize a harness decision without granting the model Git authority."""
+    subject = (
+        PlanAdmissionSubject(
+            base_sha=base_sha, head_sha=head_sha, declaration_provenance=provenance
         )
+        if phase is ReviewPhase.PLAN
+        else DiffAdmissionSubject(
+            base_sha=base_sha, head_sha=head_sha, declaration_provenance=provenance
+        )
+    )
+    return ReviewRecord(
+        status=ReviewStatus.ADMISSION_REJECTED,
+        admission_reason=reason,
+        subject=subject,
+        **_record_metadata(phase),
+    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--phase", choices=[phase.value for phase in ReviewPhase], required=True)
+    parser.add_argument("--packet", type=Path)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--base-sha", required=True)
+    parser.add_argument("--plan-head-sha")
+    parser.add_argument("--head-sha")
+    parser.add_argument("--tier", choices=[tier.value for tier in ModelTier])
+    parser.add_argument("--admission-reason", choices=[reason.value for reason in AdmissionReason])
+    parser.add_argument(
+        "--declaration-provenance",
+        choices=[kind.value for kind in DeclarationProvenanceKind],
+    )
+    parser.add_argument("--declaration-digest")
+    parser.add_argument("--pr-number", type=int, required=True)
+    parser.add_argument("--github-output", type=Path)
+    args = parser.parse_args()
+    phase = ReviewPhase(args.phase)
+    if args.admission_reason:
+        if not args.head_sha or not args.declaration_provenance:
+            parser.error("admission records require --head-sha and --declaration-provenance")
+        provenance = DeclarationProvenance(
+            kind=DeclarationProvenanceKind(args.declaration_provenance),
+            digest=args.declaration_digest,
+        )
+        record = materialize_admission_record(
+            phase=phase,
+            base_sha=args.base_sha,
+            head_sha=args.head_sha,
+            reason=AdmissionReason(args.admission_reason),
+            provenance=provenance,
+        )
+    else:
+        if not args.packet or not args.plan_head_sha or not args.tier:
+            parser.error("execution records require --packet, --plan-head-sha, and --tier")
+        tier = ModelTier(args.tier)
+        packet = json.loads(args.packet.read_text(encoding="utf-8"))
+        if phase is ReviewPhase.PLAN:
+            declaration = PlanScopeDeclaration.model_validate(packet)
+            scope_packet = PlanScopePacket.from_declaration(
+                declaration, base_sha=args.base_sha, plan_head_sha=args.plan_head_sha
+            )
+            subject = PlanReviewSubject(
+                base_sha=args.base_sha,
+                plan_head_sha=args.plan_head_sha,
+                packet_digest=scope_packet.digest,
+            )
+            model_packet: object = scope_packet
+        else:
+            if not args.head_sha:
+                parser.error("--head-sha is required for diff_review")
+            subject = DiffReviewSubject(
+                base_sha=args.base_sha,
+                plan_head_sha=args.plan_head_sha,
+                head_sha=args.head_sha,
+                diff_digest=sha256_digest(packet),
+            )
+            model_packet = packet
+        record_args = {"model_tier": tier, "subject": subject, **_record_metadata(phase)}
+        try:
+            response = _model_json(model_packet, tier)
+            findings = tuple(Finding.model_validate(item) for item in response.get("findings", []))
+            record = ReviewRecord(status=ReviewStatus.COMPLETED, findings=findings, **record_args)
+        except Exception as error:  # the public record deliberately exposes only a reason code
+            record = ReviewRecord(
+                status=ReviewStatus.UNAVAILABLE, unavailable_reason=_reason(error), **record_args
+            )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(canonical_json(record))
+    if args.github_output:
+        args.github_output.write_text(
+            f"artifact_name={record.artifact_name(args.pr_number)}\n", encoding="utf-8"
+        )
 
 
 if __name__ == "__main__":

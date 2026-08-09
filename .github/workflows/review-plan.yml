@@ -19,37 +19,76 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.base.sha }}
-      - name: Verify one admitted plan transition
+      - name: Classify the plan candidate
+        id: classify
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PLAN_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          git fetch --no-tags origin "$PLAN_SHA"
-          test "$(git rev-list --count "$BASE_SHA..$PLAN_SHA")" = "1"
-          test "$(git rev-list --parents -n 1 "$PLAN_SHA" | wc -w)" = "2"
-          test "$(git rev-parse "$PLAN_SHA^")" = "$BASE_SHA"
-          test "$(git diff --name-only "$BASE_SHA" "$PLAN_SHA")" = ".patchforge/review-plan.json"
-      - name: Review canonical packet without tools
+          git fetch --no-tags origin "$HEAD_SHA"
+          mkdir -p review-evidence
+          declaration_kind=absent
+          declaration_digest=
+          if git cat-file -e "$HEAD_SHA:.patchforge/review-plan.json" 2>/dev/null; then
+            if git show "$HEAD_SHA:.patchforge/review-plan.json" > review-evidence/declaration.json; then
+              declaration_kind=raw
+              declaration_digest="sha256:$(sha256sum review-evidence/declaration.json | cut -d ' ' -f 1)"
+            else
+              declaration_kind=unreadable
+            fi
+          fi
+          reason=
+          if ! test "$(git rev-list --count "$BASE_SHA..$HEAD_SHA")" = "1" \
+            || ! test "$(git rev-list --parents -n 1 "$HEAD_SHA" | wc -w)" = "2" \
+            || ! test "$(git rev-parse "$HEAD_SHA^")" = "$BASE_SHA" \
+            || ! test "$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")" = ".patchforge/review-plan.json"; then
+            reason=plan_transition_invalid
+          elif test "$declaration_kind" = absent; then
+            reason=declaration_absent
+          elif test "$declaration_kind" = unreadable; then
+            reason=declaration_unreadable
+          elif ! PYTHONPATH=src python -c 'from pathlib import Path; from orchestrator.review_evidence import PlanScopeDeclaration, sha256_digest; declaration = PlanScopeDeclaration.model_validate_json(Path("review-evidence/declaration.json").read_text(encoding="utf-8")); Path("review-evidence/declaration.digest").write_text(sha256_digest(declaration), encoding="utf-8")'; then
+            reason=declaration_invalid
+          else
+            declaration_kind=validated
+            declaration_digest="$(cat review-evidence/declaration.digest)"
+          fi
+          if test -n "$reason"; then mode=admission; else mode=execution; fi
+          {
+            echo "mode=$mode"
+            echo "reason=$reason"
+            echo "declaration_kind=$declaration_kind"
+            echo "declaration_digest=$declaration_digest"
+          } >> "$GITHUB_OUTPUT"
+      - name: Materialize review record
+        id: materialize
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PLAN_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MODE: ${{ steps.classify.outputs.mode }}
+          REASON: ${{ steps.classify.outputs.reason }}
+          DECLARATION_KIND: ${{ steps.classify.outputs.declaration_kind }}
+          DECLARATION_DIGEST: ${{ steps.classify.outputs.declaration_digest }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          mkdir -p review-evidence
-          git show "$PLAN_SHA:.patchforge/review-plan.json" > review-evidence/packet.json
-          PYTHONPATH=src python .github/scripts/review_runner.py \
-            --phase plan_review --packet review-evidence/packet.json \
-            --output review-evidence/review-record.json --base-sha "$BASE_SHA" \
-            --plan-head-sha "$PLAN_SHA" --tier economy
-      - name: Require a valid completed or unavailable record
-        run: |
-          test -s review-evidence/review-record.json
+          args=(--phase plan_review --output review-evidence/review-record.json --base-sha "$BASE_SHA" --head-sha "$HEAD_SHA" --pr-number "$PR_NUMBER" --github-output "$GITHUB_OUTPUT")
+          if test "$MODE" = admission; then
+            args+=(--admission-reason "$REASON" --declaration-provenance "$DECLARATION_KIND")
+            if test -n "$DECLARATION_DIGEST"; then args+=(--declaration-digest "$DECLARATION_DIGEST"); fi
+          else
+            args+=(--packet review-evidence/declaration.json --plan-head-sha "$HEAD_SHA" --tier economy)
+          fi
+          PYTHONPATH=src python .github/scripts/review_runner.py "${args[@]}"
       - uses: actions/upload-artifact@v4
         with:
-          name: review-evidence-plan_review-${{ github.event.pull_request.number }}
+          name: ${{ steps.materialize.outputs.artifact_name }}
           path: review-evidence/review-record.json
           retention-days: 30
       - uses: actions/attest@v4
         with:
           subject-path: review-evidence/review-record.json
+      - name: Fail after publishing rejected admission
+        if: steps.classify.outputs.mode == 'admission'
+        run: exit 1
