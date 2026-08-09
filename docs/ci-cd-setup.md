@@ -149,10 +149,12 @@ Each pipeline run generates a unique branch name (`patchforge/run_YYYYMMDD_HHMMS
 
 **No LLM API key error**: Set at least one of `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, or `OPENROUTER_API_KEY` in repository secrets.
 
-## Attested independent review gate
+## Attested independent review evidence
 
 The independent-review workflows use the protected `PATCHFORGE_REVIEW`
 Environment. Configure `ANTHROPIC_API_KEY` and `GOOGLE_API_KEY` there, require
 the repository owner as reviewer, and retain evidence artifacts for 30 days.
-The gate verifies GitHub attestations against its fixed workflow identity; an
-expired or missing artifact fails closed.
+The plan and diff workflows produce separately attested records. Evidence
+production does not yet authorize a merge; a later gate rollout will verify
+the records against fixed workflow identities and fail closed on missing or
+expired evidence.

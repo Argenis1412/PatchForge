@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted for issue #328. Implementation is deliberately deferred to follow-up
-issues.
+Accepted for issue #328. Evidence producers are delivered first; gate
+enforcement and human-decision consumption remain follow-up work.
 
 ## Context
 
@@ -149,7 +149,7 @@ from the diff.
 
 ## Follow-up verification
 
-The implementation issue must verify:
+The enforcement follow-up must verify:
 
 - plan and diff records bind only their respective canonical subjects;
 - all mechanical-scope conditions, including both sides of a rename;
