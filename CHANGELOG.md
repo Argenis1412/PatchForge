@@ -7,9 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes yet._
+
+## [1.2.0] - 2026-08-09
+
+### Highlights
+
+- Candidate-promotion `apply` protocol: validates an isolated candidate and
+  atomically publishes a `patchforge/<run_id>` branch without changing the
+  caller's checkout.
+- Versioned validator configuration, authorization decisions, and centralized
+  subprocess timeout policy.
+- Explicit operator credential resolution, shared provider policy, and
+  effect-free Plan, Preview, and initial CI preflight rejection handling.
+- Audit bundle export and verification with optional redaction and GPG
+  signatures.
+- Python subproject support for monorepos and aligned `doctor`/`scan`
+  compatibility checks.
+- Attested `review-evidence@3` plan and diff producers with an advisory
+  consumer. This release does not enable a decisory merge gate.
+
+### Changed
+
+- `patchforge apply` now promotes a validated candidate commit instead of
+  modifying the caller's working tree.
+- Default workspaces are outside the target repository; explicit workspaces
+  inside the target are rejected.
+- `--risk-budget` accepts only `low` and `medium`; persisted historical
+  `high` run metadata remains readable.
+- Provider credential files must be explicit and operator-owned outside the
+  target repository.
+
 ### Fixed
 
-- **Scanner tool detection on venv-less clones**: `_detect_tool()` now probes `sys.executable -m <tool>` before falling back to `PATH`, fixing `v1_supported: false` false negatives when ruff/pytest are importable but not on `PATH` (Issue #250, mirrors the validator's #223 fix)
+- **Scanner tool detection on venv-less clones**: `_detect_tool()` now probes `sys.executable -m <tool>` before falling back to `PATH`, fixing `v1_supported: false` false negatives when ruff/pytest are importable but not on `PATH` (Issue #250, mirrors the validator's #223 fix).
+- CI result consumers parse versioned result envelopes before evaluating
+  status, and initial provider preflight rejection does not create false run
+  evidence.
+- Review-evidence consumer terminal outcomes preserve supersession and verify
+  GitHub attestation provenance.
 
 ## [1.1.0] - 2026-07-12
 

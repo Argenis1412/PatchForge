@@ -33,6 +33,34 @@ issue → clarify → criteria → challenge → plan → adversarial review →
 → implement → diff review → tests → QA → commit → push
 ```
 
+For branches covered by the attested review workflows, use this flow after
+approval:
+
+```text
+issue -> plan -> review-plan commit -> plan review -> implementation chain
+     -> diff review -> QA -> commit -> push
+```
+
+### Attested review-plan commit
+
+When the attested review workflows are active, the first commit on a work
+branch is a review-plan transition. Create the branch from the current
+`base_sha`, then make one non-merge commit that changes only
+`.patchforge/review-plan.json`. Wait for plan review and admission before
+adding implementation or documentation changes.
+
+After the plan commit, add the approved work as a linear chain of single-parent
+commits. Do not merge, rebase, or force-push the branch. If `base_sha` changes,
+create a new branch from the new base and make a new plan-only commit there
+before adding the subsequent approved work. Diff review is valid only when the
+branch contains at least one commit after that new plan commit; an empty
+post-plan chain is rejected.
+
+`.patchforge/review-plan.json` declares the scope but must not contain its own
+`plan_head_sha`. The trusted workflow derives and binds that SHA when it builds
+the review packet. These rules prevent `plan_transition_invalid` results and
+preserve the commit chain expected by the diff-review workflow.
+
 Rules:
 - **The refactor is never the unit of work.** The unit is a self-contained issue with limited scope and verifiable criteria.
 - Stop and ask if anything is ambiguous
