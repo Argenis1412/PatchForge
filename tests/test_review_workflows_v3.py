@@ -25,6 +25,7 @@ def test_consumer_is_pr_exclusive_and_never_checks_out_pr_head():
     gate_globals = runpy.run_path(root / ".github/scripts/review_gate.py")
     blocking_exit = gate_globals["BLOCKING_PENDING_EXIT"]
     triage_exit = gate_globals["TRIAGE_REQUIRED_EXIT"]
+    pending_exit = gate_globals["PENDING_DIFF_EXIT"]
     assert "workflow_run" in workflow
     assert (
         "review-evidence-gate-${{ github.event.workflow_run.pull_requests[0].number }}" in workflow
@@ -36,6 +37,7 @@ def test_consumer_is_pr_exclusive_and_never_checks_out_pr_head():
     assert 'git fetch --no-tags origin "$HEAD_SHA"' in workflow
     assert f'test "$gate_status" = {blocking_exit}' in workflow
     assert f'test "$gate_status" = {triage_exit}' in workflow
+    assert f'test "$gate_status" = {pending_exit}' in workflow
     assert "assert_live_snapshot" in workflow
     assert "emit_terminal superseded" in workflow
     assert "emit_terminal evidence_incomplete" in workflow

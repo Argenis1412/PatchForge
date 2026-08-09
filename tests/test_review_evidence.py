@@ -414,14 +414,19 @@ def test_gate_evaluation_keeps_a_verified_plan_only_snapshot_pending_diff():
 
 
 @pytest.mark.parametrize(
-    ("confidence", "expected"),
+    ("confidence", "expected", "finding_phase"),
     [
-        (Confidence.LOW, GateResult.TRIAGE_REQUIRED),
-        (Confidence.MEDIUM, GateResult.BLOCKING_PENDING),
-        (Confidence.HIGH, GateResult.BLOCKING_PENDING),
+        (Confidence.LOW, GateResult.TRIAGE_REQUIRED, ReviewPhase.PLAN),
+        (Confidence.MEDIUM, GateResult.BLOCKING_PENDING, ReviewPhase.PLAN),
+        (Confidence.HIGH, GateResult.BLOCKING_PENDING, ReviewPhase.PLAN),
+        (Confidence.LOW, GateResult.TRIAGE_REQUIRED, ReviewPhase.DIFF),
+        (Confidence.MEDIUM, GateResult.BLOCKING_PENDING, ReviewPhase.DIFF),
+        (Confidence.HIGH, GateResult.BLOCKING_PENDING, ReviewPhase.DIFF),
     ],
 )
-def test_gate_evaluation_classifies_blocking_findings_by_confidence(confidence, expected):
+def test_gate_evaluation_classifies_blocking_findings_by_confidence(
+    confidence, expected, finding_phase
+):
     snapshot = GateSnapshot(
         pull_request_number=330, base_sha="base", plan_head_sha="plan", head_sha="head"
     )
@@ -438,12 +443,13 @@ def test_gate_evaluation_classifies_blocking_findings_by_confidence(confidence, 
                 plan_head_sha="plan",
                 emitted_at=datetime.now(UTC),
                 workflow_name="plan",
+                findings=(finding,) if finding_phase is ReviewPhase.PLAN else (),
             ),
             _completed_diff_candidate(
                 artifact_id=110,
                 plan_head_sha="plan",
                 head_sha="head",
-                findings=(finding,),
+                findings=(finding,) if finding_phase is ReviewPhase.DIFF else (),
             ),
         ],
         snapshot=snapshot,
