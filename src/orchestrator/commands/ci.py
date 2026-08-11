@@ -112,7 +112,7 @@ def execute(
     from orchestrator.clients.credentials import resolve_operator_credentials
     from orchestrator.git import (
         apply_patch,
-        create_controlled_branch,
+        create_branch_from_verified_base,
         current_head,
         repository_identity,
         repository_state,
@@ -670,7 +670,6 @@ def execute(
     )
 
     branch_name = f"patchforge/{run_id}"
-    pre_apply_head = current_head(target_path)
 
     existing_apply = run_dir / "apply.json"
     if existing_apply.exists():
@@ -688,7 +687,7 @@ def execute(
         applied_at=datetime.now(timezone.utc),
         branch=branch_name,
         success=False,
-        pre_apply_head=pre_apply_head,
+        pre_apply_head=run_metadata.base_commit,
         status="applying",
         apply_protocol="ci_legacy@1",
     )
@@ -720,7 +719,13 @@ def execute(
         except Exception:
             return False
 
-    branch_res = create_controlled_branch(target_path, branch_name, timeout=config.timeouts.git_op)
+    branch_res = create_branch_from_verified_base(
+        target_path,
+        branch_name,
+        run_metadata.branch,
+        run_metadata.base_commit,
+        timeout=config.timeouts.git_op,
+    )
     if branch_res.return_code != 0:
         return _apply_fail(f"Branch creation failed: {branch_res.stderr}")
 

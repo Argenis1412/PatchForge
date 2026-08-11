@@ -6,6 +6,7 @@ import pytest
 from orchestrator.git import (
     apply_patch,
     check_patch,
+    create_branch_from_verified_base,
     create_controlled_branch,
     current_branch,
     current_head,
@@ -122,6 +123,41 @@ def test_create_controlled_branch(git_repo: Path):
     result = create_controlled_branch(git_repo, "test-branch")
     assert result.return_code == 0
     assert current_branch(git_repo) == "test-branch"
+
+
+def test_create_branch_from_verified_base_anchors_output_branch(git_repo: Path):
+    source_branch = current_branch(git_repo)
+    base_commit = current_head(git_repo)
+
+    result = create_branch_from_verified_base(
+        git_repo, "patchforge/test", source_branch, base_commit
+    )
+
+    assert result.return_code == 0
+    assert current_branch(git_repo) == "patchforge/test"
+    assert current_head(git_repo) == base_commit
+
+
+def test_create_branch_from_verified_base_rejects_advanced_source_ref(git_repo: Path):
+    source_branch = current_branch(git_repo)
+    base_commit = current_head(git_repo)
+    (git_repo / "README.md").write_text("Advanced\n")
+    subprocess.run(["git", "add", "README.md"], cwd=git_repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "advance source"], cwd=git_repo, check=True, capture_output=True
+    )
+
+    result = create_branch_from_verified_base(
+        git_repo, "patchforge/test", source_branch, base_commit
+    )
+
+    assert result.return_code != 0
+    branch = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "refs/heads/patchforge/test"],
+        cwd=git_repo,
+        capture_output=True,
+    )
+    assert branch.returncode != 0
 
 
 def test_apply_patch(git_repo: Path):

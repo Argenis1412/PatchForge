@@ -207,6 +207,79 @@ def create_controlled_branch(
         return GitCommandResult(return_code=124, stdout="", stderr=f"git command timed out: {exc}")
 
 
+def create_branch_from_verified_base(
+    repo_root: Path,
+    branch_name: str,
+    source_branch: str,
+    base_commit: str,
+    *,
+    timeout: int = 30,
+) -> GitCommandResult:
+    """Atomically create and check out *branch_name* from a verified source ref."""
+    if not source_branch or source_branch == "HEAD":
+        return GitCommandResult(return_code=1, stdout="", stderr="invalid source branch")
+
+    source_ref = f"refs/heads/{source_branch}"
+    branch_ref = f"refs/heads/{branch_name}"
+    for ref in (source_ref, branch_ref):
+        if "\x00" in ref or "\n" in ref or "\r" in ref:
+            return GitCommandResult(return_code=1, stdout="", stderr=f"invalid ref: {ref!r}")
+        checked = _run_git_safe(["git", "check-ref-format", ref], timeout=timeout)
+        if checked.returncode != 0:
+            return GitCommandResult(
+                return_code=1,
+                stdout="",
+                stderr=checked.stderr or f"invalid ref: {ref}",
+            )
+    if not re.fullmatch(r"[0-9a-fA-F]{40,64}", base_commit):
+        return GitCommandResult(return_code=1, stdout="", stderr="invalid base_commit")
+
+    transaction = "\n".join(
+        [
+            "start",
+            f"verify {source_ref} {base_commit}",
+            f"create {branch_ref} {base_commit}",
+            "prepare",
+            "commit",
+            "",
+        ]
+    ).encode("ascii")
+    try:
+        created = subprocess.run(
+            ["git", "-C", str(repo_root), "update-ref", "--stdin"],
+            input=transaction,
+            capture_output=True,
+            timeout=timeout,
+        )
+    except FileNotFoundError as exc:
+        return GitCommandResult(return_code=127, stdout="", stderr=str(exc))
+    except subprocess.TimeoutExpired as exc:
+        return GitCommandResult(return_code=124, stdout="", stderr=f"git command timed out: {exc}")
+    if created.returncode != 0:
+        return GitCommandResult(
+            return_code=created.returncode,
+            stdout=created.stdout.decode(errors="replace"),
+            stderr=created.stderr.decode(errors="replace"),
+        )
+
+    try:
+        checked_out = subprocess.run(
+            ["git", "-C", str(repo_root), "checkout", branch_name],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return GitCommandResult(
+            return_code=checked_out.returncode,
+            stdout=checked_out.stdout,
+            stderr=checked_out.stderr,
+        )
+    except FileNotFoundError as exc:
+        return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {exc}")
+    except subprocess.TimeoutExpired as exc:
+        return GitCommandResult(return_code=124, stdout="", stderr=f"git command timed out: {exc}")
+
+
 def git_common_dir(repo_root: Path, *, timeout: int = 30) -> Path:
     """Return the canonical common Git directory shared by all worktrees."""
     res = _run_git_safe(
