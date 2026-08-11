@@ -1,28 +1,23 @@
 {
   "allowed_path_patterns": [
-    "pyproject.toml",
-    "uv.lock",
-    "CHANGELOG.md",
-    "docs/context/Workflow.md"
+    "docs/adr/ADR-0010-validator-configuration-contract.md",
+    "src/orchestrator/agents/validator/adapters.py",
+    "tests/test_validator_v2.py"
   ],
   "allowed_operations": [
     {
-      "pattern": "pyproject.toml",
+      "pattern": "docs/adr/ADR-0010-validator-configuration-contract.md",
       "operations": ["modify"]
     },
     {
-      "pattern": "uv.lock",
+      "pattern": "src/orchestrator/agents/validator/adapters.py",
       "operations": ["modify"]
     },
     {
-      "pattern": "CHANGELOG.md",
-      "operations": ["modify"]
-    },
-    {
-      "pattern": "docs/context/Workflow.md",
+      "pattern": "tests/test_validator_v2.py",
       "operations": ["modify"]
     }
   ],
-  "max_changed_files": 4,
-  "max_changed_lines": 150
+  "max_changed_files": 3,
+  "max_changed_lines": 180
 }
