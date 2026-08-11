@@ -1,23 +1,28 @@
 {
   "allowed_path_patterns": [
-    "docs/adr/ADR-0010-validator-configuration-contract.md",
-    "src/orchestrator/agents/validator/adapters.py",
-    "tests/test_validator_v2.py"
+    "src/orchestrator/commands/ci.py",
+    "src/orchestrator/git.py",
+    "tests/test_ci_command.py",
+    "tests/test_git_safety.py"
   ],
   "allowed_operations": [
     {
-      "pattern": "docs/adr/ADR-0010-validator-configuration-contract.md",
+      "pattern": "src/orchestrator/commands/ci.py",
       "operations": ["modify"]
     },
     {
-      "pattern": "src/orchestrator/agents/validator/adapters.py",
+      "pattern": "src/orchestrator/git.py",
       "operations": ["modify"]
     },
     {
-      "pattern": "tests/test_validator_v2.py",
+      "pattern": "tests/test_ci_command.py",
+      "operations": ["modify"]
+    },
+    {
+      "pattern": "tests/test_git_safety.py",
       "operations": ["modify"]
     }
   ],
-  "max_changed_files": 3,
-  "max_changed_lines": 180
+  "max_changed_files": 4,
+  "max_changed_lines": 220
 }
