@@ -332,6 +332,56 @@ def test_v2_python_adapter_uses_private_launcher_and_isolated_mode(monkeypatch, 
 
 
 @pytest.mark.unit
+def test_v2_pytest_uses_candidate_cwd_without_collection_path(monkeypatch, tmp_path):
+    captured = []
+
+    def fake_execute(prepared, timeout):
+        captured.append(prepared)
+        return ProcessResult(return_code=0)
+
+    monkeypatch.setattr(adapters, "execute_process", fake_execute)
+    output = run_v2_validators("run-pytest-cwd", tmp_path, [_validator("tests", "pytest")], 30)
+
+    assert output.overall_passed is True
+    assert captured[0].cwd == tmp_path
+    assert captured[0].argv[1:5] == ("-I", "-B", "-m", "pytest")
+    assert str(tmp_path) not in captured[0].argv
+    assert any(argument.startswith("cache_dir=") for argument in captured[0].argv)
+
+
+@pytest.mark.unit
+def test_v2_pytest_honors_candidate_testpaths_without_workspace_mutation(tmp_path):
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    (tmp_path / "pytest.ini").write_text("[pytest]\ntestpaths = selected\n", encoding="utf-8")
+    (selected / "test_selected.py").write_text(
+        "def test_selected():\n    assert True\n", encoding="utf-8"
+    )
+    unexpected_path = tmp_path / "unexpected.txt"
+    (tmp_path / "test_outside.py").write_text(
+        "from pathlib import Path\n\n"
+        "def test_outside():\n"
+        f"    Path({str(unexpected_path)!r}).write_text('ran', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+
+    before = adapters._tree_manifest(tmp_path)
+    output = run_v2_validators(
+        "run-pytest-testpaths",
+        tmp_path,
+        [_validator("tests", "pytest", roles=[ValidatorRole.TEST])],
+        30,
+    )
+    after = adapters._tree_manifest(tmp_path)
+
+    assert output.overall_status is OverallStatus.APPROVED
+    assert before == after
+    assert output.tools[0].role_coverage == {"test": CoverageStatus.VERIFIED}
+    assert not unexpected_path.exists()
+    assert not (tmp_path / ".pytest_cache").exists()
+
+
+@pytest.mark.unit
 def test_v2_validator_scratch_cleanup_failure_is_reported(monkeypatch, tmp_path):
     class BrokenTemporaryDirectory:
         def __init__(self, **kwargs):

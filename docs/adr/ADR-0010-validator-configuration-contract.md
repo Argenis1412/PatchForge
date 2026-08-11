@@ -50,8 +50,15 @@ persisted only after cleanup is confirmed; cleanup that cannot be confirmed is
 recorded as `cleanup_failed` and is non-authorizable. This does not provide a
 hermetic sandbox or control intentionally detached processes.
 
-Standard Python adapters launch from a private cwd with Python isolated mode
-and receive the candidate root by absolute path. V2 does not add a target
+Standard Python adapters launch with Python isolated mode. `ruff` and
+`unittest` launch from a private cwd and receive the candidate root by absolute
+path. Standard `pytest` is the sole exception: it launches from the candidate
+root without a candidate collection-path argument, so pytest applies the same
+native configuration discovery, precedence, `addopts`, and `testpaths` it
+would use when invoked from that root. PatchForge retains its fixed output
+flags and external cache override for pytest, and uses Python's `-B` flag so
+isolated mode cannot write bytecode into the candidate; this equivalence is
+limited to pytest configuration selection and collection. V2 does not add a target
 checkout's `.venv` to PATH. Each declaration has external scratch storage for
 caches and temporary files; a persistent root change, including ignored or
 untracked paths, uses the existing `failed` state and stops later declarations.

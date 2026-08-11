@@ -25,7 +25,7 @@ from .process import ProcessResult, build_isolated_environment, execute_process,
 
 _STANDARD_COMMANDS: dict[str, list[str]] = {
     "ruff": [sys.executable, "-I", "-m", "ruff", "check"],
-    "pytest": [sys.executable, "-I", "-m", "pytest"],
+    "pytest": [sys.executable, "-I", "-B", "-m", "pytest"],
     "tsc": ["npx", "tsc", "--noEmit"],
     "flake8": ["flake8", "."],
     "mypy": ["mypy", "."],
@@ -42,9 +42,10 @@ def resolve_validator_command(
 ) -> list[str] | None:
     """Resolve one declaration without executing it.
 
-    Standard Python adapters launch from a private cwd and receive the target
-    as an absolute argument, preventing a candidate-root module from becoming
-    the adapter implementation.
+    Standard Python adapters launch in isolated mode. Ruff and unittest use a
+    private cwd and receive the target as an absolute argument. Pytest is the
+    sole exception: it runs from the candidate root without a collection-path
+    argument so its native configuration discovery and ``testpaths`` apply.
     """
     command = declaration.command or _STANDARD_COMMANDS.get(declaration.adapter)
     if command is None:
@@ -57,7 +58,7 @@ def resolve_validator_command(
         if scratch_dir is not None:
             command.extend(["--cache-dir", str(scratch_dir / "ruff-cache")])
     elif declaration.adapter == "pytest":
-        command.extend([str(project_root), "--tb=short", "-q"])
+        command.extend(["--tb=short", "-q"])
         if scratch_dir is not None:
             command.extend(["-o", f"cache_dir={scratch_dir / 'pytest-cache'}"])
     elif declaration.adapter == "unittest":
@@ -90,11 +91,13 @@ def _raw_result(declaration: ValidatorConfig, project_root: Path, timeout: int) 
             command = resolve_validator_command(declaration, project_root, scratch)
             if command is None:
                 return ProcessResult(return_code=None, unavailable=True)
-            private_cwd = (
-                scratch
-                if declaration.adapter in _PYTHON_STANDARD_ADAPTERS and declaration.command is None
-                else project_root
-            )
+            private_cwd = project_root
+            if (
+                declaration.adapter in _PYTHON_STANDARD_ADAPTERS
+                and declaration.command is None
+                and declaration.adapter != "pytest"
+            ):
+                private_cwd = scratch
             return execute_process(
                 prepare_process(
                     command, private_cwd, environment=build_isolated_environment(scratch)
