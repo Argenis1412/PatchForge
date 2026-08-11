@@ -549,6 +549,89 @@ def test_export_default_preserves_all_fields(workspace_mgr: WorkspaceManager, tm
         assert doc["provider_config"] == _REDACT_FIELD_VALUES["provider_config"]
 
 
+def test_full_export_declares_complete_v2_profile(workspace_mgr: WorkspaceManager, tmp_path: Path):
+    import json
+
+    run_dir = _make_run(workspace_mgr, status="applied")
+    (run_dir / "events.jsonl").write_text('{"target": "/private/project"}\n', encoding="utf-8")
+
+    bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path)
+    members = _read_tarball(bundle)
+    manifest = json.loads(members[f"audit-{RUN_ID}/manifest.json"])
+
+    assert manifest["manifest_schema_version"] == 2
+    assert manifest["export_profile"] == "full"
+    assert manifest["omitted_artifacts"] == []
+    assert f"audit-{RUN_ID}/artifacts/events.jsonl" in members
+
+
+def test_redacted_export_declares_omitted_events(workspace_mgr: WorkspaceManager, tmp_path: Path):
+    import json
+
+    run_dir = _make_run(workspace_mgr, status="applied")
+    (run_dir / "events.jsonl").write_text(
+        '{"target": "/private/project", "token": "must-not-export"}\n', encoding="utf-8"
+    )
+
+    bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path, redact=True)
+    members = _read_tarball(bundle)
+    manifest = json.loads(members[f"audit-{RUN_ID}/manifest.json"])
+
+    assert manifest["manifest_schema_version"] == 2
+    assert manifest["export_profile"] == "redacted"
+    assert manifest["omitted_artifacts"] == ["events.jsonl"]
+    assert f"audit-{RUN_ID}/artifacts/events.jsonl" not in members
+    assert "must-not-export" not in b"".join(members.values()).decode("utf-8", errors="ignore")
+    verify_audit(bundle)
+
+
+def test_verify_accepts_legacy_v1_full_bundle(workspace_mgr: WorkspaceManager, tmp_path: Path):
+    import io
+    import json
+
+    _make_run(workspace_mgr, status="applied")
+    bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path)
+    members = _read_tarball(bundle)
+    manifest_name = f"audit-{RUN_ID}/manifest.json"
+    manifest = json.loads(members[manifest_name])
+    manifest["manifest_schema_version"] = 1
+    del manifest["export_profile"]
+    del manifest["omitted_artifacts"]
+    members[manifest_name] = json.dumps(manifest).encode("utf-8")
+
+    with tarfile.open(bundle, mode="w:gz") as tar:
+        for name, data in members.items():
+            info = tarfile.TarInfo(name=name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+
+    verify_audit(bundle)
+
+
+def test_verify_rejects_incoherent_v2_profile(workspace_mgr: WorkspaceManager, tmp_path: Path):
+    import io
+    import json
+
+    _make_run(workspace_mgr, status="applied")
+    bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path)
+    members = _read_tarball(bundle)
+    manifest_name = f"audit-{RUN_ID}/manifest.json"
+    manifest = json.loads(members[manifest_name])
+    manifest["export_profile"] = "full"
+    manifest["omitted_artifacts"] = ["events.jsonl"]
+    members[manifest_name] = json.dumps(manifest).encode("utf-8")
+
+    with tarfile.open(bundle, mode="w:gz") as tar:
+        for name, data in members.items():
+            info = tarfile.TarInfo(name=name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+
+    with pytest.raises(typer.Exit) as exc_info:
+        verify_audit(bundle)
+    assert _exit_code(exc_info) == 5
+
+
 def test_redacted_bundle_verifies(workspace_mgr: WorkspaceManager, tmp_path: Path):
     """verify-audit must pass on a --redact bundle: run.json hash matches its redacted bytes."""
     _make_run(
