@@ -485,6 +485,8 @@ def _parse_manifest(manifest_bytes: bytes) -> AuditManifest | LegacyAuditManifes
         raise ValueError("manifest must be a JSON object")
 
     manifest_version = payload.get("manifest_schema_version")
+    if type(manifest_version) is not int:
+        raise ValueError("manifest_schema_version must be an integer")
     if manifest_version == LEGACY_MANIFEST_SCHEMA_VERSION:
         return LegacyAuditManifest.model_validate(payload)
     if manifest_version == MANIFEST_SCHEMA_VERSION:

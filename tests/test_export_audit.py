@@ -740,6 +740,36 @@ def test_verify_rejects_unknown_manifest_schema_version(
     assert _exit_code(exc_info) == 7
 
 
+@pytest.mark.parametrize("invalid_version", [None, "2", True])
+def test_verify_rejects_missing_or_non_integer_manifest_schema_version(
+    workspace_mgr: WorkspaceManager, tmp_path: Path, invalid_version: object
+):
+    import io
+    import json
+
+    _make_run(workspace_mgr, status="applied")
+    bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path)
+    top_level = f"audit-{RUN_ID}"
+    members = _read_tarball(bundle)
+    manifest = json.loads(members[f"{top_level}/manifest.json"])
+    if invalid_version is None:
+        del manifest["manifest_schema_version"]
+    else:
+        manifest["manifest_schema_version"] = invalid_version
+    members[f"{top_level}/manifest.json"] = json.dumps(manifest).encode("utf-8")
+
+    with tarfile.open(bundle, mode="w:gz") as tar:
+        for name, data in members.items():
+            info = tarfile.TarInfo(name=name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+
+    with pytest.raises(typer.Exit) as exc_info:
+        verify_audit(bundle)
+
+    assert _exit_code(exc_info) == 5
+
+
 def test_manifest_extra_field_rejected():
     from pydantic import ValidationError
 
