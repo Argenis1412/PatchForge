@@ -16,6 +16,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import subprocess
 import tarfile
 import tempfile
@@ -23,7 +24,7 @@ import uuid
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Optional
+from typing import Collection, Optional
 
 import typer
 from rich.console import Console
@@ -48,6 +49,7 @@ _MAX_MEMBER_COUNT = 100_000
 _RUN_JSON_NAME = "run.json"
 _EVENTS_JSONL_NAME = "events.jsonl"
 _REDACTED_SENTINEL = "[REDACTED]"
+_FINGERPRINT_PATTERN = re.compile(r"[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64}")
 
 
 class UnsupportedManifestVersionError(ValueError):
@@ -356,7 +358,11 @@ def _add_tar_bytes(tar: tarfile.TarFile, arcname: str, data: bytes) -> None:
     tar.addfile(info, io.BytesIO(data))
 
 
-def verify_audit(bundle_path: Path, require_signature: bool = False) -> None:
+def verify_audit(
+    bundle_path: Path,
+    require_signature: bool = False,
+    trusted_fingerprints: Collection[str] | None = None,
+) -> None:
     """Verify a bundle's hashes, artifact-set completeness, and optional signature.
 
     Reads the tarball entirely in memory — never calls tarfile.extractall().
@@ -367,7 +373,12 @@ def verify_audit(bundle_path: Path, require_signature: bool = False) -> None:
         raise typer.Exit(code=1)
 
     try:
-        _verify_audit_open(bundle_path, require_signature)
+        trusted_signers = _normalize_trusted_fingerprints(trusted_fingerprints)
+        _verify_audit_open(
+            bundle_path,
+            require_signature or trusted_signers is not None,
+            trusted_signers,
+        )
     except tarfile.TarError as exc:
         # A corrupted/non-tar bundle is a verification failure (same bucket as
         # tampered content), not a "not found" condition — code 5, not 1.
@@ -377,7 +388,35 @@ def verify_audit(bundle_path: Path, require_signature: bool = False) -> None:
     console.print(f"[bold green]Bundle {bundle_path} verified successfully[/bold green]")
 
 
-def _verify_audit_open(bundle_path: Path, require_signature: bool) -> None:
+def _normalize_trusted_fingerprints(
+    trusted_fingerprints: Collection[str] | None,
+) -> frozenset[str] | None:
+    """Validate an invocation-local primary-fingerprint allowlist."""
+    if trusted_fingerprints is None:
+        return None
+
+    normalized: set[str] = set()
+    for fingerprint in trusted_fingerprints:
+        if not isinstance(fingerprint, str) or _FINGERPRINT_PATTERN.fullmatch(fingerprint) is None:
+            console.print(f"[bold red]Invalid trusted fingerprint: {fingerprint!r}[/bold red]")
+            raise typer.Exit(code=6)
+        canonical = fingerprint.upper()
+        if canonical in normalized:
+            console.print(f"[bold red]Duplicate trusted fingerprint: {fingerprint}[/bold red]")
+            raise typer.Exit(code=6)
+        normalized.add(canonical)
+
+    if not normalized:
+        console.print("[bold red]Trusted fingerprint allowlist must not be empty[/bold red]")
+        raise typer.Exit(code=6)
+    return frozenset(normalized)
+
+
+def _verify_audit_open(
+    bundle_path: Path,
+    require_signature: bool,
+    trusted_fingerprints: frozenset[str] | None,
+) -> None:
     with tarfile.open(bundle_path, mode="r:gz") as tar:
         raw_members = tar.getmembers()
         if len(raw_members) > _MAX_MEMBER_COUNT:
@@ -465,7 +504,7 @@ def _verify_audit_open(bundle_path: Path, require_signature: bool) -> None:
         signature_name = f"{top_level}/manifest.json.asc"
         if signature_name in members:
             signature_bytes = _bounded_read(tar, members[signature_name])
-            _verify_gpg_signature(manifest_bytes, signature_bytes)
+            _verify_gpg_signature(manifest_bytes, signature_bytes, trusted_fingerprints)
         elif require_signature:
             console.print(
                 "[bold red]--require-signature was set but no manifest.json.asc "
@@ -543,21 +582,43 @@ def _bounded_hash(tar: tarfile.TarFile, member: tarfile.TarInfo) -> str:
     return digest.hexdigest()
 
 
-def _verify_gpg_signature(manifest_bytes: bytes, signature_bytes: bytes) -> None:
-    """Verify cryptographic validity against the local GPG trust store.
+def _verified_primary_fingerprints(status_output: bytes) -> tuple[str, ...]:
+    """Extract primary fingerprints from GPG's machine-readable ``VALIDSIG`` records."""
+    fingerprints: list[str] = []
+    for raw_line in status_output.splitlines():
+        if not raw_line.startswith(b"[GNUPG:] "):
+            continue
+        fields = raw_line[len(b"[GNUPG:] ") :].split()
+        if not fields or fields[0] != b"VALIDSIG":
+            continue
+        if len(fields) < 11:
+            raise ValueError("malformed GPG VALIDSIG status record")
+        try:
+            signing_fingerprint = fields[1].decode("ascii")
+            primary_fingerprint = fields[10].decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise ValueError("non-ASCII GPG VALIDSIG status record") from exc
+        if (
+            _FINGERPRINT_PATTERN.fullmatch(signing_fingerprint) is None
+            or _FINGERPRINT_PATTERN.fullmatch(primary_fingerprint) is None
+        ):
+            raise ValueError("invalid fingerprint in GPG VALIDSIG status record")
+        fingerprints.append(primary_fingerprint.upper())
+    return tuple(fingerprints)
 
-    Does not enforce a signer allowlist — trust in *who* signed is delegated
-    to the operator's keyring, the same model the project already uses for
-    GPG-verified commits (see CONTEXT.md Invariant #6). An allowlist would be
-    a new authorization feature (config surface, storage format) outside this
-    issue's scope; not implemented here.
-    """
+
+def _verify_gpg_signature(
+    manifest_bytes: bytes,
+    signature_bytes: bytes,
+    trusted_fingerprints: frozenset[str] | None = None,
+) -> None:
+    """Verify cryptographic validity and, when requested, signer authorization."""
     with tempfile.NamedTemporaryFile(suffix=".asc", delete=False) as sig_file:
         sig_file.write(signature_bytes)
         sig_path = sig_file.name
     try:
         result = subprocess.run(
-            ["gpg", "--batch", "--verify", sig_path, "-"],
+            ["gpg", "--batch", "--status-fd", "1", "--verify", sig_path, "-"],
             input=manifest_bytes,
             capture_output=True,
         )
@@ -565,6 +626,22 @@ def _verify_gpg_signature(manifest_bytes: bytes, signature_bytes: bytes) -> None
             stderr = result.stderr.decode("utf-8", errors="replace").strip()
             console.print(f"[bold red]GPG signature verification failed: {stderr}[/bold red]")
             raise typer.Exit(code=6)
+        if trusted_fingerprints is not None:
+            try:
+                primary_fingerprints = _verified_primary_fingerprints(result.stdout)
+            except ValueError as exc:
+                console.print(f"[bold red]{exc}[/bold red]")
+                raise typer.Exit(code=6) from exc
+            if not primary_fingerprints:
+                console.print("[bold red]GPG verification produced no VALIDSIG record[/bold red]")
+                raise typer.Exit(code=6)
+            unauthorized = sorted(set(primary_fingerprints) - trusted_fingerprints)
+            if unauthorized:
+                console.print(
+                    "[bold red]GPG signature was made by an unauthorized primary fingerprint: "
+                    f"{', '.join(unauthorized)}[/bold red]"
+                )
+                raise typer.Exit(code=6)
     except OSError as exc:
         console.print(f"[bold red]Cannot invoke gpg: {exc}[/bold red]")
         raise typer.Exit(code=6) from exc
