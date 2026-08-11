@@ -1,21 +1,21 @@
 {
   "allowed_path_patterns": [
-    "docs/adr/ADR-0016-audit-bundle-redaction-profile.md",
-    "src/orchestrator/schemas/audit_manifest.py",
+    "docs/adr/ADR-0017-audit-signature-signer-authorization.md",
     "src/orchestrator/commands/export_audit.py",
+    "src/orchestrator/main.py",
     "tests/test_export_audit.py"
   ],
   "allowed_operations": [
     {
-      "pattern": "docs/adr/ADR-0016-audit-bundle-redaction-profile.md",
+      "pattern": "docs/adr/ADR-0017-audit-signature-signer-authorization.md",
       "operations": ["add"]
     },
     {
-      "pattern": "src/orchestrator/schemas/audit_manifest.py",
+      "pattern": "src/orchestrator/commands/export_audit.py",
       "operations": ["modify"]
     },
     {
-      "pattern": "src/orchestrator/commands/export_audit.py",
+      "pattern": "src/orchestrator/main.py",
       "operations": ["modify"]
     },
     {
@@ -24,5 +24,5 @@
     }
   ],
   "max_changed_files": 4,
-  "max_changed_lines": 260
+  "max_changed_lines": 450
 }
