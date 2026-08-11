@@ -897,6 +897,155 @@ def test_gpg_mutated_signature_fails_verify(workspace_mgr: WorkspaceManager, tmp
     assert _exit_code(exc_info) == 6
 
 
+_PRIMARY_FINGERPRINT = "A" * 40
+_SUBKEY_FINGERPRINT = "B" * 40
+_OTHER_PRIMARY_FINGERPRINT = "C" * 40
+
+
+def _validsig_status(signing_fingerprint: str, primary_fingerprint: str) -> bytes:
+    return (
+        f"[GNUPG:] VALIDSIG {signing_fingerprint} 20260811 0 0 4 0 1 10 00 {primary_fingerprint}\n"
+    ).encode("ascii")
+
+
+def test_gpg_trusted_primary_authorizes_subkey(monkeypatch: pytest.MonkeyPatch):
+    import orchestrator.commands.export_audit as module
+
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=_validsig_status(_SUBKEY_FINGERPRINT, _PRIMARY_FINGERPRINT),
+            stderr=b"",
+        ),
+    )
+
+    module._verify_gpg_signature(b"manifest", b"signature", frozenset({_PRIMARY_FINGERPRINT}))
+
+
+def test_gpg_rejects_any_unauthorized_valid_signature(monkeypatch: pytest.MonkeyPatch):
+    import orchestrator.commands.export_audit as module
+
+    statuses = _validsig_status(_SUBKEY_FINGERPRINT, _PRIMARY_FINGERPRINT) + _validsig_status(
+        _OTHER_PRIMARY_FINGERPRINT, _OTHER_PRIMARY_FINGERPRINT
+    )
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout=statuses, stderr=b""),
+    )
+
+    with pytest.raises(typer.Exit) as exc_info:
+        module._verify_gpg_signature(b"manifest", b"signature", frozenset({_PRIMARY_FINGERPRINT}))
+    assert _exit_code(exc_info) == 6
+
+
+@pytest.mark.parametrize(
+    "fingerprints",
+    [["bad"], [" "], [_PRIMARY_FINGERPRINT, _PRIMARY_FINGERPRINT.lower()], []],
+)
+def test_trusted_fingerprint_allowlist_rejects_invalid_values(
+    workspace_mgr: WorkspaceManager, tmp_path: Path, fingerprints: list[str]
+):
+    _make_run(workspace_mgr, status="applied")
+    bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        verify_audit(bundle, trusted_fingerprints=fingerprints)
+    assert _exit_code(exc_info) == 6
+
+
+def test_trusted_fingerprint_requires_signature(workspace_mgr: WorkspaceManager, tmp_path: Path):
+    _make_run(workspace_mgr, status="applied")
+    bundle = export_audit(RUN_ID, workspace=workspace_mgr.root, out_dir=tmp_path)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        verify_audit(bundle, trusted_fingerprints=[_PRIMARY_FINGERPRINT])
+    assert _exit_code(exc_info) == 6
+
+
+def test_gpg_nonzero_exit_never_authorizes(monkeypatch: pytest.MonkeyPatch):
+    import orchestrator.commands.export_audit as module
+
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(
+            cmd,
+            1,
+            stdout=_validsig_status(_SUBKEY_FINGERPRINT, _PRIMARY_FINGERPRINT)
+            + b"[GNUPG:] KEYEXPIRED 0\n",
+            stderr=b"gpg: key expired",
+        ),
+    )
+
+    with pytest.raises(typer.Exit) as exc_info:
+        module._verify_gpg_signature(b"manifest", b"signature", frozenset({_PRIMARY_FINGERPRINT}))
+    assert _exit_code(exc_info) == 6
+
+
+def test_gpg_lifecycle_status_is_informational_after_success(monkeypatch: pytest.MonkeyPatch):
+    import orchestrator.commands.export_audit as module
+
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=_validsig_status(_SUBKEY_FINGERPRINT, _PRIMARY_FINGERPRINT)
+            + b"[GNUPG:] KEYEXPIRED 0\n[GNUPG:] TRUST_UNDEFINED 0 pgp\n",
+            stderr=b"",
+        ),
+    )
+
+    module._verify_gpg_signature(b"manifest", b"signature", frozenset({_PRIMARY_FINGERPRINT}))
+
+
+@pytest.mark.parametrize("status", [b"", b"[GNUPG:] VALIDSIG incomplete\n"])
+def test_gpg_trusted_verification_requires_well_formed_validsig(
+    monkeypatch: pytest.MonkeyPatch, status: bytes
+):
+    import orchestrator.commands.export_audit as module
+
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout=status, stderr=b""),
+    )
+
+    with pytest.raises(typer.Exit) as exc_info:
+        module._verify_gpg_signature(b"manifest", b"signature", frozenset({_PRIMARY_FINGERPRINT}))
+    assert _exit_code(exc_info) == 6
+
+
+def test_cli_verify_audit_trusted_fingerprint_passthrough(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    import orchestrator.commands.export_audit as module
+
+    captured: dict[str, object] = {}
+
+    def _verify(**kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(module, "verify_audit", _verify)
+    result = cli_runner.invoke(
+        app,
+        [
+            "verify-audit",
+            str(tmp_path / "bundle.tar.gz"),
+            "--trusted-fingerprint",
+            _PRIMARY_FINGERPRINT.lower(),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["trusted_fingerprints"] == [_PRIMARY_FINGERPRINT.lower()]
+
+
 def test_package_version_fallback(monkeypatch: pytest.MonkeyPatch):
     from importlib.metadata import PackageNotFoundError
 

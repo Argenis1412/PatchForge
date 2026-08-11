@@ -432,11 +432,20 @@ def verify_audit_command(
         "--require-signature",
         help="Fail if the bundle has no GPG signature (policy decision, not a bundle property)",
     ),
+    trusted_fingerprints: list[str] | None = typer.Option(
+        None,
+        "--trusted-fingerprint",
+        help="Authorized primary GPG fingerprint; repeat for multiple signers",
+    ),
 ) -> None:
     """Verify an audit bundle's artifact hashes, completeness, and optional signature."""
     from orchestrator.commands.export_audit import verify_audit as execute_verify_audit
 
-    execute_verify_audit(bundle_path=bundle, require_signature=require_signature)
+    execute_verify_audit(
+        bundle_path=bundle,
+        require_signature=require_signature,
+        trusted_fingerprints=trusted_fingerprints,
+    )
 
 
 if __name__ == "__main__":
