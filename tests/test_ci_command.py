@@ -675,7 +675,7 @@ class TestCiExecute:
                 return_value=val_output,
             ),
             patch(
-                "orchestrator.git.create_controlled_branch",
+                "orchestrator.git.create_branch_from_verified_base",
                 return_value=mock_git_ok,
             ) as mock_branch,
             patch(
@@ -751,7 +751,7 @@ class TestCiExecute:
                 "orchestrator.validation_workspace.run_validation_in_copy",
                 return_value=val_output,
             ),
-            patch("orchestrator.git.create_controlled_branch", return_value=mock_git_ok),
+            patch("orchestrator.git.create_branch_from_verified_base", return_value=mock_git_ok),
             patch("orchestrator.git.apply_patch", return_value=mock_git_ok),
             patch("subprocess.run", return_value=mock_git_ok),
         ):
@@ -823,7 +823,7 @@ class TestCiExecute:
                 return_value=val_output,
             ),
             patch(
-                "orchestrator.git.create_controlled_branch",
+                "orchestrator.git.create_branch_from_verified_base",
                 return_value=mock_git_ok,
             ),
             patch(
@@ -994,7 +994,7 @@ class TestCiExecute:
                 "orchestrator.validation_workspace.run_validation_in_copy",
                 return_value=val_output,
             ),
-            patch("orchestrator.git.create_controlled_branch", return_value=mock_git_ok),
+            patch("orchestrator.git.create_branch_from_verified_base", return_value=mock_git_ok),
             patch("orchestrator.git.apply_patch", return_value=mock_git_ok),
             patch("orchestrator.agents.executor.rollback_to_commit"),
             patch("subprocess.run", side_effect=fake_run),
@@ -1218,9 +1218,11 @@ class TestCiExecute:
                 return_value=val_output,
             ),
             patch(
-                "orchestrator.git.create_controlled_branch",
+                "orchestrator.git.create_branch_from_verified_base",
                 return_value=mock_git_fail,
-            ),
+            ) as mock_branch,
+            patch("orchestrator.git.apply_patch") as mock_apply,
+            patch("orchestrator.agents.executor.rollback_to_commit") as mock_rollback,
         ):
             mock_val_ws.return_value.__enter__ = MagicMock(
                 return_value=MagicMock(
@@ -1239,6 +1241,9 @@ class TestCiExecute:
         assert result.status == "apply_failed"
         assert "Branch creation failed" in (result.error or "")
         assert result.validation_passed is True
+        assert mock_branch.call_args.args[2:] == ("main", "a" * 40)
+        mock_apply.assert_not_called()
+        mock_rollback.assert_not_called()
 
     def test_apply_patch_failure_with_rollback(self, ci_repo):
         from orchestrator.commands.ci import execute
@@ -1285,7 +1290,7 @@ class TestCiExecute:
                 "orchestrator.validation_workspace.run_validation_in_copy",
                 return_value=val_output,
             ),
-            patch("orchestrator.git.create_controlled_branch", return_value=mock_git_ok),
+            patch("orchestrator.git.create_branch_from_verified_base", return_value=mock_git_ok),
             patch("orchestrator.git.apply_patch", return_value=mock_patch_fail),
             patch("orchestrator.agents.executor.rollback_to_commit") as mock_rollback,
         ):
@@ -1306,7 +1311,7 @@ class TestCiExecute:
         assert result.status == "apply_failed"
         assert "Patch apply failed" in (result.error or "")
         assert result.validation_passed is True
-        mock_rollback.assert_called_once()
+        mock_rollback.assert_called_once_with(repo, "a" * 40)
 
     def test_empty_patch_fails(self, ci_repo):
         from orchestrator.commands.ci import execute

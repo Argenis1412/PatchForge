@@ -6,17 +6,20 @@ import pytest
 from orchestrator.git import (
     apply_patch,
     check_patch,
+    create_branch_from_verified_base,
     create_controlled_branch,
     current_branch,
     current_head,
     force_reset_apply,
     is_git_repo,
     is_working_tree_clean,
+    promote_candidate,
     repository_state,
     resolve_git_root,
     revert_apply,
     working_tree_status,
 )
+from orchestrator.schemas.git import GitCommandResult
 
 
 def _init_git_repo(path: Path) -> None:
@@ -122,6 +125,77 @@ def test_create_controlled_branch(git_repo: Path):
     result = create_controlled_branch(git_repo, "test-branch")
     assert result.return_code == 0
     assert current_branch(git_repo) == "test-branch"
+
+
+def test_create_branch_from_verified_base_anchors_output_branch(git_repo: Path):
+    source_branch = current_branch(git_repo)
+    base_commit = current_head(git_repo)
+
+    result = create_branch_from_verified_base(
+        git_repo, "patchforge/test", source_branch, base_commit
+    )
+
+    assert result.return_code == 0
+    assert current_branch(git_repo) == "patchforge/test"
+    assert current_head(git_repo) == base_commit
+
+
+def test_create_branch_from_verified_base_rejects_advanced_source_ref(git_repo: Path):
+    source_branch = current_branch(git_repo)
+    base_commit = current_head(git_repo)
+    (git_repo / "README.md").write_text("Advanced\n")
+    subprocess.run(["git", "add", "README.md"], cwd=git_repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "advance source"], cwd=git_repo, check=True, capture_output=True
+    )
+
+    result = create_branch_from_verified_base(
+        git_repo, "patchforge/test", source_branch, base_commit
+    )
+
+    assert result.return_code != 0
+    branch = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "refs/heads/patchforge/test"],
+        cwd=git_repo,
+        capture_output=True,
+    )
+    assert branch.returncode != 0
+
+
+def test_create_branch_from_verified_base_accepts_utf8_refs(git_repo: Path):
+    source_branch = "source/café"
+    subprocess.run(
+        ["git", "checkout", "-b", source_branch], cwd=git_repo, check=True, capture_output=True
+    )
+    base_commit = current_head(git_repo)
+
+    result = create_branch_from_verified_base(
+        git_repo, "patchforge/tést", source_branch, base_commit
+    )
+
+    assert isinstance(result, GitCommandResult)
+    assert result.return_code == 0
+    assert current_head(git_repo) == base_commit
+
+
+def test_promote_candidate_accepts_utf8_refs(git_repo: Path):
+    source_branch = "source/café"
+    subprocess.run(
+        ["git", "checkout", "-b", source_branch], cwd=git_repo, check=True, capture_output=True
+    )
+    base_commit = current_head(git_repo)
+
+    result = promote_candidate(
+        git_repo,
+        base_ref=f"refs/heads/{source_branch}",
+        base_commit=base_commit,
+        candidate_ref="refs/heads/patchforge/tést",
+        candidate_commit=base_commit,
+        receipt_ref="refs/patchforge/promotions/tést",
+    )
+
+    assert isinstance(result, GitCommandResult)
+    assert result.return_code == 0
 
 
 def test_apply_patch(git_repo: Path):
