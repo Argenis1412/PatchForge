@@ -1,28 +1,28 @@
 {
   "allowed_path_patterns": [
-    "src/orchestrator/commands/ci.py",
-    "src/orchestrator/git.py",
-    "tests/test_ci_command.py",
-    "tests/test_git_safety.py"
+    "docs/adr/ADR-0016-audit-bundle-redaction-profile.md",
+    "src/orchestrator/schemas/audit_manifest.py",
+    "src/orchestrator/commands/export_audit.py",
+    "tests/test_export_audit.py"
   ],
   "allowed_operations": [
     {
-      "pattern": "src/orchestrator/commands/ci.py",
+      "pattern": "docs/adr/ADR-0016-audit-bundle-redaction-profile.md",
+      "operations": ["add"]
+    },
+    {
+      "pattern": "src/orchestrator/schemas/audit_manifest.py",
       "operations": ["modify"]
     },
     {
-      "pattern": "src/orchestrator/git.py",
+      "pattern": "src/orchestrator/commands/export_audit.py",
       "operations": ["modify"]
     },
     {
-      "pattern": "tests/test_ci_command.py",
-      "operations": ["modify"]
-    },
-    {
-      "pattern": "tests/test_git_safety.py",
+      "pattern": "tests/test_export_audit.py",
       "operations": ["modify"]
     }
   ],
   "max_changed_files": 4,
-  "max_changed_lines": 220
+  "max_changed_lines": 260
 }

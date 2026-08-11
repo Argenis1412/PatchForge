@@ -29,7 +29,13 @@ import typer
 from rich.console import Console
 
 from orchestrator.schemas.artifacts import RunMetadata
-from orchestrator.schemas.audit_manifest import MANIFEST_SCHEMA_VERSION, ArtifactHash, AuditManifest
+from orchestrator.schemas.audit_manifest import (
+    LEGACY_MANIFEST_SCHEMA_VERSION,
+    MANIFEST_SCHEMA_VERSION,
+    ArtifactHash,
+    AuditManifest,
+    LegacyAuditManifest,
+)
 from orchestrator.storage.lock import acquire_repo_lock, release_repo_lock
 from orchestrator.workspace import WorkspaceManager
 
@@ -40,7 +46,13 @@ _CHUNK_SIZE = 65536
 _MAX_MEMBER_SIZE = 500 * 1024 * 1024  # 500 MiB per tar member
 _MAX_MEMBER_COUNT = 100_000
 _RUN_JSON_NAME = "run.json"
+_EVENTS_JSONL_NAME = "events.jsonl"
 _REDACTED_SENTINEL = "[REDACTED]"
+
+
+class UnsupportedManifestVersionError(ValueError):
+    """Raised when a manifest is not one of the explicitly supported versions."""
+
 
 # Fields that leak internal filesystem layout, secret references, or provider
 # configuration. Redacted only when --redact is passed; the default export
@@ -239,6 +251,15 @@ def export_audit(
             )
             raise typer.Exit(code=3)
 
+        export_profile = "redacted" if redact else "full"
+        omitted_artifacts = [_EVENTS_JSONL_NAME] if redact else []
+        if redact:
+            run_files = [
+                file_path
+                for file_path in run_files
+                if file_path.relative_to(run_dir).as_posix() != _EVENTS_JSONL_NAME
+            ]
+
         artifact_hashes: list[ArtifactHash] = []
         artifact_bytes: dict[str, bytes] = {}
         for file_path in run_files:
@@ -282,6 +303,8 @@ def export_audit(
         commit_anchor=run_metadata.base_commit,
         artifacts=artifact_hashes,
         run_metadata=metadata_dump,
+        export_profile=export_profile,
+        omitted_artifacts=omitted_artifacts,
     )
     manifest_bytes = manifest.model_dump_json(indent=2).encode("utf-8")
 
@@ -404,17 +427,15 @@ def _verify_audit_open(bundle_path: Path, require_signature: bool) -> None:
 
         manifest_bytes = _bounded_read(tar, members[manifest_name])
         try:
-            manifest = AuditManifest.model_validate_json(manifest_bytes)
+            manifest = _parse_manifest(manifest_bytes)
+        except UnsupportedManifestVersionError as exc:
+            console.print(f"[bold red]{exc}[/bold red]")
+            raise typer.Exit(code=7) from exc
         except Exception as exc:
             console.print(f"[bold red]Invalid manifest.json: {exc}[/bold red]")
             raise typer.Exit(code=5) from exc
 
-        if manifest.manifest_schema_version != MANIFEST_SCHEMA_VERSION:
-            console.print(
-                f"[bold red]Unrecognized manifest_schema_version="
-                f"{manifest.manifest_schema_version}[/bold red]"
-            )
-            raise typer.Exit(code=7)
+        _validate_manifest_profile(manifest)
 
         artifacts_prefix = f"{top_level}/artifacts/"
         present_paths = {
@@ -451,6 +472,45 @@ def _verify_audit_open(bundle_path: Path, require_signature: bool) -> None:
                 "is present in the bundle[/bold red]"
             )
             raise typer.Exit(code=6)
+
+
+def _parse_manifest(manifest_bytes: bytes) -> AuditManifest | LegacyAuditManifest:
+    """Dispatch audit manifests by version before interpreting their fields."""
+    try:
+        payload = json.loads(manifest_bytes)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("manifest is not valid JSON") from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError("manifest must be a JSON object")
+
+    manifest_version = payload.get("manifest_schema_version")
+    if type(manifest_version) is not int:
+        raise ValueError("manifest_schema_version must be an integer")
+    if manifest_version == LEGACY_MANIFEST_SCHEMA_VERSION:
+        return LegacyAuditManifest.model_validate(payload)
+    if manifest_version == MANIFEST_SCHEMA_VERSION:
+        return AuditManifest.model_validate(payload)
+    raise UnsupportedManifestVersionError(
+        f"Unrecognized manifest_schema_version={manifest_version!r}"
+    )
+
+
+def _validate_manifest_profile(manifest: AuditManifest | LegacyAuditManifest) -> None:
+    """Reject v2 profile/artifact combinations that cannot be policy-complete."""
+    if isinstance(manifest, LegacyAuditManifest):
+        return
+
+    declared_paths = {artifact.path for artifact in manifest.artifacts}
+    omissions = manifest.omitted_artifacts
+    if manifest.export_profile == "full":
+        valid = not omissions
+    else:
+        valid = omissions == [_EVENTS_JSONL_NAME] and _EVENTS_JSONL_NAME not in declared_paths
+
+    if not valid:
+        console.print("[bold red]Invalid audit manifest export profile or omissions[/bold red]")
+        raise typer.Exit(code=5)
 
 
 def _bounded_read(tar: tarfile.TarFile, member: tarfile.TarInfo) -> bytes:
