@@ -275,7 +275,9 @@ def create_branch_from_verified_base(
             stderr=checked_out.stderr,
         )
     except FileNotFoundError as exc:
-        return GitCommandResult(return_code=127, stdout="", stderr=f"git executable not found: {exc}")
+        return GitCommandResult(
+            return_code=127, stdout="", stderr=f"git executable not found: {exc}"
+        )
     except subprocess.TimeoutExpired as exc:
         return GitCommandResult(return_code=124, stdout="", stderr=f"git command timed out: {exc}")
 

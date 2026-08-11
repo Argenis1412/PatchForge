@@ -714,7 +714,7 @@ def execute(
         from orchestrator.agents.executor import rollback_to_commit
 
         try:
-            rollback_to_commit(target_path, pre_apply_head)
+            rollback_to_commit(target_path, run_metadata.base_commit)
             return True
         except Exception:
             return False
