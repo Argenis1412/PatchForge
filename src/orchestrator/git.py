@@ -243,7 +243,7 @@ def create_branch_from_verified_base(
             "commit",
             "",
         ]
-    ).encode("ascii")
+    ).encode("utf-8")
     try:
         created = subprocess.run(
             ["git", "-C", str(repo_root), "update-ref", "--stdin"],
@@ -422,7 +422,7 @@ def promote_candidate(
             "commit",
             "",
         ]
-    ).encode("ascii")
+    ).encode("utf-8")
     try:
         res = subprocess.run(
             ["git", "-C", str(repo_root), "update-ref", "--stdin"],

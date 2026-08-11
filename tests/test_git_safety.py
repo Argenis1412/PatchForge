@@ -13,6 +13,7 @@ from orchestrator.git import (
     force_reset_apply,
     is_git_repo,
     is_working_tree_clean,
+    promote_candidate,
     repository_state,
     resolve_git_root,
     revert_apply,
@@ -158,6 +159,40 @@ def test_create_branch_from_verified_base_rejects_advanced_source_ref(git_repo: 
         capture_output=True,
     )
     assert branch.returncode != 0
+
+
+def test_create_branch_from_verified_base_accepts_utf8_refs(git_repo: Path):
+    source_branch = "source/café"
+    subprocess.run(
+        ["git", "checkout", "-b", source_branch], cwd=git_repo, check=True, capture_output=True
+    )
+    base_commit = current_head(git_repo)
+
+    result = create_branch_from_verified_base(
+        git_repo, "patchforge/tést", source_branch, base_commit
+    )
+
+    assert result.return_code == 0
+    assert current_head(git_repo) == base_commit
+
+
+def test_promote_candidate_accepts_utf8_refs(git_repo: Path):
+    source_branch = "source/café"
+    subprocess.run(
+        ["git", "checkout", "-b", source_branch], cwd=git_repo, check=True, capture_output=True
+    )
+    base_commit = current_head(git_repo)
+
+    result = promote_candidate(
+        git_repo,
+        base_ref=f"refs/heads/{source_branch}",
+        base_commit=base_commit,
+        candidate_ref="refs/heads/patchforge/tést",
+        candidate_commit=base_commit,
+        receipt_ref="refs/patchforge/promotions/tést",
+    )
+
+    assert result.return_code == 0
 
 
 def test_apply_patch(git_repo: Path):

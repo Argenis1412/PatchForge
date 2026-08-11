@@ -1311,7 +1311,7 @@ class TestCiExecute:
         assert result.status == "apply_failed"
         assert "Patch apply failed" in (result.error or "")
         assert result.validation_passed is True
-        mock_rollback.assert_called_once()
+        mock_rollback.assert_called_once_with(repo, "a" * 40)
 
     def test_empty_patch_fails(self, ci_repo):
         from orchestrator.commands.ci import execute
