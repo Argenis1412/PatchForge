@@ -19,6 +19,7 @@ from orchestrator.git import (
     revert_apply,
     working_tree_status,
 )
+from orchestrator.schemas.git import GitCommandResult
 
 
 def _init_git_repo(path: Path) -> None:
@@ -172,6 +173,7 @@ def test_create_branch_from_verified_base_accepts_utf8_refs(git_repo: Path):
         git_repo, "patchforge/tést", source_branch, base_commit
     )
 
+    assert isinstance(result, GitCommandResult)
     assert result.return_code == 0
     assert current_head(git_repo) == base_commit
 
@@ -192,6 +194,7 @@ def test_promote_candidate_accepts_utf8_refs(git_repo: Path):
         receipt_ref="refs/patchforge/promotions/tést",
     )
 
+    assert isinstance(result, GitCommandResult)
     assert result.return_code == 0
 
 
