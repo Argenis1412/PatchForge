@@ -144,6 +144,77 @@ def execute(
         _fail("another PatchForge operation holds the repository lock")
     try:
         target = Path(metadata.target_path).resolve()
+        wal_path = run_dir / APPLY_JSON
+
+        if wal_path.exists():
+            try:
+                wal = ApplyResult.model_validate_json(wal_path.read_text(encoding="utf-8"))
+            except Exception:
+                _fail("apply.json is corrupt; candidate recovery is fail-closed")
+            if wal.apply_protocol != APPLY_PROTOCOL:
+                _fail("apply.json belongs to a different apply protocol and cannot be resumed")
+            if wal.promotion_state in {PROMOTION_PREPARED, PROMOTION_APPLIED}:
+                candidate = resolve_ref(target, wal.candidate_ref or "")
+                receipt = resolve_ref(target, wal.promotion_receipt_ref or "")
+                if candidate == wal.candidate_commit and receipt == wal.candidate_commit:
+                    try:
+                        repository_identity = str(git_common_dir(target))
+                    except RuntimeError as exc:
+                        _fail(f"failed to resolve repository identity: {exc}")
+
+                    def recovery_is_authorized() -> bool:
+                        if (
+                            wal.run_id != run_id
+                            or wal.workspace_path != str(workspace_path)
+                            or wal.candidate_ref != candidate_ref
+                            or wal.promotion_receipt_ref != receipt_ref
+                            or wal.expected_base_ref != f"refs/heads/{metadata.branch}"
+                            or wal.expected_base_commit != metadata.base_commit
+                            or not wal.candidate_commit
+                            or not wal.policy_digest
+                        ):
+                            return False
+                        try:
+                            policy = ValidationPolicy.model_validate_json(
+                                (run_dir / VALIDATION_POLICY_JSON).read_text(encoding="utf-8")
+                            )
+                            output = ValidatorOutput.model_validate_json(
+                                (run_dir / VALIDATION_JSON).read_text(encoding="utf-8")
+                            )
+                        except Exception:
+                            return False
+                        subject = expected_validation_subject(
+                            run_id=run_id,
+                            project_root=target,
+                            base_commit=metadata.base_commit,
+                            patch_checksum=patch_checksum,
+                            candidate_commit=wal.candidate_commit,
+                            repository_identity=repository_identity,
+                            policy_digest=wal.policy_digest,
+                        )
+                        return (
+                            policy.digest == wal.policy_digest
+                            and evaluate_validation(
+                                output,
+                                fresh=False,
+                                expected_subject=subject,
+                                expected_policy=policy,
+                            ).authorized
+                        )
+
+                    if not recovery_is_authorized():
+                        _fail("candidate recovery evidence is incomplete or unauthorized")
+                    _finish(manager, run_id, metadata, wal)
+                    return
+                if candidate is not None or receipt is not None:
+                    _fail(
+                        "candidate promotion is inconsistent; inspect refs manually before retrying"
+                    )
+                if wal.promotion_state == PROMOTION_APPLIED:
+                    _fail(
+                        "candidate promotion is inconsistent; inspect refs manually before retrying"
+                    )
+
         try:
             base_config = TargetConfig.load(
                 target_path=target,
@@ -174,79 +245,19 @@ def execute(
                 json.dumps({"error": "Failed to resolve HEAD", "message": str(exc)}, indent=2),
             )
             _fail(f"failed to resolve HEAD: {exc}")
-        try:
-            repository_identity = str(git_common_dir(target))
-        except RuntimeError as exc:
-            _fail(f"failed to resolve repository identity: {exc}")
-
-        wal_path = run_dir / APPLY_JSON
-
-        def recovery_is_authorized(wal: ApplyResult) -> bool:
-            if (
-                wal.run_id != run_id
-                or wal.workspace_path != str(workspace_path)
-                or wal.candidate_ref != candidate_ref
-                or wal.promotion_receipt_ref != receipt_ref
-                or not wal.expected_base_ref
-                or wal.expected_base_commit != metadata.base_commit
-                or not wal.candidate_commit
-                or not wal.policy_digest
-            ):
-                return False
-            try:
-                policy = ValidationPolicy.model_validate_json(
-                    (run_dir / VALIDATION_POLICY_JSON).read_text(encoding="utf-8")
-                )
-                output = ValidatorOutput.model_validate_json(
-                    (run_dir / VALIDATION_JSON).read_text(encoding="utf-8")
-                )
-            except Exception:
-                return False
-            subject = expected_validation_subject(
-                run_id=run_id,
-                project_root=target,
-                base_commit=metadata.base_commit,
-                patch_checksum=patch_checksum,
-                candidate_commit=wal.candidate_commit,
-                repository_identity=repository_identity,
-                policy_digest=wal.policy_digest,
-            )
-            return (
-                policy.digest == wal.policy_digest
-                and evaluate_validation(
-                    output, fresh=False, expected_subject=subject, expected_policy=policy
-                ).authorized
-            )
-
-        if wal_path.exists():
-            try:
-                wal = ApplyResult.model_validate_json(wal_path.read_text(encoding="utf-8"))
-            except Exception:
-                _fail("apply.json is corrupt; candidate recovery is fail-closed")
-            if wal.apply_protocol != APPLY_PROTOCOL:
-                _fail("apply.json belongs to a different apply protocol and cannot be resumed")
-            if wal.promotion_state in {PROMOTION_PREPARED, PROMOTION_APPLIED}:
-                candidate = resolve_ref(target, wal.candidate_ref or "")
-                receipt = resolve_ref(target, wal.promotion_receipt_ref or "")
-                if candidate == wal.candidate_commit and receipt == wal.candidate_commit:
-                    if not recovery_is_authorized(wal):
-                        _fail("candidate recovery evidence is incomplete or unauthorized")
-                    _finish(manager, run_id, metadata, wal)
-                    return
-                if candidate is not None or receipt is not None:
-                    _fail(
-                        "candidate promotion is inconsistent; inspect refs manually before retrying"
-                    )
-                if wal.promotion_state == PROMOTION_APPLIED:
-                    _fail(
-                        "candidate promotion is inconsistent; inspect refs manually before retrying"
-                    )
-
         if base_branch == "HEAD":
             _fail("candidate promotion requires an attached base branch")
         base_ref = f"refs/heads/{base_branch}"
         if live_base != metadata.base_commit:
             _fail("base branch no longer matches this run's base_commit; run preview again")
+        try:
+            repository_identity = str(
+                git_common_dir(target)
+                if git_timeout == 30
+                else git_common_dir(target, timeout=git_timeout)
+            )
+        except RuntimeError as exc:
+            _fail(f"failed to resolve repository identity: {exc}")
 
         candidate_workspace = (
             candidate_worktree(target, metadata.base_commit)

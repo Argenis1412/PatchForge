@@ -24,6 +24,10 @@ the run even if that live base later advances. That recovery is authorized only
 when the WAL, policy, validation output, and validation subject bind the
 recorded candidate identity; corrupt, partial, foreign, mismatched, or
 unauthorized state fails closed.
+Recovery reads only that persisted evidence, the common Git identity, and the
+published refs. It does not reload configuration or credentials from an
+advanced base, because those mutable inputs cannot invalidate an already
+published and authorized promotion.
 
 The validation subject includes repository common Git directory, base, patch
 checksum, candidate commit, and policy digest. The policy is loaded from the

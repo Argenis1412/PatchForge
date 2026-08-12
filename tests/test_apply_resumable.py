@@ -159,8 +159,13 @@ def test_validator_untracked_artifact_does_not_block_promotion(tmp_path: Path) -
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("wal_branch", "expected_status"), [(None, "applied"), ("other", "previewed")]
+)
 def test_recovery_finishes_after_base_advances_with_matching_candidate_and_receipt(
     tmp_path: Path,
+    wal_branch: str | None,
+    expected_status: str,
 ) -> None:
     ctx = _setup_run(tmp_path)
     repo = Path(ctx["repo"])
@@ -202,19 +207,24 @@ def test_recovery_finishes_after_base_advances_with_matching_candidate_and_recei
         candidate_ref=candidate_ref,
         candidate_commit=candidate,
         promotion_receipt_ref=receipt_ref,
-        expected_base_ref=f"refs/heads/{ctx['branch']}",
+        expected_base_ref=f"refs/heads/{wal_branch or ctx['branch']}",
         expected_base_commit=str(ctx["base"]),
         policy_digest=policy.digest,
         workspace_path=str(Path(ctx["workspace"])),
     )
     _wal_write(wal, manager.run_dir(str(ctx["run_id"])) / "apply.json")
     (repo / "base-advanced.txt").write_text("new base\n", encoding="utf-8")
-    _git(repo, "add", "base-advanced.txt")
+    (repo / "orchestrator.json").write_text("{not json", encoding="utf-8")
+    _git(repo, "add", "base-advanced.txt", "orchestrator.json")
     _git(repo, "commit", "-m", "advance base")
 
-    apply_execute(str(ctx["run_id"]), workspace=Path(ctx["workspace"]))
+    if expected_status == "applied":
+        apply_execute(str(ctx["run_id"]), workspace=Path(ctx["workspace"]))
+    else:
+        with pytest.raises(typer.Exit):
+            apply_execute(str(ctx["run_id"]), workspace=Path(ctx["workspace"]))
 
-    assert manager.read_run_json(str(ctx["run_id"])).status == "applied"
+    assert manager.read_run_json(str(ctx["run_id"])).status == expected_status
     assert _git(repo, "rev-parse", "HEAD") != ctx["base"]
 
 
