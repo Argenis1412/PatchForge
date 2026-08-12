@@ -1,18 +1,23 @@
 {
   "allowed_path_patterns": [
-    "CHANGELOG.md",
-    "docs/context/CONTEXT.md"
+    "docs/adr/ADR-0011-apply-protocol-candidate-promotion.md",
+    "src/orchestrator/commands/apply.py",
+    "tests/test_apply_resumable.py"
   ],
   "allowed_operations": [
     {
-      "pattern": "CHANGELOG.md",
+      "pattern": "docs/adr/ADR-0011-apply-protocol-candidate-promotion.md",
       "operations": ["modify"]
     },
     {
-      "pattern": "docs/context/CONTEXT.md",
+      "pattern": "src/orchestrator/commands/apply.py",
+      "operations": ["modify"]
+    },
+    {
+      "pattern": "tests/test_apply_resumable.py",
       "operations": ["modify"]
     }
   ],
-  "max_changed_files": 2,
-  "max_changed_lines": 100
+  "max_changed_files": 3,
+  "max_changed_lines": 180
 }
