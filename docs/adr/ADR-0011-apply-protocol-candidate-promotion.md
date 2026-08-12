@@ -33,6 +33,14 @@ The validation subject includes repository common Git directory, base, patch
 checksum, candidate commit, and policy digest. The policy is loaded from the
 base tree, never from a candidate that may modify `orchestrator.json`.
 
+Candidate promotion acquires a non-reentrant SQLite `BEGIN IMMEDIATE`
+transaction in `<git_common_dir>/patchforge-candidate-promotion.db` before it
+reads recovery WAL or constructs a candidate. That database and the canonical
+common Git directory are one mandatory coordination domain shared by linked
+worktrees; no caller selects an alternate database. The transaction is held
+until promotion completes or the process exits, so no TTL lease can admit a
+concurrent publisher or recovery.
+
 CI and worker retain their legacy mechanisms temporarily. Every writer labels
 its `apply.json` protocol and each reader rejects another protocol before it
 mutates a repository.

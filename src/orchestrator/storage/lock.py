@@ -201,3 +201,36 @@ def release_repo_lock(repo_identity: str, worker_id: str, db_dir: Path) -> None:
         )
     finally:
         conn.close()
+
+
+def candidate_promotion_lock_path(git_common_dir: Path) -> Path:
+    """Return the mandatory coordination database for one Git ref namespace."""
+    return git_common_dir / "patchforge-candidate-promotion.db"
+
+
+def acquire_candidate_promotion_lock(git_common_dir: Path) -> sqlite3.Connection:
+    """Hold a non-reentrant SQLite write transaction for candidate promotion.
+
+    The database lives in Git's common directory, so every linked worktree
+    shares the same lock domain.  The returned connection owns the transaction
+    until ``release_candidate_promotion_lock`` closes it.
+    """
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = _sqlite_connect(candidate_promotion_lock_path(git_common_dir), timeout=0)
+        conn.execute("PRAGMA busy_timeout=0")
+        conn.execute("BEGIN IMMEDIATE")
+        return conn
+    except (OSError, sqlite3.Error) as exc:
+        if conn is not None:
+            conn.close()
+        raise RuntimeError("unable to acquire candidate-promotion coordination lock") from exc
+
+
+def release_candidate_promotion_lock(conn: sqlite3.Connection) -> None:
+    """Release a held candidate-promotion transaction by closing its connection."""
+    try:
+        if conn.in_transaction:
+            conn.rollback()
+    finally:
+        conn.close()

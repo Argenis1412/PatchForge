@@ -23,6 +23,11 @@ from orchestrator.schemas.artifacts import (
 from orchestrator.schemas.config import TargetConfig
 from orchestrator.schemas.validator_output import ValidatorOutput
 from orchestrator.storage import _wal_write
+from orchestrator.storage.lock import (
+    acquire_candidate_promotion_lock,
+    candidate_promotion_lock_path,
+    release_candidate_promotion_lock,
+)
 from orchestrator.validation_decision import (
     attach_validation_decision,
     expected_validation_subject,
@@ -271,6 +276,140 @@ def test_corrupt_candidate_recovery_wal_fails_closed_without_marking_run_applied
         apply_execute(str(ctx["run_id"]), workspace=Path(ctx["workspace"]))
 
     assert manager.read_run_json(str(ctx["run_id"])).status == "previewed"
+    lock = acquire_candidate_promotion_lock(git_common_dir(Path(ctx["repo"])))
+    release_candidate_promotion_lock(lock)
+
+
+@pytest.mark.unit
+def test_linked_worktrees_share_candidate_promotion_lock_domain(tmp_path: Path) -> None:
+    ctx = _setup_run(tmp_path)
+    repo = Path(ctx["repo"])
+    linked = tmp_path / "linked"
+    _git(repo, "worktree", "add", "--detach", str(linked), "HEAD")
+    common_dir = git_common_dir(repo)
+    linked_common_dir = git_common_dir(linked)
+    first = acquire_candidate_promotion_lock(common_dir)
+    try:
+        assert candidate_promotion_lock_path(common_dir) == candidate_promotion_lock_path(
+            linked_common_dir
+        )
+        with pytest.raises(RuntimeError, match="candidate-promotion coordination lock"):
+            acquire_candidate_promotion_lock(linked_common_dir)
+    finally:
+        release_candidate_promotion_lock(first)
+        _git(repo, "worktree", "remove", "--force", str(linked))
+
+    second = acquire_candidate_promotion_lock(linked_common_dir)
+    release_candidate_promotion_lock(second)
+
+
+@pytest.mark.unit
+def test_unrelated_repositories_do_not_contend_for_candidate_promotion_lock(tmp_path: Path) -> None:
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    first_ctx = _setup_run(first_root)
+    second_ctx = _setup_run(second_root)
+    first_common_dir = git_common_dir(Path(first_ctx["repo"]))
+    second_common_dir = git_common_dir(Path(second_ctx["repo"]))
+
+    first = acquire_candidate_promotion_lock(first_common_dir)
+    second = acquire_candidate_promotion_lock(second_common_dir)
+    try:
+        assert candidate_promotion_lock_path(first_common_dir) != candidate_promotion_lock_path(
+            second_common_dir
+        )
+    finally:
+        release_candidate_promotion_lock(second)
+        release_candidate_promotion_lock(first)
+
+
+@pytest.mark.unit
+def test_candidate_promotion_lock_fails_closed_when_database_cannot_open(tmp_path: Path) -> None:
+    non_directory = tmp_path / "not-a-directory"
+    non_directory.write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="candidate-promotion coordination lock"):
+        acquire_candidate_promotion_lock(non_directory)
+
+
+@pytest.mark.unit
+def test_candidate_promotion_lock_does_not_reenter(tmp_path: Path) -> None:
+    ctx = _setup_run(tmp_path)
+    common_dir = git_common_dir(Path(ctx["repo"]))
+    first = acquire_candidate_promotion_lock(common_dir)
+    try:
+        with pytest.raises(RuntimeError, match="candidate-promotion coordination lock"):
+            acquire_candidate_promotion_lock(common_dir)
+    finally:
+        release_candidate_promotion_lock(first)
+
+
+@pytest.mark.unit
+def test_apply_same_worker_id_cannot_reenter_candidate_promotion_lock(tmp_path: Path) -> None:
+    ctx = _setup_run(tmp_path)
+    common_dir = git_common_dir(Path(ctx["repo"]))
+    first = acquire_candidate_promotion_lock(common_dir)
+    try:
+        with pytest.raises(typer.Exit):
+            apply_execute(
+                str(ctx["run_id"]),
+                workspace=Path(ctx["workspace"]),
+                worker_id=str(ctx["run_id"]),
+            )
+    finally:
+        release_candidate_promotion_lock(first)
+
+
+@pytest.mark.unit
+def test_coordination_failure_blocks_recovery_before_wal_read(tmp_path: Path) -> None:
+    ctx = _setup_run(tmp_path)
+    manager = ctx["manager"]
+    assert isinstance(manager, WorkspaceManager)
+    wal_path = manager.run_dir(str(ctx["run_id"])) / "apply.json"
+    wal_path.write_text("{not json", encoding="utf-8")
+    before = wal_path.read_bytes()
+
+    with (
+        patch(
+            "orchestrator.commands.apply.acquire_candidate_promotion_lock",
+            side_effect=RuntimeError("database unavailable"),
+        ),
+        pytest.raises(typer.Exit),
+    ):
+        apply_execute(str(ctx["run_id"]), workspace=Path(ctx["workspace"]))
+
+    assert wal_path.read_bytes() == before
+    assert manager.read_run_json(str(ctx["run_id"])).status == "previewed"
+
+
+@pytest.mark.unit
+def test_coordination_failure_blocks_new_publication_without_writing_wal(tmp_path: Path) -> None:
+    ctx = _setup_run(tmp_path)
+    repo = Path(ctx["repo"])
+    manager = ctx["manager"]
+    assert isinstance(manager, WorkspaceManager)
+
+    with (
+        patch(
+            "orchestrator.commands.apply.acquire_candidate_promotion_lock",
+            side_effect=RuntimeError("database unavailable"),
+        ),
+        pytest.raises(typer.Exit),
+    ):
+        apply_execute(str(ctx["run_id"]), workspace=Path(ctx["workspace"]))
+
+    assert not (manager.run_dir(str(ctx["run_id"])) / "apply.json").exists()
+    assert manager.read_run_json(str(ctx["run_id"])).status == "previewed"
+    assert (
+        subprocess.run(
+            ["git", "show-ref", "--verify", "--quiet", f"refs/heads/patchforge/{ctx['run_id']}"],
+            cwd=repo,
+            check=False,
+        ).returncode
+        != 0
+    )
 
 
 @pytest.mark.unit
