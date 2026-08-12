@@ -21,7 +21,10 @@ from orchestrator.provider_runtime import ProviderRuntime
 from orchestrator.schemas.artifacts import APPLY_JSON
 from orchestrator.schemas.config import TargetConfig, default_workspace_path
 from orchestrator.storage import _wal_write
-from orchestrator.storage.lock import acquire_repo_lock, release_repo_lock
+from orchestrator.storage.lock import (
+    acquire_candidate_promotion_lock,
+    release_candidate_promotion_lock,
+)
 from orchestrator.workspace import WorkspaceManager
 
 console = Console()
@@ -64,7 +67,6 @@ def execute(
     workspace: Optional[Path] = None,
     issue_number: Optional[int] = None,
     worker_id: Optional[str] = None,
-    coordination_db_dir: Optional[Path] = None,
     timeout_overrides: dict[str, int] | None = None,
 ) -> None:
     """Build, validate, and atomically promote an isolated candidate commit.
@@ -72,7 +74,7 @@ def execute(
     ``allow_dirty`` is retained as a CLI compatibility option.  Candidate
     construction never reads or mutates the caller's working tree.
     """
-    del allow_dirty
+    del allow_dirty, worker_id
     console.print(
         Panel(
             f"[bold red]PatchForge Candidate Promotion[/bold red]\n"
@@ -138,12 +140,30 @@ def execute(
         console.print("[yellow]Run is already marked applied.[/yellow]")
         return
 
-    lock_dir = coordination_db_dir or workspace_path
-    lock_owner = worker_id or run_id
-    if not acquire_repo_lock(metadata.target_path, lock_owner, db_dir=lock_dir):
-        _fail("another PatchForge operation holds the repository lock")
+    target = Path(metadata.target_path).resolve()
     try:
-        target = Path(metadata.target_path).resolve()
+        git_common_directory = git_common_dir(target)
+    except RuntimeError as exc:
+        # Preserve the existing failure artifact when the target is also
+        # unavailable for HEAD resolution; this remains before every recovery
+        # or publication action.
+        try:
+            current_branch(target)
+            current_head(target)
+        except RuntimeError as head_exc:
+            manager.write_artifact(
+                run_id,
+                "failure.json",
+                json.dumps({"error": "Failed to resolve HEAD", "message": str(head_exc)}, indent=2),
+            )
+            _fail(f"failed to resolve HEAD: {head_exc}")
+        _fail(f"failed to resolve repository identity: {exc}")
+    try:
+        promotion_lock = acquire_candidate_promotion_lock(git_common_directory)
+    except RuntimeError as exc:
+        _fail(f"candidate promotion coordination is unavailable: {exc}")
+    repository_identity = str(git_common_directory)
+    try:
         wal_path = run_dir / APPLY_JSON
 
         if wal_path.exists():
@@ -157,10 +177,6 @@ def execute(
                 candidate = resolve_ref(target, wal.candidate_ref or "")
                 receipt = resolve_ref(target, wal.promotion_receipt_ref or "")
                 if candidate == wal.candidate_commit and receipt == wal.candidate_commit:
-                    try:
-                        repository_identity = str(git_common_dir(target))
-                    except RuntimeError as exc:
-                        _fail(f"failed to resolve repository identity: {exc}")
 
                     def recovery_is_authorized() -> bool:
                         if (
@@ -250,15 +266,6 @@ def execute(
         base_ref = f"refs/heads/{base_branch}"
         if live_base != metadata.base_commit:
             _fail("base branch no longer matches this run's base_commit; run preview again")
-        try:
-            repository_identity = str(
-                git_common_dir(target)
-                if git_timeout == 30
-                else git_common_dir(target, timeout=git_timeout)
-            )
-        except RuntimeError as exc:
-            _fail(f"failed to resolve repository identity: {exc}")
-
         candidate_workspace = (
             candidate_worktree(target, metadata.base_commit)
             if git_timeout == 30
@@ -359,4 +366,4 @@ def execute(
         result.promotion_receipt_commit = result.candidate_commit
         _finish(manager, run_id, metadata, result)
     finally:
-        release_repo_lock(metadata.target_path, lock_owner, lock_dir)
+        release_candidate_promotion_lock(promotion_lock)

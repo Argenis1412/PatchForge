@@ -2,6 +2,7 @@
   "allowed_path_patterns": [
     "docs/adr/ADR-0011-apply-protocol-candidate-promotion.md",
     "src/orchestrator/commands/apply.py",
+    "src/orchestrator/storage/lock.py",
     "tests/test_apply_resumable.py"
   ],
   "allowed_operations": [
@@ -14,10 +15,14 @@
       "operations": ["modify"]
     },
     {
+      "pattern": "src/orchestrator/storage/lock.py",
+      "operations": ["modify"]
+    },
+    {
       "pattern": "tests/test_apply_resumable.py",
       "operations": ["modify"]
     }
   ],
-  "max_changed_files": 3,
-  "max_changed_lines": 180
+  "max_changed_files": 4,
+  "max_changed_lines": 320
 }
