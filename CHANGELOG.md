@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes yet._
+### Maintenance status
+
+- The latest published release remains `v1.2.0` (2026-08-09). No `v1.2.1`
+  release or tag has been created.
+- `main` includes validated but unreleased maintenance fixes: V2 pytest
+  candidate-root authorization (#348/#349), CI inline-apply base binding
+  (#350/#351), audit-bundle redaction profiles (#352/#353), and local GPG
+  signer authorization (#239/#354).
+- The project is frozen as a portfolio artifact; future work is limited to
+  reproducible regressions in existing safety contracts.
 
 ## [1.2.0] - 2026-08-09
 
