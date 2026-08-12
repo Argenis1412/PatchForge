@@ -1,6 +1,6 @@
 # PatchForge Project Context
 
-> Last updated: 2026-08-07
+> Last updated: 2026-08-11
 > Read [AGENTS.md](../../AGENTS.md) before this document. This is the
 > canonical current project state, not a changelog.
 
@@ -24,14 +24,16 @@
   formatting on every change. Historical test counts are not live metrics.
 - **Architecture:** Stable. No approved architectural migration is in
   progress.
-- **Known blockers:** Full LLM dogfooding remains constrained by provider
-  credits and is not a release gate.
-- **Current priority:** Observe one external user solving a real problem and
-  document the problem, workflow, and evidence before selecting further
-  product work.
-- **P5 status:** Learning Pipeline items are scoped backlog, not active work.
-  Do not start P5 merely because it is next in the old roadmap; choose the
-  next development priority from external-use evidence.
+- **Maintenance closure:** The portfolio is frozen at
+  `9776497bcffdf5c45899185da48e470e8c0e4cb1` after #348/#349, #350/#351,
+  #352/#353, and #239/#354. Those validated maintenance fixes are unreleased.
+  `v1.2.0`, tagged at `8f6e98f0334487e40c1ae173a90f446891d9007a`, remains the
+  latest published release.
+- **Current priority:** None. Do not start V3, pilots, provider work, agent
+  integrations, SaaS, or commercial expansion. Reopen delivery only for a
+  reproducible regression in an existing safety contract.
+- **P5 status:** Historical scoped backlog, not active work and not a trigger
+  for implementation.
 
 ## Product and Architecture Map
 
@@ -143,14 +145,11 @@ Do not change these without an ADR. Read the linked record for rationale.
 
 ## Priority Handoff
 
-The current priority is intentionally singular. When it completes, replace it
-with the next evidence-backed priority and update only the state, debt, or
-invariant affected by that work. Do not turn completion notes into a timeline.
-
-For the successor priority, capture the external user's problem, target
-repository characteristics, attempted workflow, observed friction, and result
-in an experiment or issue. Choose a new implementation only after reviewing
-that evidence against the existing backlog.
+PatchForge has no successor delivery priority while frozen as a portfolio
+artifact. A future issue may be considered only after a reproducible regression
+is demonstrated against an existing safety contract. Do not use this handoff to
+restart product discovery, external pilots, providers, integrations, SaaS, or
+commercial expansion.
 
 ## Documentation Ownership
 
