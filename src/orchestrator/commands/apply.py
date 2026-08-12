@@ -174,21 +174,12 @@ def execute(
                 json.dumps({"error": "Failed to resolve HEAD", "message": str(exc)}, indent=2),
             )
             _fail(f"failed to resolve HEAD: {exc}")
-        if base_branch == "HEAD":
-            _fail("candidate promotion requires an attached base branch")
-        base_ref = f"refs/heads/{base_branch}"
-        if live_base != metadata.base_commit:
-            _fail("base branch no longer matches this run's base_commit; run preview again")
-
-        wal_path = run_dir / APPLY_JSON
         try:
-            repository_identity = str(
-                git_common_dir(target)
-                if git_timeout == 30
-                else git_common_dir(target, timeout=git_timeout)
-            )
+            repository_identity = str(git_common_dir(target))
         except RuntimeError as exc:
             _fail(f"failed to resolve repository identity: {exc}")
+
+        wal_path = run_dir / APPLY_JSON
 
         def recovery_is_authorized(wal: ApplyResult) -> bool:
             if (
@@ -196,7 +187,7 @@ def execute(
                 or wal.workspace_path != str(workspace_path)
                 or wal.candidate_ref != candidate_ref
                 or wal.promotion_receipt_ref != receipt_ref
-                or wal.expected_base_ref != base_ref
+                or not wal.expected_base_ref
                 or wal.expected_base_commit != metadata.base_commit
                 or not wal.candidate_commit
                 or not wal.policy_digest
@@ -227,7 +218,6 @@ def execute(
                 ).authorized
             )
 
-        wal = None
         if wal_path.exists():
             try:
                 wal = ApplyResult.model_validate_json(wal_path.read_text(encoding="utf-8"))
@@ -235,7 +225,7 @@ def execute(
                 _fail("apply.json is corrupt; candidate recovery is fail-closed")
             if wal.apply_protocol != APPLY_PROTOCOL:
                 _fail("apply.json belongs to a different apply protocol and cannot be resumed")
-            if wal.promotion_state == PROMOTION_PREPARED:
+            if wal.promotion_state in {PROMOTION_PREPARED, PROMOTION_APPLIED}:
                 candidate = resolve_ref(target, wal.candidate_ref or "")
                 receipt = resolve_ref(target, wal.promotion_receipt_ref or "")
                 if candidate == wal.candidate_commit and receipt == wal.candidate_commit:
@@ -247,11 +237,16 @@ def execute(
                     _fail(
                         "candidate promotion is inconsistent; inspect refs manually before retrying"
                     )
-            elif wal.promotion_state == PROMOTION_APPLIED:
-                if not recovery_is_authorized(wal):
-                    _fail("candidate recovery evidence is incomplete or unauthorized")
-                _finish(manager, run_id, metadata, wal)
-                return
+                if wal.promotion_state == PROMOTION_APPLIED:
+                    _fail(
+                        "candidate promotion is inconsistent; inspect refs manually before retrying"
+                    )
+
+        if base_branch == "HEAD":
+            _fail("candidate promotion requires an attached base branch")
+        base_ref = f"refs/heads/{base_branch}"
+        if live_base != metadata.base_commit:
+            _fail("base branch no longer matches this run's base_commit; run preview again")
 
         candidate_workspace = (
             candidate_worktree(target, metadata.base_commit)

@@ -16,6 +16,15 @@ SHA, receipt ref, and policy digest. One Git ref transaction verifies the base
 and creates both candidate and receipt refs. Recovery accepts only a matching
 candidate/receipt pair; partial or foreign states fail closed.
 
+Base compatibility is evaluated at two distinct protocol boundaries. Before a
+new candidate is constructed or either promotion ref is published, the live
+base branch must still equal the run's recorded base commit. After the atomic
+transaction publishes a matching candidate/receipt pair, recovery may finish
+the run even if that live base later advances. That recovery is authorized only
+when the WAL, policy, validation output, and validation subject bind the
+recorded candidate identity; corrupt, partial, foreign, mismatched, or
+unauthorized state fails closed.
+
 The validation subject includes repository common Git directory, base, patch
 checksum, candidate commit, and policy digest. The policy is loaded from the
 base tree, never from a candidate that may modify `orchestrator.json`.

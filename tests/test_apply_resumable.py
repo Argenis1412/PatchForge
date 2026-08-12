@@ -159,7 +159,9 @@ def test_validator_untracked_artifact_does_not_block_promotion(tmp_path: Path) -
 
 
 @pytest.mark.unit
-def test_recovery_finishes_only_matching_candidate_and_receipt(tmp_path: Path) -> None:
+def test_recovery_finishes_after_base_advances_with_matching_candidate_and_receipt(
+    tmp_path: Path,
+) -> None:
     ctx = _setup_run(tmp_path)
     repo = Path(ctx["repo"])
     manager = ctx["manager"]
@@ -206,10 +208,96 @@ def test_recovery_finishes_only_matching_candidate_and_receipt(tmp_path: Path) -
         workspace_path=str(Path(ctx["workspace"])),
     )
     _wal_write(wal, manager.run_dir(str(ctx["run_id"])) / "apply.json")
+    (repo / "base-advanced.txt").write_text("new base\n", encoding="utf-8")
+    _git(repo, "add", "base-advanced.txt")
+    _git(repo, "commit", "-m", "advance base")
 
     apply_execute(str(ctx["run_id"]), workspace=Path(ctx["workspace"]))
 
     assert manager.read_run_json(str(ctx["run_id"])).status == "applied"
+    assert _git(repo, "rev-parse", "HEAD") != ctx["base"]
+
+
+@pytest.mark.unit
+def test_stale_base_without_published_recovery_rejects_before_candidate_construction(
+    tmp_path: Path,
+) -> None:
+    ctx = _setup_run(tmp_path)
+    repo = Path(ctx["repo"])
+    manager = ctx["manager"]
+    assert isinstance(manager, WorkspaceManager)
+    (repo / "base-advanced.txt").write_text("new base\n", encoding="utf-8")
+    _git(repo, "add", "base-advanced.txt")
+    _git(repo, "commit", "-m", "advance base")
+
+    with (
+        patch("orchestrator.git.candidate_worktree") as candidate_worktree,
+        pytest.raises(typer.Exit),
+    ):
+        apply_execute(str(ctx["run_id"]), workspace=Path(ctx["workspace"]))
+
+    candidate_worktree.assert_not_called()
+    assert manager.read_run_json(str(ctx["run_id"])).status == "previewed"
+    assert (
+        subprocess.run(
+            ["git", "show-ref", "--verify", "--quiet", f"refs/heads/patchforge/{ctx['run_id']}"],
+            cwd=repo,
+            check=False,
+        ).returncode
+        != 0
+    )
+
+
+@pytest.mark.unit
+def test_corrupt_candidate_recovery_wal_fails_closed_without_marking_run_applied(
+    tmp_path: Path,
+) -> None:
+    ctx = _setup_run(tmp_path)
+    manager = ctx["manager"]
+    assert isinstance(manager, WorkspaceManager)
+    (manager.run_dir(str(ctx["run_id"])) / "apply.json").write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(typer.Exit):
+        apply_execute(str(ctx["run_id"]), workspace=Path(ctx["workspace"]))
+
+    assert manager.read_run_json(str(ctx["run_id"])).status == "previewed"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("promotion_state", ["promotion_prepared", "promotion_applied"])
+def test_partial_candidate_recovery_refs_fail_closed_without_marking_run_applied(
+    tmp_path: Path, promotion_state: str
+) -> None:
+    ctx = _setup_run(tmp_path)
+    repo = Path(ctx["repo"])
+    manager = ctx["manager"]
+    assert isinstance(manager, WorkspaceManager)
+    candidate = _git(repo, "rev-parse", "HEAD")
+    candidate_ref = f"refs/heads/patchforge/{ctx['run_id']}"
+    _git(repo, "update-ref", candidate_ref, candidate)
+    _wal_write(
+        ApplyResult(
+            run_id=str(ctx["run_id"]),
+            applied_at=datetime.now(timezone.utc),
+            branch=f"patchforge/{ctx['run_id']}",
+            success=False,
+            apply_protocol=APPLY_PROTOCOL,
+            promotion_state=promotion_state,
+            candidate_ref=candidate_ref,
+            candidate_commit=candidate,
+            promotion_receipt_ref=promotion_receipt_ref(str(ctx["run_id"])),
+            expected_base_ref=f"refs/heads/{ctx['branch']}",
+            expected_base_commit=str(ctx["base"]),
+            policy_digest="a" * 64,
+            workspace_path=str(Path(ctx["workspace"])),
+        ),
+        manager.run_dir(str(ctx["run_id"])) / "apply.json",
+    )
+
+    with pytest.raises(typer.Exit):
+        apply_execute(str(ctx["run_id"]), workspace=Path(ctx["workspace"]))
+
+    assert manager.read_run_json(str(ctx["run_id"])).status == "previewed"
 
 
 @pytest.mark.unit
