@@ -1,28 +1,28 @@
 {
   "allowed_path_patterns": [
-    "docs/adr/ADR-0011-apply-protocol-candidate-promotion.md",
-    "src/orchestrator/commands/apply.py",
-    "src/orchestrator/storage/lock.py",
-    "tests/test_apply_resumable.py"
+    "pyproject.toml",
+    "uv.lock",
+    "CHANGELOG.md",
+    "docs/context/CONTEXT.md"
   ],
   "allowed_operations": [
     {
-      "pattern": "docs/adr/ADR-0011-apply-protocol-candidate-promotion.md",
+      "pattern": "pyproject.toml",
       "operations": ["modify"]
     },
     {
-      "pattern": "src/orchestrator/commands/apply.py",
+      "pattern": "uv.lock",
       "operations": ["modify"]
     },
     {
-      "pattern": "src/orchestrator/storage/lock.py",
+      "pattern": "CHANGELOG.md",
       "operations": ["modify"]
     },
     {
-      "pattern": "tests/test_apply_resumable.py",
+      "pattern": "docs/context/CONTEXT.md",
       "operations": ["modify"]
     }
   ],
   "max_changed_files": 4,
-  "max_changed_lines": 320
+  "max_changed_lines": 180
 }

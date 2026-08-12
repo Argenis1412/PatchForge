@@ -7,16 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes yet._
+
+## [1.2.1] - 2026-08-12
+
+### Fixed
+
+- Validator V2 pytest discovery remains fail-closed from the candidate root
+  without writing bytecode (#348 / #349).
+- CI inline apply atomically binds its output branch to the scanned base, and
+  candidate-promotion recovery completes only an authorized published
+  candidate/receipt pair (#350 / #351, #357 / #358).
+- Audit export declares its redaction profile and omissions, trusted GPG
+  fingerprints are authorized fail-closed, and candidate-promotion locking is
+  shared across linked worktrees through the Git common directory (#352 / #353,
+  #239 / #354, #359 / #360).
+
 ### Maintenance status
 
-- The latest published release remains `v1.2.0` (2026-08-09). No `v1.2.1`
-  release or tag has been created.
-- `main` includes validated but unreleased maintenance fixes: V2 pytest
-  candidate-root authorization (#348/#349), CI inline-apply base binding
-  (#350/#351), audit-bundle redaction profiles (#352/#353), and local GPG
-  signer authorization (#239/#354).
-- The project is frozen as a portfolio artifact; future work is limited to
-  reproducible regressions in existing safety contracts.
+- This is the final planned maintenance release for the portfolio artifact.
+  Future work is limited to reproducible regressions in existing safety
+  contracts.
 
 ## [1.2.0] - 2026-08-09
 

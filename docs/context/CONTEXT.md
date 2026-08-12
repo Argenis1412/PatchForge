@@ -1,6 +1,6 @@
 # PatchForge Project Context
 
-> Last updated: 2026-08-11
+> Last updated: 2026-08-12
 > Read [AGENTS.md](../../AGENTS.md) before this document. This is the
 > canonical current project state, not a changelog.
 
@@ -24,11 +24,11 @@
   formatting on every change. Historical test counts are not live metrics.
 - **Architecture:** Stable. No approved architectural migration is in
   progress.
-- **Maintenance closure:** The portfolio is frozen at
-  `9776497bcffdf5c45899185da48e470e8c0e4cb1` after #348/#349, #350/#351,
-  #352/#353, and #239/#354. Those validated maintenance fixes are unreleased.
-  `v1.2.0`, tagged at `8f6e98f0334487e40c1ae173a90f446891d9007a`, remains the
-  latest published release.
+- **Maintenance closure:** `v1.2.1` is the final planned maintenance release,
+  consolidating #348/#349, #350/#351, #352/#353, #239/#354, #357/#358, and
+  #359/#360 after `v1.2.0` (`8f6e98f0334487e40c1ae173a90f446891d9007a`). The
+  release tag and GitHub Release must target the audited merge commit for
+  issue #361.
 - **Current priority:** None. Do not start V3, pilots, provider work, agent
   integrations, SaaS, or commercial expansion. Reopen delivery only for a
   reproducible regression in an existing safety contract.
